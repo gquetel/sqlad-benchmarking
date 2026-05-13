@@ -1,0 +1,3 @@
+[formatter.black]
+command = "black"
+includes = ["*.py"]

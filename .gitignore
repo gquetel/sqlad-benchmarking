@@ -1,2 +1,51 @@
-CLAUDE.md
+reports
+# treefmt
+.treefmt/
+
+# Environments
 .venv
+env/
+venv/
+ENV/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+coverage.xml
+
+# mkdocs
+docs/site/
+/site
+
+# mypy
+.mypy_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Mac OS
+.DS_Store
+
+# vim
+*.swp
+*.swo
+
+# VSCode
+.vscode/
