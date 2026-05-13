@@ -3,9 +3,9 @@ FROM nixos/nix AS base
 WORKDIR /app
 
 COPY npins npins/
-COPY dockerfiles/python-env.nix dockerfiles/python-env.nix
+COPY nix/python-env.nix nix/python-env.nix
 
-RUN nix-env -f dockerfiles/python-env.nix -i
+RUN nix-env -f nix/python-env.nix -i
 
 COPY requirements.txt requirements.txt
 RUN pip install -r requirements.txt --no-cache-dir

@@ -5,6 +5,7 @@ let
       allowUnfree = true;
     };
   };
+  pyEnv = import ./nix/python-env.nix;
 in
 (pkgs.buildFHSEnv {
   # buildFHSEnv is the only sustainable way I managed to exchange with CUDA
@@ -15,8 +16,8 @@ in
   name = "cuda-ml";
 
   targetPkgs = pkgs: with pkgs; [
-    python314
-    python314Packages.pip
+    pyEnv.python314
+    pyEnv.pip
     python314Packages.virtualenv
     treefmt
     black
@@ -28,6 +29,7 @@ in
         python -m venv .venv
         source .venv/bin/activate
         pip install -r requirements.txt
+        pip install -e .
         pip install \
           pytest==8.3.4 \
           coverage==7.8.0 \

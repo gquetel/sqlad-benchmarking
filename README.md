@@ -5,14 +5,20 @@ A short description of the project.
 ## Opinionated 
 
 - Using `nix` and its ecosystem to manage development environments and foster reproducibility.
-  - `shell.nix` is the single source of truth for the Python version: the interpreter is
-    provided by nix, so it is fully pinned and reproducible across machines.
+  - `nix/python-env.nix` is the single source of truth for the Python version: shared by
+    Docker builds and CI, so the interpreter is fully pinned and reproducible across environments.
+  - `shell.nix` wraps `nix/python-env.nix` with `buildFHSEnv` for local development, which
+    provides a CUDA-compatible FHS environment on both NixOS and non-NixOS machines.
   - Runtime and dev dependencies are managed by pip on top of the nix-provided interpreter.
     Pip is preferred over nix packages because pip can pull pre-built wheels (including GPU-specific
     CUDA wheels) from PyPI caches. Using nix for those would require local rebuilds due to
     the absence of binary caches for GPU packages.
 - TODO: MLFLOW
-- 
+- Delete dependabot updates PR for two reasons: (1) notification fatigue, (2) bumping package version 
+can lead to different experiments results or breaking changes that needs to be tested. 
+It is time consuming to be done properly, hence packages updates are done at my discretion.
+The exception to this is dependabot security updates which can be activated through GitHub's interface
+that warns me about potential vulnerabilites in my dependencies. 
 
 ## Project structure
 
@@ -27,9 +33,8 @@ The directory structure of the project looks like this:
 ├── data/                     # Data directory
 │   ├── processed/
 │   └── raw/
-├── dockerfiles/              # Dockerfiles and nix environment for Docker builds
+├── dockerfiles/              # Dockerfiles
 │   ├── api.dockerfile
-│   ├── python-env.nix
 │   └── train.dockerfile
 ├── docs/                     # Documentation
 │   ├── mkdocs.yaml
@@ -37,6 +42,9 @@ The directory structure of the project looks like this:
 │       └── index.md
 ├── models/                   # Trained models
 ├── notebooks/                # Jupyter notebooks
+├── nix/                      # Shared Nix environments
+│   ├── ci-env.nix            # CI environment (Python + system libs for native extensions)
+│   └── python-env.nix        # Pinned Python interpreter (used by Docker and CI)
 ├── npins/                    # Nix pin sources
 ├── reports/                  # Reports
 │   └── figures/
