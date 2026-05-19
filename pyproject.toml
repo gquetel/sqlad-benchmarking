@@ -19,6 +19,17 @@ readme = "README.md"
 requires-python = ">=3.14"
 dynamic = ["dependencies"]
 
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "coverage",
+  "mypy",
+  "invoke",
+  "mkdocs-material",
+  "mkdocstrings-python",
+  "pip-tools",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

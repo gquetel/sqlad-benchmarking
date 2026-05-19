@@ -28,15 +28,7 @@ in
       if [ ! -d .venv ]; then
         python -m venv .venv
         source .venv/bin/activate
-        pip install -r requirements.txt
-        pip install -e .
-        pip install \
-          pytest==8.3.4 \
-          coverage==7.8.0 \
-          mypy==1.19.1 \
-          invoke==2.2.0 \
-          mkdocs-material==9.7.1 \
-          mkdocstrings-python==2.0.1
+        pip install -e ".[dev]"
       else
         source .venv/bin/activate
         echo "Virtual environment already found. Run pip install -r requirements.txt to update."
