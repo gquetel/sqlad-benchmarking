@@ -1,3 +1,9 @@
-[formatter.black]
-command = "black"
+[formatter.ruff-format]
+command = "ruff"
+options = ["format"]
+includes = ["*.py"]
+
+[formatter.ruff-lint]
+command = "ruff"
+options = ["check", "--fix"]
 includes = ["*.py"]

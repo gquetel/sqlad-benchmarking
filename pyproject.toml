@@ -39,8 +39,25 @@ dependencies = {file = ["requirements.txt"]}
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
-[tool.black]
+[tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
+select = [
+  "B",   # Likely bugs and design problems (flake8-bugbear)
+  "E",   # PEP 8 codestyle errors
+  "N",   # PEP 8 Variable naming convention
+  "S",   # Security rules (flake8-bandit) 
+  "W",   # PEP 8 codestyle  warnings
+  "I",   # Sort imports properly (isort)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# assert is accceptable in testing code (not invoked with optimization)
+"tests/**/*.py" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.coverage.run]
 omit = ["tests/*"]

@@ -20,7 +20,7 @@ in
     pyEnv.pip
     python314Packages.virtualenv
     treefmt
-    black
+    ruff
   ];
 
   runScript = ''

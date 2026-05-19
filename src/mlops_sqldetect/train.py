@@ -1,5 +1,5 @@
-from mlops_sqldetect.model import Model
 from mlops_sqldetect.data import MyDataset
+from mlops_sqldetect.model import Model
 
 
 def train():
