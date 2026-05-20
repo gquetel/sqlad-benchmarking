@@ -34,7 +34,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+dependencies = {file = ["requirements.in"]}
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
