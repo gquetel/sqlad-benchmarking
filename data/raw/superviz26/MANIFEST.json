@@ -1,0 +1,35 @@
+{
+  "name": "Superviz26-SQL",
+  "doi": "10.5281/zenodo.19627322",
+  "record_url": "https://zenodo.org/records/19627322",
+  "url_pattern": "https://zenodo.org/api/records/19627322/files/{filename}/content",
+  "columns": [
+    "full_query",
+    "label",
+    "user_inputs",
+    "attack_stage",
+    "tamper_method",
+    "attack_status",
+    "statement_type",
+    "query_template_id",
+    "attack_id",
+    "attack_technique",
+    "split"
+  ],
+  "domains": {
+    "a": "OurAirports",
+    "b": "Sakila",
+    "c": "AdventureWorks",
+    "d": "OracleHR"
+  },
+  "files": {
+    "a-a.csv":   {"kind": "in_domain", "test_domain": "a", "train_domains": ["a"],           "bytes": 314230801, "sha256": "04022ec1e1486753748441bc0c8813b090a50ad43db3a064bcfefeb1ac4d86f5"},
+    "b-b.csv":   {"kind": "in_domain", "test_domain": "b", "train_domains": ["b"],           "bytes": 271108203, "sha256": "d5d1bde81d08da7489558a3727b98fc9c1feec069b7e102f64071946cee5e38b"},
+    "c-c.csv":   {"kind": "in_domain", "test_domain": "c", "train_domains": ["c"],           "bytes": 338373492, "sha256": "57d1de28857b31d3610a19ec9c96cf92c6061ebc3bb4d7e61a2dd02a001ee8cc"},
+    "d-d.csv":   {"kind": "in_domain", "test_domain": "d", "train_domains": ["d"],           "bytes": 227017688, "sha256": "2d41e5088aaa25b4b1d5f61c6791c9a9b2c86ff579aa154b756faefde404abd6"},
+    "bcd-a.csv": {"kind": "lodo",      "test_domain": "a", "train_domains": ["b", "c", "d"], "bytes": 310825615, "sha256": "541b98c35725758389ef5615c167d0069a79c729c5374f0a535fc62f9ef4e700"},
+    "acd-b.csv": {"kind": "lodo",      "test_domain": "b", "train_domains": ["a", "c", "d"], "bytes": 274817552, "sha256": "adccf4850176bb2a2c2204ba5c0808df3ff6e82d4667b1852ef8f90e941cadcc"},
+    "abd-c.csv": {"kind": "lodo",      "test_domain": "c", "train_domains": ["a", "b", "d"], "bytes": 331802795, "sha256": "9c1c71092c4c0af2b3def91e9791aaac0009fec73fbf7a7ec7d29c3287afbd17"},
+    "abc-d.csv": {"kind": "lodo",      "test_domain": "d", "train_domains": ["a", "b", "c"], "bytes": 233392756, "sha256": "a728f7761df2b99468401f2864b5f2116681fcbb0c592c235b7f4ce77a852242"}
+  }
+}

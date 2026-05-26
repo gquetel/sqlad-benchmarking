@@ -21,6 +21,10 @@ in
     python314Packages.virtualenv
     treefmt
     ruff
+
+    # Shared libs that pip-installed wheels link against
+    zlib
+    stdenv.cc.cc.lib   # libstdc++, libgcc_s
   ];
 
   runScript = ''

@@ -49,3 +49,11 @@ docs/site/
 
 # VSCode
 .vscode/
+
+# Data and trained models (downloaded / generated, not versioned in git)
+/data/raw/**/*.csv
+/data/processed/
+/models/*.joblib
+/models/*.pt
+/models/*.pth
+/reports/*.csv
