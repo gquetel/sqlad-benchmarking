@@ -20,6 +20,7 @@ jobs:
       - name: Run tests & coverage
         run: |
           nix-shell nix/ci-env.nix --run "
+            set -euo pipefail
             python -m venv .venv
             source .venv/bin/activate
             pip install --require-hashes -r requirements.txt
