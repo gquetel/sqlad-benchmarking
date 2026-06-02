@@ -26,6 +26,10 @@ DEFAULT_EXPERIMENT = "mlops-sqldetect"
 # See https://mlflow.org/docs/latest/ml/model/models-from-code/#using-the-model
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 
+# Model-from-code script: passed as a path so MLflow loads it instead of
+# CloudPickling a DetectorModel instance.
+_MODEL_SCRIPT = _PACKAGE_ROOT / "detector_model.py"
+
 
 class _UrlRewriteStream:
     """Wraps a stream and rewrites a URL in every write() call.
@@ -81,26 +85,6 @@ def setup_mlflow() -> bool:
     return True
 
 
-class DetectorModel(mlflow.pyfunc.PythonModel):
-    """Pyfunc adapter exposing any detector's anomaly score through ``predict``.
-    See: https://mlflow.org/docs/latest/ml/model/models-from-code/
-
-    This wrapper allows to have model artifacts as real MLflow models of a raw pickle.
-    """
-
-    def load_context(self, context) -> None:
-        from mlops_sqldetect.model import load_pipeline
-
-        path = Path(context.artifacts["detector"])
-        # We infer the decision engine from the file suffix.
-        # (``.joblib`` -> OCSVM, ``.pt`` -> AutoEncoder)
-        name = "ocsvm" if path.suffix == ".joblib" else "ae"
-        self.detector = load_pipeline(name, path)
-
-    def predict(self, context, model_input: pd.DataFrame):
-        return self.detector.score_samples(model_input)
-
-
 def log_and_register_detector(
     model_path: Path,
     registered_name: str,
@@ -116,7 +100,7 @@ def log_and_register_detector(
     """
     return mlflow.pyfunc.log_model(
         name="model",
-        python_model=DetectorModel(),
+        python_model=str(_MODEL_SCRIPT),
         artifacts={"detector": str(model_path)},
         input_example=input_example,
         code_paths=[str(_PACKAGE_ROOT)],

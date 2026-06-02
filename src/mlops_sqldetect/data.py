@@ -45,9 +45,15 @@ def load_dataset(
     if not data_path.exists():
         raise FileNotFoundError(f"Dataset not found: {data_path}")
 
-    read_kwargs: dict = {"dtype": {"full_query": str, "label": "Int64"}}
+    dtype: dict = {"full_query": str, "label": "Int64"}
+    read_kwargs: dict = {"dtype": dtype}
     if usecols is not None:
-        read_kwargs["usecols"] = list({*usecols, *REQUIRED_COLUMNS})
+        cols = list({*usecols, *REQUIRED_COLUMNS})
+        read_kwargs["usecols"] = cols
+        # Pin metadata columns to str so chunked reads can't infer mixed
+        # object/float chunks (pandas low-memory concat raises IndexError).
+        for c in cols:
+            dtype.setdefault(c, "str")
 
     df = pd.read_csv(data_path, **read_kwargs)
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
