@@ -1,6 +1,8 @@
 > Guidance for autonomous coding agents
 > Read this before writing, editing, or executing anything in this repo.
 
+By default, you don't have access to any python environment or any other tools. When you need something, use `nix-shell`.
+
 # Reproducibility 
 
 This repo uses Nix for reproducible environments. **Never run unversioned upgrade commands** such as:
@@ -29,9 +31,13 @@ Every `pip install` must use an exact version (`==`). Python tooling versions ar
 * Use type hints.
 * Do not add inline comments unless absolutely necessary.
 
+# Experiment tracking
+
+* `evaluate_suite` logs params, metrics, the per-epoch AE training loss, and the fitted model artifact to MLflow when `MLFLOW_TRACKING_URI` is set (opt out with `--no-track`). Configuration is environment-driven via `.env` (see  `.env.example`).
+
 # Documentation
 
-* Use inline comments to document the **why** and not the **what**.
+* Use inline comments to document the **why** and not the **what**. Keep them short.
 * If the project has a `docs/` folder, update documentation there as needed.
 * The project uses `mkdocs` for documentation. To build the docs locally: `mkdocs serve --config-file docs/mkdocs.yaml`.
 * Use existing docstring style.

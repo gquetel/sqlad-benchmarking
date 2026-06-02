@@ -67,11 +67,7 @@ def stratified_subsample(
     """Return a label-stratified subsample of ``df`` of approximately ``limit`` rows."""
     if limit is None or len(df) <= limit:
         return df
-    return (
-        df.groupby("label", group_keys=False)
-        .sample(frac=limit / len(df), random_state=seed)
-        .reset_index(drop=True)
-    )
+    return df.groupby("label", group_keys=False).sample(frac=limit / len(df), random_state=seed).reset_index(drop=True)
 
 
 def split_normals(df: pd.DataFrame) -> pd.DataFrame:

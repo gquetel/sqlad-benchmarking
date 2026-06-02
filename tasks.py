@@ -78,15 +78,16 @@ def evaluate(
     )
 
 
-@task(help={"limit": "Total stratified samples per split (default 1000)."})
-def smoke(ctx: Context, limit: int = 1000) -> None:
+@task(help={"limit": "Total stratified samples per split (default 1000).", "no_track": "Disable MLflow tracking."})
+def smoke(ctx: Context, limit: int = 1000, no_track: bool = False) -> None:
     """Fast end-to-end smoke run on a small subset (in-domain, OCSVM only)."""
-    ctx.run(
+    cmd = (
         f"python -m {PROJECT_NAME}.evaluate_suite --suite in_domain --pipelines ocsvm "
-        f"--limit {limit} --report reports/smoke.csv",
-        echo=True,
-        pty=not WINDOWS,
+        f"--limit {limit} --report reports/smoke.csv"
     )
+    if no_track:
+        cmd += " --no-track"
+    ctx.run(cmd, echo=True, pty=not WINDOWS)
 
 
 @task

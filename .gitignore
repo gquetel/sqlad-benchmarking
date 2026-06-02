@@ -1,4 +1,10 @@
 reports
+
+# Secrets
+.env
+.env.*
+!.env.example
+
 # treefmt
 .treefmt/
 

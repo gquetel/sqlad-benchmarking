@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data" / "raw" / "superviz26"
 MANIFEST_PATH = DATA_DIR / "MANIFEST.json"
-CHUNK_BYTES = 1 << 20 
+CHUNK_BYTES = 1 << 20
 
 
 @dataclass(frozen=True)
@@ -86,8 +86,10 @@ def _download(spec: FileSpec, *, resume: bool) -> None:
         mode = "ab"
         logger.info(f"Resuming {spec.name} from byte {start}")
 
-    req = Request(spec.url, headers=headers)  
-    with urlopen(req) as response, tmp.open(mode) as out:  
+    if not spec.url.startswith(("https://", "http://")):
+        raise ValueError(f"Unexpected URL scheme: {spec.url}")
+    req = Request(spec.url, headers=headers)  # noqa: S310
+    with urlopen(req) as response, tmp.open(mode) as out:  # noqa: S310
         while True:
             chunk = response.read(CHUNK_BYTES)
             if not chunk:

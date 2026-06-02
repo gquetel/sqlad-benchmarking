@@ -96,9 +96,7 @@ def load_split(
     """
     path = resolve_path(name, root)
     if not path.exists():
-        raise FileNotFoundError(
-            f"{path} not found. Run: python -m tools.fetch_superviz26 --datasets {name.value}"
-        )
+        raise FileNotFoundError(f"{path} not found. Run: python -m tools.fetch_superviz26 --datasets {name.value}")
 
     cols = tuple(columns)
     if "split" not in cols:

@@ -1,13 +1,15 @@
-"""Li SQL injection detection pipelines: OCSVM and AutoEncoder.
+"""SQL injection detection pipelines: OCSVM and AutoEncoder.
 
-Both pipelines share :class:`LiExtractor` for feature extraction and produce a
-scalar anomaly score per query (higher = more anomalous). They expose a uniform
-``fit``/``score_samples``/``save``/``load`` interface so callers can swap them
-without branching.
+Each pipeline pairs a *feature extractor* with a one-class decision head and produces
+a scalar anomaly score per query (higher = more anomalous). The extractor is
+injected, not hardcoded, so any extractor can be combined with any head. Both
+expose a uniform ``fit``/``score_samples``/``save``/``load`` interface so callers
+can swap them without branching.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -16,12 +18,13 @@ import joblib
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.base import TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import OneClassSVM
 from torch import nn
 
-from mlops_sqldetect.features import LiExtractor
+from mlops_sqldetect.features import DEFAULT_EXTRACTOR, build_extractor
 
 PipelineName = Literal["ocsvm", "ae"]
 
@@ -39,14 +42,23 @@ class OCSVMConfig:
     max_iter: int = 1000
 
 
-class LiOCSVM:
-    """Li features → StandardScaler → OneClassSVM, exposed as a single object."""
+class OCSVMDetector:
+    """features → StandardScaler → OneClassSVM, exposed as a single object.
 
-    def __init__(self, config: OCSVMConfig | None = None) -> None:
+    The feature extractor is the first pipeline step and is pickled with the rest
+    of the pipeline, so it travels with the saved artifact and is restored on
+    :meth:`load` without the caller needing to name it again.
+    """
+
+    def __init__(
+        self,
+        config: OCSVMConfig | None = None,
+        extractor: TransformerMixin | None = None,
+    ) -> None:
         self.config = config or OCSVMConfig()
         self.pipeline: Pipeline = Pipeline(
             steps=[
-                ("features", LiExtractor()),
+                ("features", extractor if extractor is not None else build_extractor()),
                 ("scaler", StandardScaler()),
                 (
                     "ocsvm",
@@ -60,7 +72,7 @@ class LiOCSVM:
             ]
         )
 
-    def fit(self, df: pd.DataFrame) -> "LiOCSVM":
+    def fit(self, df: pd.DataFrame) -> "OCSVMDetector":
         """Fit on normal samples only (caller's responsibility)."""
         self.pipeline.fit(df)
         return self
@@ -75,7 +87,7 @@ class LiOCSVM:
         joblib.dump(self.pipeline, path)
 
     @classmethod
-    def load(cls, path: Path) -> "LiOCSVM":
+    def load(cls, path: Path) -> "OCSVMDetector":
         obj = cls()
         obj.pipeline = joblib.load(Path(path))
         return obj
@@ -120,17 +132,23 @@ class _AutoEncoderNet(nn.Module):
         return self.decoder(self.encoder(x))
 
 
-class LiAutoEncoder:
-    """Li features → StandardScaler → MLP autoencoder; score = reconstruction MSE."""
+class AEDetector:
+    """features → StandardScaler → MLP autoencoder; score = reconstruction MSE.
+
+    The feature extractor is injected and persisted in the checkpoint alongside
+    the scaler and weights, so :meth:`load` restores the exact extractor that was
+    used at training time regardless of which one it was.
+    """
 
     def __init__(
         self,
         config: AEConfig | None = None,
+        extractor: TransformerMixin | None = None,
         device: torch.device | None = None,
     ) -> None:
         self.config = config or AEConfig()
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.extractor = LiExtractor()
+        self.extractor = extractor if extractor is not None else build_extractor()
         self.scaler = StandardScaler()
         self.net: _AutoEncoderNet | None = None
 
@@ -139,20 +157,30 @@ class LiAutoEncoder:
         x = self.scaler.fit_transform(x) if fit_scaler else self.scaler.transform(x)
         return torch.from_numpy(np.asarray(x, dtype=np.float32)).to(self.device)
 
-    def fit(self, df: pd.DataFrame) -> "LiAutoEncoder":
-        """Fit scaler + network on normal samples (caller's responsibility)."""
+    def fit(
+        self,
+        df: pd.DataFrame,
+        epoch_callback: Callable[[int, float], None] | None = None,
+    ) -> "AEDetector":
+        """Fit scaler + network on normal samples (caller's responsibility).
+
+        Args:
+            df: Normal-class training samples.
+            epoch_callback: Optional ``(epoch, mean_loss)`` hook called once per
+                epoch, e.g. to log a training-loss curve to MLflow.
+        """
         torch.manual_seed(self.config.seed)
         x = self._featurize(df, fit_scaler=True)
 
-        self.net = _AutoEncoderNet(
-            input_dim=x.shape[1], hidden_dims=self.config.hidden_dims
-        ).to(self.device)
+        self.net = _AutoEncoderNet(input_dim=x.shape[1], hidden_dims=self.config.hidden_dims).to(self.device)
         optimizer = torch.optim.Adam(self.net.parameters(), lr=self.config.learning_rate)
         loss_fn = nn.MSELoss()
 
         self.net.train()
-        for _ in range(self.config.epochs):
+        for epoch in range(self.config.epochs):
             perm = torch.randperm(x.size(0), device=self.device)
+            epoch_loss = 0.0
+            n_batches = 0
             for start in range(0, x.size(0), self.config.batch_size):
                 idx = perm[start : start + self.config.batch_size]
                 batch = x[idx]
@@ -160,6 +188,10 @@ class LiAutoEncoder:
                 loss = loss_fn(self.net(batch), batch)
                 loss.backward()
                 optimizer.step()
+                epoch_loss += loss.item()
+                n_batches += 1
+            if epoch_callback is not None:
+                epoch_callback(epoch, epoch_loss / n_batches)
         self.net.eval()
         return self
 
@@ -183,20 +215,20 @@ class LiAutoEncoder:
                 "input_dim": self.net.input_dim,
                 "config": self.config,
                 "scaler": self.scaler,
+                "extractor": self.extractor,
             },
             path,
         )
 
     @classmethod
-    def load(cls, path: Path, device: torch.device | None = None) -> "LiAutoEncoder":
+    def load(cls, path: Path, device: torch.device | None = None) -> "AEDetector":
         # weights_only=False is required because the checkpoint stores the fitted
-        # sklearn StandardScaler and the AEConfig dataclass alongside the weights.
+        # sklearn StandardScaler, the feature extractor, and the AEConfig
+        # dataclass alongside the weights.
         bundle = torch.load(Path(path), map_location="cpu", weights_only=False)
-        obj = cls(config=bundle["config"], device=device)
+        obj = cls(config=bundle["config"], extractor=bundle.get("extractor"), device=device)
         obj.scaler = bundle["scaler"]
-        obj.net = _AutoEncoderNet(
-            input_dim=bundle["input_dim"], hidden_dims=obj.config.hidden_dims
-        ).to(obj.device)
+        obj.net = _AutoEncoderNet(input_dim=bundle["input_dim"], hidden_dims=obj.config.hidden_dims).to(obj.device)
         obj.net.load_state_dict(bundle["state_dict"])
         obj.net.eval()
         return obj
@@ -205,19 +237,32 @@ class LiAutoEncoder:
 # ----- Factory ---------------------------------------------------------------
 
 
-def build_pipeline(name: PipelineName) -> LiOCSVM | LiAutoEncoder:
-    """Return a fresh, unfitted Li pipeline by short name (``ocsvm`` or ``ae``)."""
+Detector = OCSVMDetector | AEDetector
+
+
+def build_pipeline(name: PipelineName, extractor: str = DEFAULT_EXTRACTOR) -> Detector:
+    """Return a fresh, unfitted pipeline by decision-head and extractor short name.
+
+    Args:
+        name: Decision head, ``"ocsvm"`` or ``"ae"``.
+        extractor: Feature extractor short name (see :data:`EXTRACTORS`).
+    """
+    extractor_instance = build_extractor(extractor)
     if name == "ocsvm":
-        return LiOCSVM()
+        return OCSVMDetector(extractor=extractor_instance)
     if name == "ae":
-        return LiAutoEncoder()
+        return AEDetector(extractor=extractor_instance)
     raise ValueError(f"Unknown pipeline: {name!r} (expected 'ocsvm' or 'ae')")
 
 
-def load_pipeline(name: PipelineName, path: Path) -> LiOCSVM | LiAutoEncoder:
-    """Load a previously-saved pipeline by short name."""
+def load_pipeline(name: PipelineName, path: Path) -> Detector:
+    """Load a previously-saved pipeline by decision-head short name.
+
+    The feature extractor travels with the saved artifact, so it does not need to
+    be named again here.
+    """
     if name == "ocsvm":
-        return LiOCSVM.load(path)
+        return OCSVMDetector.load(path)
     if name == "ae":
-        return LiAutoEncoder.load(path)
+        return AEDetector.load(path)
     raise ValueError(f"Unknown pipeline: {name!r} (expected 'ocsvm' or 'ae')")
