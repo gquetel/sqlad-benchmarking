@@ -1,8 +1,9 @@
 import os
+import sys
 
 from invoke import Context, task
 
-WINDOWS = os.name == "nt"
+WINDOWS = os.name == "nt" or sys.version_info >= (3, 14)
 PROJECT_NAME = "mlops_sqldetect"
 
 
@@ -78,8 +79,14 @@ def evaluate(
     )
 
 
-@task(help={"limit": "Total stratified samples per split (default 1000).", "no_track": "Disable MLflow tracking."})
-def smoke(ctx: Context, limit: int = 1000, no_track: bool = False) -> None:
+@task(
+    help={
+        "limit": "Total stratified samples per split (default 1000).",
+        "no_track": "Disable MLflow tracking.",
+        "register": "Register fitted models in the MLflow Model Registry.",
+    }
+)
+def smoke(ctx: Context, limit: int = 1000, no_track: bool = False, register: bool = False) -> None:
     """Fast end-to-end smoke run on a small subset (in-domain, OCSVM only)."""
     cmd = (
         f"python -m {PROJECT_NAME}.evaluate_suite --suite in_domain --pipelines ocsvm "
@@ -87,6 +94,8 @@ def smoke(ctx: Context, limit: int = 1000, no_track: bool = False) -> None:
     )
     if no_track:
         cmd += " --no-track"
+    if register:
+        cmd += " --register"
     ctx.run(cmd, echo=True, pty=not WINDOWS)
 
 
