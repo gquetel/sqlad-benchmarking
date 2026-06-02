@@ -91,10 +91,12 @@ def _run_one(
 
     model = build_pipeline(pipeline, extractor)
     run_name = f"{pipeline}-{extractor}-{dataset.value}[{run_type}]"
-    run_ctx = mlflow.start_run(run_name=run_name) if track else nullcontext()
+    run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
         if track:
-            mlflow.log_params({**asdict(model.config), "limit": limit})
+            # ``scenario`` is logged as a param so it can serve as the X-axis when
+            # comparing metrics in mlflow UI.
+            mlflow.log_params({**asdict(model.config), "limit": limit, "scenario": dataset.value})
             mlflow.set_tags(
                 {
                     "pipeline": pipeline,
@@ -105,8 +107,7 @@ def _run_one(
                     "run_type": run_type,
                 }
             )
-            # Record the source CSV (Zenodo URL + manifest sha256 as the data
-            # version) without downloading it. One file holds both splits.
+            # This sets the "Dataset" column for each child run.
             log_dataset_input(
                 url=mf["url_pattern"].format(filename=file_key),
                 name=f"superviz26-{dataset.value}",
@@ -151,13 +152,17 @@ def _run_one(
         )
 
         if track:
+            mlflow.log_params(
+                {
+                    "n_train": row.n_train,
+                    "n_test": row.n_test,
+                    "n_attacks": row.n_attacks,
+                }
+            )
             mlflow.log_metrics(
                 {
                     "roc_auc": row.roc_auc,
                     "average_precision": row.average_precision,
-                    "n_train": row.n_train,
-                    "n_test": row.n_test,
-                    "n_attacks": row.n_attacks,
                     "fit_seconds": row.fit_seconds,
                     "score_seconds": row.score_seconds,
                 }
@@ -206,32 +211,51 @@ def evaluate_suite(
     report.parent.mkdir(parents=True, exist_ok=True)
     write_header = not report.exists()
 
-    # Tracking is opt-out and only active when a server is configured, so the
-    # local CSV report stays the source of truth for offline and CI runs.
     track_enabled = track and setup_mlflow()
 
+    # if we setup a sample limit, we consider this a smoke-run
+    run_type = "smoke-run" if limit is not None else "full-run"
+
     rows: list[ResultRow] = []
-    for dataset in datasets:
-        for pipeline in requested_pipelines:
-            for extractor in requested_extractors:
-                row = _run_one(
-                    dataset,
-                    pipeline,  # type: ignore[arg-type]
-                    extractor,
-                    data_root,
-                    model_dir,
-                    limit=limit,
-                    suite=suite,
-                    track=track_enabled,
-                    register=register,
-                )
-                rows.append(row)
-                pd.DataFrame([asdict(row)]).to_csv(report, mode="a", header=write_header, index=False)
-                write_header = False
-                logger.info(
-                    f"  -> ROC-AUC={row.roc_auc:.4f}  AP={row.average_precision:.4f}  "
-                    f"fit={row.fit_seconds}s  score={row.score_seconds}s"
-                )
+    
+    # This code is highly shaped around logging to mlflow. It will work without 
+    # logging, but this explains most of its structure.
+    # 
+    # We create for each pipeline (decision engine + feature extractor) a parent run.
+    # Then, for each dataset we create a child, where we log the metrics of interest. 
+    for pipeline in requested_pipelines:
+        for extractor in requested_extractors:
+            parent_name = f"{pipeline}-{extractor}[{run_type}]"
+            parent_ctx = mlflow.start_run(run_name=parent_name) if track_enabled else nullcontext()
+            with parent_ctx:
+                if track_enabled:
+                    mlflow.set_tags(
+                        {
+                            "pipeline": pipeline,
+                            "feature_extractor": extractor,
+                            "suite": suite,
+                            "run_type": run_type,
+                        }
+                    )
+                for dataset in datasets:
+                    row = _run_one(
+                        dataset,
+                        pipeline,  # type: ignore[arg-type]
+                        extractor,
+                        data_root,
+                        model_dir,
+                        limit=limit,
+                        suite=suite,
+                        track=track_enabled,
+                        register=register,
+                    )
+                    rows.append(row)
+                    pd.DataFrame([asdict(row)]).to_csv(report, mode="a", header=write_header, index=False)
+                    write_header = False
+                    logger.info(
+                        f"  -> ROC-AUC={row.roc_auc:.4f}  AP={row.average_precision:.4f}  "
+                        f"fit={row.fit_seconds}s  score={row.score_seconds}s"
+                    )
 
     df = pd.DataFrame([asdict(r) for r in rows])
     logger.info(f"Wrote {len(df)} rows to {report}")
