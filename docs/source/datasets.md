@@ -39,7 +39,7 @@ The script streams each file to `data/raw/superviz26/`, resumes interrupted down
 Equivalent invoke alias:
 
 ```bash
-invoke fetch-data --datasets a-a,bcd-a
+invoke fetch-superviz26 --datasets a-a,bcd-a
 ```
 
 ## Loading

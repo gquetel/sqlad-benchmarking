@@ -108,6 +108,34 @@ def log_and_register_detector(
     )
 
 
+def find_parent_run_id(tags: dict[str, str]) -> str | None:
+    """Return the id of an existing root run whose tags match ``tags``, or None.
+
+    Searches the active experiment for a single run carrying every key/value in
+    ``tags``. Parents are marked with ``run_role == "parent"`` (see the caller),
+    which distinguishes them from their nested children, so reusing the returned
+    id keeps every child of a given (pipeline, extractor) accumulating under one
+    stable, comparable parent across repeated suite invocations.
+    """
+    filter_string = " and ".join(f"tags.`{key}` = '{value}'" for key, value in tags.items())
+    runs = mlflow.search_runs(filter_string=filter_string, max_results=1, output_format="list")
+    return runs[0].info.run_id if runs else None
+
+
+def ensure_parent_run(tags: dict[str, str], name: str) -> str:
+    """Return the id of the parent run matching ``tags``, creating it if absent.
+
+    The run is created and immediately ended so callers can reopen it by id and nest
+    children under it. Pre-creating it once (e.g. before fanning a grid out to many
+    concurrent SLURM jobs) avoids duplicate parents racing on find-or-create.
+    """
+    run_id = find_parent_run_id(tags)
+    if run_id:
+        return run_id
+    with mlflow.start_run(run_name=name, tags=tags) as run:
+        return run.info.run_id
+
+
 def log_dataset_input(*, url: str, name: str, digest: str, context: str) -> None:
     """Record the source dataset on the active run as metadata only.
 

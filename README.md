@@ -1,6 +1,9 @@
 # mlops_sqldetect
 
-A short description of the project.
+An MLOps pipeline for one-class SQL injection detection: anomaly-detection heads
+(One-Class SVM, LOF, AutoEncoder) over pluggable SQL feature extractors (Li
+hand-crafted features, CountVectorizer, SecureBERT), evaluated on the Superviz
+SQL datasets with MLflow experiment tracking.
 
 ## Opinionated 
 
@@ -13,25 +16,24 @@ A short description of the project.
     Pip is preferred over nix packages because pip can pull pre-built wheels (including GPU-specific
     CUDA wheels) from PyPI caches. Using nix for those would require local rebuilds due to
     the absence of binary caches for GPU packages.
-- TODO: MLFLOW
+- MLflow for experiment tracking: `evaluate_suite` logs params, metrics, the per-epoch
+  AE training loss, and the fitted model artifact when `MLFLOW_TRACKING_URI` is set
+  (opt out with `--no-track`). Tracking is configured via `.env` (see `.env.example`).
 - Delete dependabot updates PR for two reasons: (1) notification fatigue, (2) bumping package version 
 can lead to different experiments results or breaking changes that needs to be tested. 
 It is time consuming to be done properly, hence packages updates are done at my discretion.
 The exception to this is dependabot security updates which can be activated through GitHub's interface
-that warns me about potential vulnerabilites in my dependencies. 
+that warns me about potential vulnerabilities in my dependencies. 
 
 ## Project structure
 
 The directory structure of the project looks like this:
 ```txt
 ├── .github/                  # GitHub Actions and dependabot
-│   ├── dependabot.yaml
+│   ├── dependabot.yml
 │   └── workflows/
-│       ├── linting.yaml
 │       └── tests.yaml
-├── configs/                  # Configuration files
 ├── data/                     # Data directory
-│   ├── processed/
 │   └── raw/
 ├── dockerfiles/              # Dockerfiles
 │   ├── api.dockerfile
@@ -39,35 +41,48 @@ The directory structure of the project looks like this:
 ├── docs/                     # Documentation
 │   ├── mkdocs.yaml
 │   └── source/
+│       ├── datasets.md
 │       └── index.md
 ├── models/                   # Trained models
-├── notebooks/                # Jupyter notebooks
 ├── nix/                      # Shared Nix environments
 │   ├── ci-env.nix            # CI environment (Python + system libs for native extensions)
 │   └── python-env.nix        # Pinned Python interpreter (used by Docker and CI)
 ├── npins/                    # Nix pin sources
-├── reports/                  # Reports
-│   └── figures/
+├── reports/                  # Evaluation reports (CSV)
 ├── src/                      # Source code
 │   └── mlops_sqldetect/
 │       ├── __init__.py
 │       ├── api.py
-│       ├── data.py
-│       ├── evaluate.py
-│       ├── model.py
-│       ├── train.py
-│       └── visualize.py
+│       ├── data.py            # CSV loading and split/subsample helpers
+│       ├── datasets/          # Dataset families (Superviz25, Superviz26) + registry
+│       ├── detector_model.py  # MLflow model-from-code wrapper
+│       ├── evaluate.py        # CLI: score a saved pipeline on a CSV
+│       ├── evaluate_suite.py  # CLI: run an evaluation grid + MLflow logging
+│       ├── features/          # Feature extractors (li, countvect, securebert)
+│       ├── metrics.py         # Threshold calibration and metric computation
+│       ├── model.py           # Detector heads (OCSVM, LOF, AutoEncoder) + factory
+│       ├── tracking.py        # MLflow configuration and helpers
+│       ├── train.py           # CLI: fit and save a pipeline
+│       └── visualize.py       # ROC / AUPRC curve helpers
 ├── tests/                    # Tests
 │   ├── __init__.py
 │   ├── test_api.py
-│   ├── test_data.py
+│   ├── test_datasets.py
+│   ├── test_features.py
+│   ├── test_metrics.py
 │   └── test_model.py
+├── tools/                    # Dataset download scripts
+│   ├── fetch_superviz25.py
+│   └── fetch_superviz26.py
+├── .env.example              # Example MLflow tracking configuration
 ├── .gitignore
+├── .pre-commit-config.yaml
 ├── AGENTS.md                 # Guidance for coding agents
 ├── LICENSE
 ├── pyproject.toml            # Python project file
 ├── README.md                 # Project README
-├── requirements.txt          # Runtime dependencies (pinned)
+├── requirements.in           # Top-level runtime dependencies
+├── requirements.txt          # Fully pinned runtime dependencies (pip-compile)
 ├── shell.nix                 # Nix development environment
 ├── tasks.py                  # Invoke task definitions
 └── treefmt.toml              # Formatter configuration

@@ -16,7 +16,7 @@ from typing import Literal
 
 import pandas as pd
 
-from mlops_sqldetect.data import load_dataset, stratified_subsample
+from mlops_sqldetect.data import load_split_csv
 
 Split = Literal["train", "test"]
 
@@ -97,13 +97,4 @@ def load_split(
     path = resolve_path(name, root)
     if not path.exists():
         raise FileNotFoundError(f"{path} not found. Run: python -m tools.fetch_superviz26 --datasets {name.value}")
-
-    cols = tuple(columns)
-    if "split" not in cols:
-        cols = cols + ("split",)
-
-    df = load_dataset(path, usecols=cols)
-    if "split" not in df.columns:
-        raise ValueError(f"{path} has no 'split' column")
-    out = df[df["split"] == split].reset_index(drop=True)
-    return stratified_subsample(out, limit=limit, seed=seed)
+    return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)

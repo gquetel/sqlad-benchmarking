@@ -1,4 +1,4 @@
-"""CLI to evaluate a fitted Li pipeline on a labelled CSV."""
+"""CLI to evaluate a fitted detection pipeline on a labelled CSV."""
 
 from __future__ import annotations
 

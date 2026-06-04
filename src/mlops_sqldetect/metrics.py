@@ -1,5 +1,4 @@
-"""Evaluation metrics for one-class SQLi detection.
-"""
+"""Evaluation metrics for one-class SQLi detection."""
 
 from __future__ import annotations
 

@@ -1,0 +1,20 @@
+# SLURM site settings for tools/slurm_submit.py
+conda_env: mlops-sqldetect
+conda_setup: ~/miniconda3/etc/profile.d/conda.sh   # sourced before `conda activate`
+submit_dir: reports/slurm  # manifests, generated job scripts and .out logs (git-ignored)
+
+cpu:
+  partition: cpu
+  cpus_per_task: 32
+  mem: 32G
+  time: "08:00:00"
+
+gpu:
+  partition: gpu   # may be a fallback list, e.g. "A100,V100" (A100 first via admin PriorityTier)
+  gres: gpu:1
+  cpus_per_task: 32
+  mem: 64G
+  time: "08:00:00"
+
+# Models pinned to A100 only (VRAM): an extractor (e.g. sbert) or a pipeline:extractor (e.g. ae:sbert).
+force_a100: []

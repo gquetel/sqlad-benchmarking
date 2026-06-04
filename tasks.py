@@ -3,7 +3,9 @@ import sys
 
 from invoke import Context, task
 
-WINDOWS = os.name == "nt" or sys.version_info >= (3, 14)
+# Disable pty when it is unavailable or unsupported: on Windows, and on Python
+# 3.14+ where invoke's pty handling is broken (this project requires 3.14+).
+NO_PTY = os.name == "nt" or sys.version_info >= (3, 14)
 PROJECT_NAME = "mlops_sqldetect"
 
 
@@ -11,18 +13,12 @@ PROJECT_NAME = "mlops_sqldetect"
 @task
 def requirements(ctx: Context) -> None:
     """Install project requirements."""
-    ctx.run("pip install -r requirements.txt", echo=True, pty=not WINDOWS)
-    ctx.run("pip install -e .", echo=True, pty=not WINDOWS)
+    ctx.run("pip install -r requirements.txt", echo=True, pty=not NO_PTY)
+    ctx.run("pip install -e .", echo=True, pty=not NO_PTY)
 
 
 # Project commands
-@task
-def preprocess_data(ctx: Context) -> None:
-    """Preprocess data."""
-    ctx.run(f"python src/{PROJECT_NAME}/data.py data/raw data/processed", echo=True, pty=not WINDOWS)
-
-
-@task(help={"dataset": "CSV dataset path", "pipeline": "ocsvm or ae", "output": "Output model path"})
+@task(help={"dataset": "CSV dataset path", "pipeline": "ocsvm, lof or ae", "output": "Output model path"})
 def train(
     ctx: Context,
     dataset: str = "data/raw/dataset.csv",
@@ -33,13 +29,13 @@ def train(
     ctx.run(
         f"python -m {PROJECT_NAME}.train {dataset} --output {output} --pipeline {pipeline}",
         echo=True,
-        pty=not WINDOWS,
+        pty=not NO_PTY,
     )
 
 
-@task(help={"datasets": "Comma-separated short names (e.g. 'a-a,bcd-a'); empty for all"})
-def fetch_data(ctx: Context, datasets: str = "", force: bool = False, check: bool = False) -> None:
-    """Download Superviz26-SQL CSVs from Zenodo with MD5 verification."""
+@task(help={"datasets": "Comma-separated Superviz26 short names (e.g. 'a-a,bcd-a'); empty for all"})
+def fetch_superviz26(ctx: Context, datasets: str = "", force: bool = False, check: bool = False) -> None:
+    """Download Superviz26-SQL CSVs from Zenodo with checksum verification."""
     cmd = "python -m tools.fetch_superviz26"
     if datasets:
         cmd += f" --datasets {datasets}"
@@ -47,24 +43,79 @@ def fetch_data(ctx: Context, datasets: str = "", force: bool = False, check: boo
         cmd += " --force"
     if check:
         cmd += " --check"
-    ctx.run(cmd, echo=True, pty=not WINDOWS)
+    ctx.run(cmd, echo=True, pty=not NO_PTY)
 
 
-@task(help={"suite": "in_domain, lodo, or all", "pipelines": "Comma-separated pipeline names"})
+@task
+def fetch_superviz25(ctx: Context, force: bool = False, check: bool = False) -> None:
+    """Download the Superviz25-SQL dataset from Zenodo with checksum verification."""
+    cmd = "python -m tools.fetch_superviz25"
+    if force:
+        cmd += " --force"
+    if check:
+        cmd += " --check"
+    ctx.run(cmd, echo=True, pty=not NO_PTY)
+
+
+@task
+def fetch_data(ctx: Context, force: bool = False, check: bool = False) -> None:
+    """Download every dataset (Superviz25 + Superviz26) from Zenodo."""
+    fetch_superviz26(ctx, force=force, check=check)
+    fetch_superviz25(ctx, force=force, check=check)
+
+
+@task(
+    help={
+        "dataset": "Dataset family: superviz26 or superviz25",
+        "suite": "Suite name (depends on dataset, e.g. in_domain, lodo, all)",
+        "pipelines": "Comma-separated decision-head names (ocsvm, lof, ae)",
+        "extractors": "Comma-separated feature-extractor names (li, cv, sbert)",
+    }
+)
 def evaluate_suite(
     ctx: Context,
+    dataset: str = "superviz26",
     suite: str = "all",
     pipelines: str = "ocsvm,ae",
+    extractors: str = "li",
 ) -> None:
-    """Run the Superviz26 in-domain + LODO evaluation grid."""
+    """Run an evaluation grid over the chosen dataset family."""
     ctx.run(
-        f"python -m {PROJECT_NAME}.evaluate_suite --suite {suite} --pipelines {pipelines}",
+        f"python -m {PROJECT_NAME}.evaluate_suite --dataset {dataset} "
+        f"--suite {suite} --pipelines {pipelines} --extractors {extractors}",
         echo=True,
-        pty=not WINDOWS,
+        pty=not NO_PTY,
     )
 
 
-@task(help={"dataset": "CSV dataset path", "model_path": "Saved model path", "pipeline": "ocsvm or ae"})
+@task(
+    help={
+        "dataset": "Dataset family: superviz26 or superviz25",
+        "suite": "Suite name (depends on dataset, e.g. in_domain, lodo, all)",
+        "pipelines": "Comma-separated decision-head names (ocsvm, lof, ae)",
+        "extractors": "Comma-separated feature-extractor names (li, cv, sbert)",
+        "dry_run": "Print the manifests and sbatch commands without submitting.",
+    }
+)
+def slurm_suite(
+    ctx: Context,
+    dataset: str = "superviz26",
+    suite: str = "all",
+    pipelines: str = "ocsvm,ae",
+    extractors: str = "li",
+    dry_run: bool = False,
+) -> None:
+    """Submit the evaluation grid to SLURM as one job array per resource class."""
+    cmd = (
+        f"python -m tools.slurm_submit --dataset {dataset} "
+        f"--suite {suite} --pipelines {pipelines} --extractors {extractors}"
+    )
+    if dry_run:
+        cmd += " --dry-run"
+    ctx.run(cmd, echo=True, pty=not NO_PTY)
+
+
+@task(help={"dataset": "CSV dataset path", "model_path": "Saved model path", "pipeline": "ocsvm, lof or ae"})
 def evaluate(
     ctx: Context,
     dataset: str,
@@ -75,7 +126,7 @@ def evaluate(
     ctx.run(
         f"python -m {PROJECT_NAME}.evaluate {dataset} {model_path} --pipeline {pipeline}",
         echo=True,
-        pty=not WINDOWS,
+        pty=not NO_PTY,
     )
 
 
@@ -96,14 +147,14 @@ def smoke(ctx: Context, limit: int = 1000, no_track: bool = False, register: boo
         cmd += " --no-track"
     if register:
         cmd += " --register"
-    ctx.run(cmd, echo=True, pty=not WINDOWS)
+    ctx.run(cmd, echo=True, pty=not NO_PTY)
 
 
 @task
 def test(ctx: Context) -> None:
     """Run tests."""
-    ctx.run("coverage run -m pytest tests/", echo=True, pty=not WINDOWS)
-    ctx.run("coverage report -m -i", echo=True, pty=not WINDOWS)
+    ctx.run("coverage run -m pytest tests/", echo=True, pty=not NO_PTY)
+    ctx.run("coverage report -m -i", echo=True, pty=not NO_PTY)
 
 
 @task
@@ -112,10 +163,10 @@ def docker_build(ctx: Context, progress: str = "plain") -> None:
     ctx.run(
         f"docker build -t train:latest . -f dockerfiles/train.dockerfile --progress={progress}",
         echo=True,
-        pty=not WINDOWS,
+        pty=not NO_PTY,
     )
     ctx.run(
-        f"docker build -t api:latest . -f dockerfiles/api.dockerfile --progress={progress}", echo=True, pty=not WINDOWS
+        f"docker build -t api:latest . -f dockerfiles/api.dockerfile --progress={progress}", echo=True, pty=not NO_PTY
     )
 
 
@@ -123,10 +174,10 @@ def docker_build(ctx: Context, progress: str = "plain") -> None:
 @task
 def build_docs(ctx: Context) -> None:
     """Build documentation."""
-    ctx.run("mkdocs build --config-file docs/mkdocs.yaml --site-dir build", echo=True, pty=not WINDOWS)
+    ctx.run("mkdocs build --config-file docs/mkdocs.yaml --site-dir build", echo=True, pty=not NO_PTY)
 
 
 @task
 def serve_docs(ctx: Context) -> None:
     """Serve documentation."""
-    ctx.run("mkdocs serve --config-file docs/mkdocs.yaml", echo=True, pty=not WINDOWS)
+    ctx.run("mkdocs serve --config-file docs/mkdocs.yaml", echo=True, pty=not NO_PTY)

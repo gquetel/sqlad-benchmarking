@@ -5,4 +5,7 @@ numpy
 pandas
 scikit-learn
 torch
+transformers # SecureBERT feature extractor
 typer
+plotly
+kaleido

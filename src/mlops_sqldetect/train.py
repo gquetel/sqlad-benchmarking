@@ -25,6 +25,7 @@ def train(
     pipeline: Annotated[PipelineName, typer.Option(help="Detector head.")] = "ocsvm",
     extractor: Annotated[str, typer.Option(help="Feature extractor short name.")] = DEFAULT_EXTRACTOR,
     limit: Annotated[int | None, typer.Option(help="Label-stratified subset size for smoke runs.")] = None,
+    cache: Annotated[bool, typer.Option(help="Cache extractor features to disk to skip recomputation.")] = True,
 ) -> None:
     """Fit a pipeline on the normal-class samples of ``dataset``."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -32,7 +33,7 @@ def train(
     df_normal = split_normals(df)
     logger.info(f"Loaded {len(df)} rows ({len(df_normal)} normal) from {dataset}")
 
-    model = build_pipeline(pipeline, extractor)
+    model = build_pipeline(pipeline, extractor, cache=cache)
     model.fit(df_normal)
     model.save(output)
     logger.info(f"Saved {pipeline} pipeline ({extractor} features) to {output}")

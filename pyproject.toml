@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mlops_sqldetect"
 version = "0.0.1"
-description = "A short description of the project."
+description = "One-class SQL injection detection (OCSVM, LOF, AutoEncoder) with MLflow tracking."
 authors = [
   { name = "gquetel", email = "gregor.quetel@telecom-paris.fr" },
 ]
@@ -53,11 +53,12 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# assert is accceptable in testing code (not invoked with optimization)
+# assert is acceptable in testing code (not invoked with optimization)
 "tests/**/*.py" = ["S101"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.coverage.run]
+source = ["src/mlops_sqldetect"]
 omit = ["tests/*"]

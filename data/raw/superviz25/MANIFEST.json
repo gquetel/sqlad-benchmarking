@@ -1,0 +1,25 @@
+{
+  "name": "Superviz25-SQL",
+  "doi": "10.5281/zenodo.17086037",
+  "record_url": "https://zenodo.org/records/17086037",
+  "url_pattern": "https://zenodo.org/api/records/17086037/files/{filename}/content",
+  "columns": [
+    "full_query",
+    "label",
+    "user_inputs",
+    "attack_stage",
+    "tamper_method",
+    "attack_status",
+    "statement_type",
+    "query_template_id",
+    "attack_id",
+    "attack_technique",
+    "split"
+  ],
+  "domains": {
+    "a": "OurAirports"
+  },
+  "files": {
+    "dataset.csv": {"kind": "single", "md5": "7fe0fd69a3cde9b57bc4f1e2d19260f8"}
+  }
+}

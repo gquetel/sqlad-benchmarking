@@ -18,13 +18,21 @@ Every `pip install` must use an exact version (`==`). Python tooling versions ar
   * To install a package: `pip install <package>==<exact-version>`.
   * To run Python scripts: `python <script-name>.py`.
 * The project uses `pytest` for testing: `pytest tests/`.
-* The project uses `treefmt` + `black` for formatting:
+* The project uses `treefmt` + `ruff` for formatting and linting:
     * To format code: `treefmt`.
     * To check formatting without writing: `treefmt --fail-on-change`.
 * The project uses `invoke` for task management. Refer to `tasks.py` for available tasks.
+* To parallelize the evaluation grid on a SLURM cluster, `tools.slurm_submit` fans each
+  `(scenario, pipeline, extractor)` cell out as a job array (one array per resource class:
+  `cpu`, `gpu` for `ae`/`sbert` cells on a partition list like `A100,V100`, and an A100-only
+  array for cells matched by `force_a100`). Site settings live in `configs/slurm.yaml`; jobs
+  activate the env via `conda`. Each cell writes its row to `reports/{dataset}/cells/*.csv`;
+  MLflow is the canonical store.
+    * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --dry-run`.
+    * Submit: `invoke slurm-suite --dataset superviz26 --suite all --pipelines ocsvm,ae`.
 
 # Code style
-
+* DO NOT ADD EXCEPTIONS TO RUFF BY YOURSELF. ASK ME FIRST. 
 * Follow existing code style.
 * Keep line length within 120 characters.
 * Use f-strings for formatting.
