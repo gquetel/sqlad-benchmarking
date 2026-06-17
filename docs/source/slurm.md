@@ -39,6 +39,9 @@ python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --e
 
 # Submit for real:
 python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ocsvm,ae --extractors li
+
+# Smoke run: cap each cell to a label-stratified subset (passed through to evaluate_suite):
+python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors sbert --limit 50000
 ```
 
 Equivalent invoke alias:

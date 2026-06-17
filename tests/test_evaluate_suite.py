@@ -7,7 +7,31 @@ import typer
 
 from mlops_sqldetect.datasets import FAMILIES
 from mlops_sqldetect.evaluate_suite import Cell, _validate_grid, enumerate_cells
-from tools.slurm_submit import _bucket, _is_forced_a100, _needs_gpu
+from tools.slurm_submit import _bucket, _is_forced_a100, _needs_gpu, _write_job_script
+
+_JOB_CFG = {
+    "conda_setup": "/opt/conda/etc/profile.d/conda.sh",
+    "conda_env": "sqldetect",
+    "cpu": {"partition": "cpu", "cpus_per_task": 4, "mem": "8G", "time": "01:00:00"},
+}
+
+
+def _write_cpu_script(tmp_path, *, limit):
+    script = tmp_path / "job.sbatch"
+    _write_job_script(
+        script,
+        bucket="cpu",
+        cfg=_JOB_CFG,
+        dataset="superviz25",
+        manifest=tmp_path / "cells.jsonl",
+        n=3,
+        log_pattern=str(tmp_path / "logs" / "cpu-%A_%a.log"),
+        target_fpr=0.001,
+        seed=7,
+        track=False,
+        limit=limit,
+    )
+    return script.read_text()
 
 
 def test_enumerate_cells_orders_pipeline_extractor_scenario():
@@ -59,3 +83,11 @@ def test_bucket_assignment():
 
 def test_family_scenario_count_matches_suite_all():
     assert len(FAMILIES["superviz26"].suites["all"]) == 8
+
+
+def test_job_script_includes_limit_when_set(tmp_path):
+    assert "--limit 50000" in _write_cpu_script(tmp_path, limit=50000)
+
+
+def test_job_script_omits_limit_when_none(tmp_path):
+    assert "--limit" not in _write_cpu_script(tmp_path, limit=None)

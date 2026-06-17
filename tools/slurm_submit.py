@@ -82,6 +82,7 @@ def _write_job_script(
     target_fpr: float,
     seed: int,
     track: bool,
+    limit: int | None,
 ) -> None:
     """Generate a self-contained array script: full #SBATCH header, then dispatch one cell per index."""
     res = _resolve_resources(cfg, bucket)
@@ -103,6 +104,7 @@ def _write_job_script(
         directives.append(f"#SBATCH --account={cfg['account']}")
     register_flag = "--register" if track and cfg.get("register") else "--no-register"
     track_flag = "--track" if track else "--no-track"
+    limit_flag = f" \\\n  --limit {limit}" if limit is not None else ""
     header = "\n".join(directives)
     path.write_text(
         f"""#!/bin/bash
@@ -117,7 +119,7 @@ python -m tools.slurm_run_cell \\
   --dataset {dataset} \\
   --target-fpr {target_fpr} \\
   --seed {seed} \\
-  {register_flag} {track_flag}
+  {register_flag} {track_flag}{limit_flag}
 """
     )
 
@@ -151,6 +153,7 @@ def submit(
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,
     register: Annotated[bool, typer.Option(help="Register each fitted model in the MLflow Model Registry.")] = False,
     no_track: Annotated[bool, typer.Option(help="Disable MLflow tracking for the submitted jobs.")] = False,
+    limit: Annotated[int | None, typer.Option(help="Label-stratified subset size per cell for smoke runs.")] = None,
     run_id: Annotated[
         str | None, typer.Option(help="Submission id; names the dir under submit_dir (default: timestamp).")
     ] = None,
@@ -197,6 +200,7 @@ def submit(
             target_fpr=target_fpr,
             seed=seed,
             track=track,
+            limit=limit,
         )
         logger.info(f"{bucket}: {len(group_cells)} cells (partition {_resolve_resources(cfg, bucket)['partition']})")
         job_id = _submit_array(script, dry_run)

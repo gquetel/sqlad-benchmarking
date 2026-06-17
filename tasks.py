@@ -94,6 +94,7 @@ def evaluate_suite(
         "suite": "Suite name (depends on dataset, e.g. in_domain, lodo, all)",
         "pipelines": "Comma-separated decision-head names (ocsvm, lof, ae)",
         "extractors": "Comma-separated feature-extractor names (li, cv, sbert)",
+        "limit": "Label-stratified subset size per cell for smoke runs.",
         "dry_run": "Print the manifests and sbatch commands without submitting.",
     }
 )
@@ -103,6 +104,7 @@ def slurm_suite(
     suite: str = "all",
     pipelines: str = "ocsvm,ae",
     extractors: str = "li",
+    limit: int | None = None,
     dry_run: bool = False,
 ) -> None:
     """Submit the evaluation grid to SLURM as one job array per resource class."""
@@ -110,6 +112,8 @@ def slurm_suite(
         f"python -m tools.slurm_submit --dataset {dataset} "
         f"--suite {suite} --pipelines {pipelines} --extractors {extractors}"
     )
+    if limit is not None:
+        cmd += f" --limit {limit}"
     if dry_run:
         cmd += " --dry-run"
     ctx.run(cmd, echo=True, pty=not NO_PTY)
