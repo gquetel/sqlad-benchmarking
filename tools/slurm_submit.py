@@ -138,7 +138,10 @@ def _submit_array(script: Path, dry_run: bool) -> str | None:
         raise typer.BadParameter("sbatch not found on PATH; run on a SLURM submit node or use --dry-run.")
     cmd[0] = sbatch
     # Safe: shell=False, absolute sbatch path, script generated from the versioned config.
-    result = subprocess.run(cmd, shell=False, capture_output=True, text=True, check=True)  # noqa: S603
+    result = subprocess.run(cmd, shell=False, capture_output=True, text=True)  # noqa: S603
+    if result.returncode != 0:
+        # Propagate sbatch errors
+        raise typer.BadParameter(f"sbatch rejected {script}:\n{result.stderr.strip() or result.stdout.strip()}")
     logger.info(result.stdout.strip())
     return result.stdout.strip().split()[-1]
 

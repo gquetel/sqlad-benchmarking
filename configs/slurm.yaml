@@ -4,17 +4,18 @@ conda_setup: ~/miniconda3/etc/profile.d/conda.sh   # sourced before `conda activ
 submit_dir: reports/slurm  # manifests, generated job scripts and .out logs (git-ignored)
 
 cpu:
-  partition: cpu
+  partition: CPU
   cpus_per_task: 32
   mem: 32G
   time: "08:00:00"
 
 gpu:
-  partition: gpu   # may be a fallback list, e.g. "A100,V100" (A100 first via admin PriorityTier)
+  partition: A100,V100   # fallback list: SLURM starts on whichever frees first (A100 first via admin PriorityTier)
   gres: gpu:1
   cpus_per_task: 32
   mem: 64G
   time: "08:00:00"
 
-# Models pinned to A100 only (VRAM): an extractor (e.g. sbert) or a pipeline:extractor (e.g. ae:sbert).
+# Models pinned to A100 only (high VRAM usage). 
+# Accepts an extractor or a pipeline:extractor
 force_a100: []
