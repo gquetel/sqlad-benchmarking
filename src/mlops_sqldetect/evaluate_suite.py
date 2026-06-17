@@ -294,7 +294,7 @@ def _run_one(
         # Calibrate the decision threshold on the held-out validation normals at the
         # target FPR (out-of-sample), then binarise the test scores for the metrics.
         threshold = threshold_for_fpr(model.score_samples(df_val), target_fpr)
-        m = compute_metrics(df_test["label"], scores, threshold)
+        m = compute_metrics(df_test["label"], scores, threshold, f"{pipeline}_{extractor}_{family.name}_{dataset.value}")
         preds = (scores > threshold).astype(int)
         rpa = recall_per_attack(df_test["label"], preds, df_test["attack_technique"])
 
@@ -468,10 +468,6 @@ def evaluate_suite(
                     rows.append(row)
                     pd.DataFrame([asdict(row)]).to_csv(report, mode="a", header=write_header, index=False)
                     write_header = False
-                    logger.info(
-                        f"Results: ROC-AUC={row.roc_auc:.4f}  AUPRC={row.auprc:.4f}  F1={row.f1:.4f}  "
-                        f"recall={row.recall:.4f}  FPR={row.fpr:.4f}  "
-                    )
 
     df = pd.DataFrame([asdict(r) for r in rows])
     logger.info(f"Wrote {len(df)} rows to {report}")

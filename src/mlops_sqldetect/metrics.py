@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 
 import numpy as np
@@ -17,6 +18,8 @@ from sklearn.metrics import (
     roc_curve,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def threshold_for_fpr(normal_scores: np.ndarray, target_fpr: float) -> float:
     """Score percentile of normal samples that admits at most ``target_fpr`` false positives."""
@@ -30,7 +33,7 @@ def wilson_ci(score: float, n: int) -> float:
     return 1.96 * math.sqrt(score * (1 - score) / n)
 
 
-def compute_metrics(labels: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, float]:
+def compute_metrics(labels: np.ndarray, scores: np.ndarray, threshold: float, model_name: str = "") -> dict[str, float]:
     """Threshold-based + curve-based metrics from anomaly scores; values in ``[0, 1]``."""
     labels = np.asarray(labels, dtype=int)
     scores = np.asarray(scores, dtype=float)
@@ -44,7 +47,7 @@ def compute_metrics(labels: np.ndarray, scores: np.ndarray, threshold: float) ->
     tn, fp, _, _ = confusion_matrix(labels, preds, labels=[0, 1]).ravel()
     achieved_fpr = float(fp / (fp + tn)) if (fp + tn) else 0.0
 
-    return {
+    m = {
         "f1": float(f1_score(labels, preds, zero_division=0)),
         "accuracy": float(accuracy_score(labels, preds)),
         "precision": float(precision_score(labels, preds, zero_division=0)),
@@ -55,6 +58,17 @@ def compute_metrics(labels: np.ndarray, scores: np.ndarray, threshold: float) ->
         "auroc_ci": wilson_ci(rocauc, len(scores)),
         "auprc_ci": wilson_ci(auprc, len(scores)),
     }
+
+    logger.info(f"Metrics for {model_name}.")
+    logger.info(f"Accuracy: {m['accuracy'] * 100:.2f}%")
+    logger.info(f"F1 Score: {m['f1'] * 100:.2f}%")
+    logger.info(f"Precision: {m['precision'] * 100:.2f}%")
+    logger.info(f"Recall: {m['recall'] * 100:.2f}%")
+    logger.info(f"False Positive Rate: {m['fpr'] * 100:.5f}%")
+    logger.info(f"ROC-AUC: {rocauc:.4f}, CI {m['auroc_ci']:.4f}")
+    logger.info(f"AUPRC: {auprc:.4f}, CI {m['auprc_ci']:.4f}")
+
+    return m
 
 
 def recall_per_attack(labels: np.ndarray, preds: np.ndarray, techniques: pd.Series) -> dict[str, float]:

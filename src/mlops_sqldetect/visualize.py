@@ -6,12 +6,17 @@ PNG and PDF (via plotly + kaleido); the PNG is uploaded as an MLflow artifact.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from sklearn.metrics import auc, precision_recall_curve, roc_curve
+
+# Disable log clutter because of kaleido
+for _name in ("kaleido", "choreographer", "logistro", "browser_proc"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 PAPER_FONT = "CMU Serif"
 

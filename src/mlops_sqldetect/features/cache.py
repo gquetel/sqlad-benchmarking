@@ -13,6 +13,7 @@ file per query, so a full Superviz26 suite produces only a few dozen files.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from pathlib import Path
 
@@ -28,6 +29,8 @@ CACHE_DIR_ENV = "SQLDETECT_CACHE_DIR"
 # Dense float matrices are stored at this dtype to halve the footprint; restored
 # to float32 on load so downstream scalers see today's dtype.
 STORE_DTYPE = np.float16
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_cache_dir(cache: bool = True, cache_dir: str | os.PathLike | None = None) -> Path | None:
@@ -73,9 +76,11 @@ class CachingExtractor(BaseEstimator, TransformerMixin):
         path = Path(self.cache_dir) / f"{self._key(X)}.npz"
         cached = self._load(path)
         if cached is not None:
+            logger.info("Feature cache hit: %s", path.name)
             return cached
         result = self.base.transform(X)
         self._save(path, result)
+        logger.info("Feature cache saved: %s", path.name)
         return result
 
     def get_feature_names_out(self, input_features=None):
