@@ -21,11 +21,8 @@ jobs:
         run: |
           nix-shell nix/ci-env.nix --run "
             set -euo pipefail
-            python -m venv .venv
-            source .venv/bin/activate
-            pip install --require-hashes -r requirements.txt
-            pip install -e . --no-deps
-            pip install pytest coverage
-            coverage run -m pytest tests/
-            coverage report -m
+            uv lock --check
+            uv sync --frozen
+            uv run coverage run -m pytest tests/
+            uv run coverage report -m
           "

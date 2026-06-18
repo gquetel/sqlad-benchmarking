@@ -1,7 +1,4 @@
 # SLURM site settings for tools/slurm_submit.py
-conda_env: mlops-sqldetect
-conda_setup: ~/miniconda3/etc/profile.d/conda.sh   # sourced before `conda activate`
-submit_dir: reports/slurm  # manifests, generated job scripts and .out logs (git-ignored)
 
 cpu:
   partition: CPU
@@ -10,7 +7,7 @@ cpu:
   time: "08:00:00"
 
 gpu:
-  partition: A100,V100   # fallback list: SLURM starts on whichever frees first (A100 first via admin PriorityTier)
+  partition: A100,V100   # fallback list: SLURM starts on whichever frees first
   gres: gpu:1
   cpus_per_task: 32
   mem: 64G

@@ -5,18 +5,23 @@ By default, you don't have access to any python environment or any other tools. 
 
 # Reproducibility 
 
-This repo uses Nix for reproducible environments. **Never run unversioned upgrade commands** such as:
-- `pip install --upgrade pip`
-- `pip install -U <package>`
-- `pip install <package>` without an exact version pin
+This repo uses Nix for reproducible environments and [uv](https://docs.astral.sh/uv/) for
+Python packages. **Never run unversioned upgrade commands** such as:
+- `uv lock --upgrade` / `uv lock --upgrade-package <pkg>`
+- `uv add <package>` without an exact version pin
 
-Every `pip install` must use an exact version (`==`). Python tooling versions are pinned in `shell.nix`. Dependency versions are pinned in `requirements.txt`. Do not change pinned versions without explicit instruction.
+Dependencies are declared in `pyproject.toml` and locked in `uv.lock`; `requirements.txt` is a
+pip-compatible export of the lock (do not hand-edit it). Nix provides the interpreter and uv is
+configured to never download its own Python (`UV_PYTHON_DOWNLOADS=never`). Do not change pinned
+versions or regenerate the lock without explicit instruction.
 
 # Relevant commands
 
-* The project uses `pip` for Python package installation inside the Nix-managed venv.
-  * To install a package: `pip install <package>==<exact-version>`.
-  * To run Python scripts: `python <script-name>.py`.
+* The project uses `uv` for Python package management on top of the Nix-provided interpreter.
+  * To sync the environment from the lock: `uv sync --frozen`.
+  * To add a package: `uv add <package>==<exact-version>` (then commit `uv.lock` + `requirements.txt`).
+  * To regenerate the lock and the `requirements.txt` export: `invoke lock`.
+  * To run a command in the project env: `uv run <command>` (e.g. `uv run python <script>.py`).
 * The project uses `pytest` for testing: `pytest tests/`.
 * The project uses `treefmt` + `ruff` for formatting and linting:
     * To format code: `treefmt`.
@@ -26,7 +31,7 @@ Every `pip install` must use an exact version (`==`). Python tooling versions ar
   `(scenario, pipeline, extractor)` cell out as a job array (one array per resource class:
   `cpu`, `gpu` for `ae`/`sbert` cells on a partition list like `A100,V100`, and an A100-only
   array for cells matched by `force_a100`). Site settings live in `configs/slurm.yaml`; jobs
-  activate the env via `conda`. Each cell writes its row to `reports/{dataset}/cells/*.csv`;
+  activate the uv `.venv` (built once on the login node). Each cell writes its row to `reports/{dataset}/cells/*.csv`;
   MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --dry-run`.
     * Submit: `invoke slurm-suite --dataset superviz26 --suite all --pipelines ocsvm,ae`.

@@ -10,8 +10,6 @@ from mlops_sqldetect.evaluate_suite import Cell, _validate_grid, enumerate_cells
 from tools.slurm_submit import _bucket, _is_forced_a100, _needs_gpu, _write_job_script
 
 _JOB_CFG = {
-    "conda_setup": "/opt/conda/etc/profile.d/conda.sh",
-    "conda_env": "sqldetect",
     "cpu": {"partition": "cpu", "cpus_per_task": 4, "mem": "8G", "time": "01:00:00"},
 }
 

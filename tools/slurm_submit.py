@@ -5,7 +5,7 @@ Each cell ``(scenario, pipeline, extractor)`` becomes one array task that runs t
 (no shared writer, no merge step). Cells needing a GPU (``pipeline == "ae"`` or
 ``extractor == "sbert"``) go to a GPU array on the config's partition list (A100 first,
 V100 fallback); cells whose extractor or ``pipeline:extractor`` is listed in ``force_a100``
-get an A100-only array; the rest go to a CPU array. Resources and the conda environment
+get an A100-only array; the rest go to a CPU array. Resources and the environment setup
 come from ``configs/slurm.yaml``.
 
 Usage:
@@ -33,6 +33,13 @@ from mlops_sqldetect.tracking import ensure_parent_run, setup_mlflow
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Manifests, generated job scripts and .out logs (git-ignored), relative to REPO_ROOT.
+SUBMIT_DIR = "reports/slurm"
+# Run on the compute node (after cd-ing into the repo) before each cell. The uv .venv is
+# built once on the login node (`uv sync --frozen`) and reused from the shared filesystem;
+# array tasks only activate it (no concurrent `uv sync`, which would race).
+ENV_SETUP = "source .venv/bin/activate"
 
 
 # GPU cells try A100 first then fall back to V100 via the config's partition list; cells
@@ -110,9 +117,8 @@ def _write_job_script(
         f"""#!/bin/bash
 {header}
 set -euo pipefail
-source {cfg["conda_setup"]}
-conda activate {cfg["conda_env"]}
 cd {REPO_ROOT}
+{ENV_SETUP}
 python -m tools.slurm_run_cell \\
   --manifest {manifest} \\
   --index "$SLURM_ARRAY_TASK_ID" \\
@@ -170,7 +176,7 @@ def submit(
 
     cells = enumerate_cells(dataset, suite, pipelines, extractors)
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S")
-    submit_dir = REPO_ROOT / cfg["submit_dir"] / run_id
+    submit_dir = REPO_ROOT / SUBMIT_DIR / run_id
     (submit_dir / "logs").mkdir(parents=True, exist_ok=True)
     logger.info(f"{len(cells)} cells -> {submit_dir}")
 

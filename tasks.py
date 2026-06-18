@@ -11,10 +11,16 @@ PROJECT_NAME = "mlops_sqldetect"
 
 # Setup commands
 @task
-def requirements(ctx: Context) -> None:
-    """Install project requirements."""
-    ctx.run("pip install -r requirements.txt", echo=True, pty=not NO_PTY)
-    ctx.run("pip install -e .", echo=True, pty=not NO_PTY)
+def sync(ctx: Context) -> None:
+    """Create/refresh the .venv from uv.lock (deps + dev group + project)."""
+    ctx.run("uv sync --frozen", echo=True, pty=not NO_PTY)
+
+
+@task
+def lock(ctx: Context) -> None:
+    """Regenerate uv.lock and the pip-compatible requirements.txt export."""
+    ctx.run("uv lock", echo=True, pty=not NO_PTY)
+    ctx.run("uv export --no-dev --no-emit-project -o requirements.txt", echo=True, pty=not NO_PTY)
 
 
 # Project commands

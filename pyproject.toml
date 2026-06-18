@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mlops_sqldetect"
 version = "0.0.1"
-description = "One-class SQL injection detection (OCSVM, LOF, AutoEncoder) with MLflow tracking."
+description = "Unsupervized SQL attack detection with MLflow tracking."
 authors = [
   { name = "gquetel", email = "gregor.quetel@telecom-paris.fr" },
 ]
@@ -16,10 +16,22 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 readme = "README.md"
-requires-python = ">=3.14"
-dynamic = ["dependencies"]
+requires-python = "==3.14.3"
+dependencies = [
+  "joblib",
+  "mlflow-skinny==3.12",  # Server is 3.12 so far.
+  "python-dotenv",
+  "numpy",
+  "pandas",
+  "scikit-learn",
+  "torch==2.12.0",  
+  "transformers==5.12.0",  
+  "typer",
+  "plotly",
+  "kaleido",
+]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "pytest",
   "coverage",
@@ -27,14 +39,10 @@ dev = [
   "invoke",
   "mkdocs-material",
   "mkdocstrings-python",
-  "pip-tools",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.in"]}
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -21,10 +21,13 @@ Each array task runs one cell through `evaluate_suite` and writes its **own** pe
 to `reports/{dataset}/cells/{pipeline}_{extractor}_{scenario}.csv` — so the parallel jobs
 never share a writer and a rerun simply overwrites its own file.
 
-Site settings (conda env, partitions, resources, `force_a100`) live in
+Site settings (partitions, resources, `force_a100`) live in
 [`configs/slurm.yaml`](https://github.com/gquetel/mlops-sqldetect/blob/main/configs/slurm.yaml);
-the full `#SBATCH` header is baked into each generated script. Jobs activate the
-environment with `conda activate <conda_env>` on the compute node.
+the full `#SBATCH` header is baked into each generated script. Each job `cd`s into the repo
+and activates the uv `.venv` with `source .venv/bin/activate` on the compute node. That
+`.venv` is built once on the login node (`uv sync --frozen`) and reused from the shared
+filesystem; array tasks only activate it and never run `uv sync` concurrently (which would
+race on the shared `.venv`).
 
 !!! note "A100-first preference"
     `--partition=A100,V100` lets SLURM pick whichever frees up first. A *strict* A100-first
