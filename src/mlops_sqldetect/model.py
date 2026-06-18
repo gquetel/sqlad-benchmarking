@@ -9,6 +9,7 @@ can swap them without branching.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +30,12 @@ from torch import nn
 from mlops_sqldetect.features import DEFAULT_EXTRACTOR, build_extractor
 from mlops_sqldetect.features.cache import maybe_wrap, resolve_cache_dir
 
+logger = logging.getLogger(__name__)
+
 PipelineName = Literal["ocsvm", "lof", "ae"]
+
+# Human-readable labels for logs and MLflow run names; acronyms stay uppercase.
+PIPELINE_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoencoder"}
 
 
 def _scaler_for(extractor: str) -> TransformerMixin:
@@ -262,6 +268,7 @@ class AEDetector:
     ) -> None:
         self.config = config or AEConfig()
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info("AEDetector using device: %s", self.device)
         self.extractor = extractor if extractor is not None else build_extractor()
         self.scaler = scaler if scaler is not None else StandardScaler()
         self.output_activation = output_activation

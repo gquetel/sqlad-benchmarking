@@ -13,8 +13,8 @@ from typing import Annotated
 import typer
 
 from mlops_sqldetect.data import load_dataset, split_normals
-from mlops_sqldetect.features import DEFAULT_EXTRACTOR
-from mlops_sqldetect.model import PipelineName, build_pipeline
+from mlops_sqldetect.features import DEFAULT_EXTRACTOR, EXTRACTOR_LABELS
+from mlops_sqldetect.model import PIPELINE_LABELS, PipelineName, build_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,10 @@ def train(
     model = build_pipeline(pipeline, extractor, cache=cache)
     model.fit(df_normal)
     model.save(output)
-    logger.info(f"Saved {pipeline} pipeline ({extractor} features) to {output}")
+    logger.info(
+        f"Saved {PIPELINE_LABELS.get(pipeline, pipeline)} pipeline "
+        f"({EXTRACTOR_LABELS.get(extractor, extractor)} features) to {output}"
+    )
 
 
 if __name__ == "__main__":

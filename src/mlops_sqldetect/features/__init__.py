@@ -29,6 +29,10 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
 # Default extractor used when a caller does not specify one.
 DEFAULT_EXTRACTOR = "li"
 
+# Human-readable labels for logs and MLflow run names. Acronyms stay uppercase;
+# labels mirror their reference works (Li et al., SecureBERT).
+EXTRACTOR_LABELS: dict[str, str] = {"li": "Li", "cv": "CountVectorizer", "sbert": "SecureBERT"}
+
 
 def build_extractor(name: str = DEFAULT_EXTRACTOR, cache_dir: str | os.PathLike | None = None) -> TransformerMixin:
     """Instantiate a feature extractor by short name (see :data:`EXTRACTORS`).
@@ -47,6 +51,7 @@ def build_extractor(name: str = DEFAULT_EXTRACTOR, cache_dir: str | os.PathLike 
 __all__ = [
     "DEFAULT_EXTRACTOR",
     "EXTRACTORS",
+    "EXTRACTOR_LABELS",
     "CachingExtractor",
     "CountVectorizerExtractor",
     "LiExtractor",

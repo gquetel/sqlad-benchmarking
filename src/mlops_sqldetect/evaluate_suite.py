@@ -29,9 +29,9 @@ from sklearn.model_selection import train_test_split
 
 from mlops_sqldetect.data import load_whole_sampled, split_normals
 from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
-from mlops_sqldetect.features import EXTRACTORS
+from mlops_sqldetect.features import EXTRACTOR_LABELS, EXTRACTORS
 from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
-from mlops_sqldetect.model import AEDetector, PipelineName, build_pipeline
+from mlops_sqldetect.model import PIPELINE_LABELS, AEDetector, PipelineName, build_pipeline
 from mlops_sqldetect.tracking import (
     ensure_parent_run,
     log_and_register_detector,
@@ -43,11 +43,6 @@ from mlops_sqldetect.visualize import dump_curve_points, plot_pr_curve, plot_roc
 logger = logging.getLogger(__name__)
 
 ALL_PIPELINES: tuple[PipelineName, ...] = ("ocsvm", "lof", "ae")
-
-# Human-readable labels used to build MLflow parent run names. Acronyms stay
-# uppercase; extractor labels mirror their reference works (Li et al., SecureBERT).
-PIPELINE_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoencoder"}
-EXTRACTOR_LABELS: dict[str, str] = {"li": "Li", "cv": "CountVectorizer", "sbert": "SecureBERT"}
 
 # MLflow metric keys allow alnum and ``_-./`` plus space; anything else is replaced.
 _MLFLOW_KEY_RE = re.compile(r"[^0-9A-Za-z_\-./ ]+")
@@ -190,7 +185,10 @@ def _run_one(
     cache_dir: Path | None = None,
 ) -> ResultRow:
     """Train + evaluate one (dataset, pipeline, extractor) cell, optionally logging to MLflow."""
-    logger.info(f"=== {pipeline} + {extractor} on {family.name}/{dataset.value} ===")
+    logger.info(
+        f"=== {PIPELINE_LABELS.get(pipeline, pipeline)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
+        f"on {family.name.capitalize()}/{dataset.value} ==="
+    )
     # attack_technique is needed for per-technique recall; it is NaN on normal rows.
     if limit is not None:
         # Smoke run: sample `limit` rows from the whole file (all splits, both
