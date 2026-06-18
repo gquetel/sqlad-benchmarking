@@ -19,7 +19,13 @@ from mlflow.data.meta_dataset import MetaDataset
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EXPERIMENT = "mlops-sqldetect"
+
+def _experiment_name(dataset: str) -> str:
+    """Map a dataset family to its MLflow experiment name.
+
+    Superviz25 runs land in "Superviz25-SQL"; every other family in "Superviz26-SQL".
+    """
+    return "Superviz25-SQL" if dataset == "superviz25" else "Superviz26-SQL"
 
 # Path to the importable mlops_sqldetect package, bundled into pyfunc models
 # via ``code_paths`` so the detector can be unpickled and scored anywhere.
@@ -50,8 +56,11 @@ class _UrlRewriteStream:
         return getattr(self._stream, name)
 
 
-def setup_mlflow() -> bool:
+def setup_mlflow(dataset: str) -> bool:
     """Configure MLflow from the environment.
+
+    The experiment is derived from ``dataset``: Superviz25 runs go to the
+    "Superviz25-SQL" experiment, every other family to "Superviz26-SQL".
 
     Returns:
         True if a tracking server is configured and tracking should proceed
@@ -72,7 +81,7 @@ def setup_mlflow() -> bool:
 
     mlflow.set_tracking_uri(tracking_uri)
     try:
-        mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT_NAME") or DEFAULT_EXPERIMENT)
+        mlflow.set_experiment(_experiment_name(dataset))
     except Exception as exc:
         logger.warning(f"MLflow tracking disabled: could not reach {tracking_uri} ({exc})")
         return False

@@ -176,7 +176,7 @@ def submit(
 
     # Pre-create the MLflow parents once, serially, so concurrent array tasks reuse them
     # instead of racing on find-or-create and spawning duplicate parents.
-    if track and setup_mlflow():
+    if track and setup_mlflow(dataset):
         for pipeline, extractor in {(c.pipeline, c.extractor) for c in cells}:
             name, tags = parent_run_spec(FAMILIES[dataset], pipeline, extractor)
             ensure_parent_run(tags, name)

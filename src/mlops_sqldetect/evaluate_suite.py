@@ -433,7 +433,7 @@ def evaluate_suite(
         report.unlink(missing_ok=True)
     write_header = not report.exists()
 
-    track_enabled = track and setup_mlflow()
+    track_enabled = track and setup_mlflow(dataset)
 
     rows: list[ResultRow] = []
 
