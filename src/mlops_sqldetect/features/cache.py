@@ -81,7 +81,7 @@ class CachingExtractor(BaseEstimator, TransformerMixin):
         result = self.base.transform(X)
         self._save(path, result)
         logger.info("Feature cache saved: %s", path.name)
-        return result
+        return self._load(path)
 
     def get_feature_names_out(self, input_features=None):
         return self.base.get_feature_names_out(input_features)

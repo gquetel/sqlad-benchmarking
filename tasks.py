@@ -24,21 +24,6 @@ def lock(ctx: Context) -> None:
 
 
 # Project commands
-@task(help={"dataset": "CSV dataset path", "pipeline": "ocsvm, lof or ae", "output": "Output model path"})
-def train(
-    ctx: Context,
-    dataset: str = "data/raw/dataset.csv",
-    pipeline: str = "ocsvm",
-    output: str = "models/li.joblib",
-) -> None:
-    """Train a Li SQL injection detection pipeline."""
-    ctx.run(
-        f"python -m {PROJECT_NAME}.train {dataset} --output {output} --pipeline {pipeline}",
-        echo=True,
-        pty=not NO_PTY,
-    )
-
-
 @task(help={"datasets": "Comma-separated Superviz26 short names (e.g. 'a-a,bcd-a'); empty for all"})
 def fetch_superviz26(ctx: Context, datasets: str = "", force: bool = False, check: bool = False) -> None:
     """Download Superviz26-SQL CSVs from Zenodo with checksum verification."""
@@ -68,76 +53,6 @@ def fetch_data(ctx: Context, force: bool = False, check: bool = False) -> None:
     """Download every dataset (Superviz25 + Superviz26) from Zenodo."""
     fetch_superviz26(ctx, force=force, check=check)
     fetch_superviz25(ctx, force=force, check=check)
-
-
-@task(
-    help={
-        "dataset": "Dataset family: superviz26 or superviz25",
-        "suite": "Suite name (depends on dataset, e.g. in_domain, lodo, all)",
-        "pipelines": "Comma-separated decision-head names (ocsvm, lof, ae)",
-        "extractors": "Comma-separated feature-extractor names (li, cv, sbert)",
-    }
-)
-def evaluate_suite(
-    ctx: Context,
-    dataset: str = "superviz26",
-    suite: str = "all",
-    pipelines: str = "ocsvm,ae",
-    extractors: str = "li",
-) -> None:
-    """Run an evaluation grid over the chosen dataset family."""
-    ctx.run(
-        f"python -m {PROJECT_NAME}.evaluate_suite --dataset {dataset} "
-        f"--suite {suite} --pipelines {pipelines} --extractors {extractors}",
-        echo=True,
-        pty=not NO_PTY,
-    )
-
-
-@task(
-    help={
-        "dataset": "Dataset family: superviz26 or superviz25",
-        "suite": "Suite name (depends on dataset, e.g. in_domain, lodo, all)",
-        "pipelines": "Comma-separated decision-head names (ocsvm, lof, ae)",
-        "extractors": "Comma-separated feature-extractor names (li, cv, sbert)",
-        "limit": "Label-stratified subset size per cell for smoke runs.",
-        "dry_run": "Print the manifests and sbatch commands without submitting.",
-    }
-)
-def slurm_suite(
-    ctx: Context,
-    dataset: str = "superviz26",
-    suite: str = "all",
-    pipelines: str = "ocsvm,ae",
-    extractors: str = "li",
-    limit: int | None = None,
-    dry_run: bool = False,
-) -> None:
-    """Submit the evaluation grid to SLURM as one job array per resource class."""
-    cmd = (
-        f"python -m tools.slurm_submit --dataset {dataset} "
-        f"--suite {suite} --pipelines {pipelines} --extractors {extractors}"
-    )
-    if limit is not None:
-        cmd += f" --limit {limit}"
-    if dry_run:
-        cmd += " --dry-run"
-    ctx.run(cmd, echo=True, pty=not NO_PTY)
-
-
-@task(help={"dataset": "CSV dataset path", "model_path": "Saved model path", "pipeline": "ocsvm, lof or ae"})
-def evaluate(
-    ctx: Context,
-    dataset: str,
-    model_path: str,
-    pipeline: str = "ocsvm",
-) -> None:
-    """Evaluate a Li SQL injection detection pipeline."""
-    ctx.run(
-        f"python -m {PROJECT_NAME}.evaluate {dataset} {model_path} --pipeline {pipeline}",
-        echo=True,
-        pty=not NO_PTY,
-    )
 
 
 @task(

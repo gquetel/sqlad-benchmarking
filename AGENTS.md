@@ -26,7 +26,11 @@ versions or regenerate the lock without explicit instruction.
 * The project uses `treefmt` + `ruff` for formatting and linting:
     * To format code: `treefmt`.
     * To check formatting without writing: `treefmt --fail-on-change`.
-* The project uses `invoke` for task management. Refer to `tasks.py` for available tasks.
+* The project uses `invoke` for setup/orchestration tasks (e.g. `sync`, `lock`, `test`, docs,
+  docker, dataset fetch). Refer to `tasks.py` for available tasks. The train/eval/SLURM entry
+  points are Typer CLIs run directly via `python -m mlops_sqldetect.<module>` (e.g. `train`,
+  `evaluate`, `evaluate_suite`) or `python -m tools.<module>` (e.g. `slurm_submit`); use `--help`
+  on any of them to see options.
 * To parallelize the evaluation grid on a SLURM cluster, `tools.slurm_submit` fans each
   `(scenario, pipeline, extractor)` cell out as a job array (one array per resource class:
   `cpu`, `gpu` for `ae`/`sbert` cells on a partition list like `A100,V100`, and an A100-only
@@ -34,7 +38,7 @@ versions or regenerate the lock without explicit instruction.
   activate the uv `.venv` (built once on the login node). Each cell writes its row to `reports/{dataset}/cells/*.csv`;
   MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --dry-run`.
-    * Submit: `invoke slurm-suite --dataset superviz26 --suite all --pipelines ocsvm,ae`.
+    * Submit: `python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ocsvm,ae --extractors li`.
 
 # Code style
 * DO NOT ADD EXCEPTIONS TO RUFF BY YOURSELF. ASK ME FIRST. 

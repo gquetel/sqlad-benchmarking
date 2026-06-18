@@ -47,12 +47,6 @@ python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ocsvm,
 python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors sbert --limit 50000
 ```
 
-Equivalent invoke alias:
-
-```bash
-invoke slurm-suite --dataset superviz26 --suite all --pipelines ocsvm,ae --dry-run
-```
-
 Manifests, generated job scripts, and `.out` logs are written under
 `reports/slurm/<run-id>/` (git-ignored).
 

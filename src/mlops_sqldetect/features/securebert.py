@@ -64,12 +64,16 @@ class SecureBertExtractor(BaseEstimator, TransformerMixin):
     @torch.no_grad()
     def transform(self, X) -> np.ndarray:  # noqa: N803
         self._ensure_model()
+        # Follow the model's actual device rather than self.device: a checkpoint
+        # loaded with map_location (see AEDetector.load) can leave the unpickled
+        # model on CPU while self.device still reads "cuda" from when it was saved.
+        model_device = next(self.model_.parameters()).device
         queries = _as_queries(X)
         out: list[np.ndarray] = []
         for start in range(0, len(queries), self.batch_size):
             batch = queries[start : start + self.batch_size]
             inputs = self.tokenizer_(batch, return_tensors="pt", truncation=True, padding=True, max_length=MAX_LENGTH)
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            inputs = {k: v.to(model_device) for k, v in inputs.items()}
             pooled = self.model_(**inputs).pooler_output
             out.append(pooled.cpu().numpy())
         if not out:

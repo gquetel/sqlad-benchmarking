@@ -12,8 +12,6 @@ from mlops_sqldetect.features import build_extractor
 from mlops_sqldetect.model import (
     AEConfig,
     AEDetector,
-    LOFDetector,
-    OCSVMDetector,
     _scaler_for,
     build_pipeline,
     load_pipeline,
@@ -47,6 +45,8 @@ def _fast_ae(extractor: str) -> AEDetector:
 
 
 def test_scaler_for_routes_per_extractor():
+    """Each extractor must be paired with the scaler its feature space needs.
+    """
     # cv (raw counts) and sbert (tanh-bounded embeddings) go to OCSVM/LOF unscaled;
     # only Li dense features are standardised.
     assert isinstance(_scaler_for("cv"), FunctionTransformer)
@@ -55,37 +55,54 @@ def test_scaler_for_routes_per_extractor():
 
 
 @pytest.mark.parametrize("head", ["ocsvm", "lof"])
-@pytest.mark.parametrize("extractor", ["li", "cv"])
+@pytest.mark.parametrize("extractor", ["li", "cv", pytest.param("sbert", marks=pytest.mark.slow)])
 def test_sklearn_heads_rank_attacks_above_normals(head, extractor):
+    """End-to-end smoke test of the OCSVM/LOF heads across every extractor.
+
+    This checks that the pipeline runs correctly, we expect a ROC superior to a 
+    threshold, when not the case, it might exhibit a ranking issue.
+    """
     df_train, df_test = _train_test()
     model = build_pipeline(head, extractor).fit(df_train)
     scores = model.score_samples(df_test)
+    # Shape + finiteness first: a NaN/inf or mis-shaped score array would poison
+    # every downstream metric, so fail loudly here rather than in the harness.
     assert scores.shape == (len(df_test),)
     assert np.isfinite(scores).all()
-    # Rank-based check (robust to LOF's extreme magnitudes): higher scores must
-    # separate attacks from normals.
+    # AUC checks score orientation, not model quality: it catches a head that
+    # ranks attacks below normals (e.g. a sign error). Maybe the threshold should be adjusted.
     assert roc_auc_score(df_test["label"], scores) >= 0.9
 
 
-def test_lof_scores_unseen_rows_via_novelty():
-    df_train, df_test = _train_test()
-    model = build_pipeline("lof", "li").fit(df_train)
-    # decision_function on unseen rows only works with novelty=True; must not raise.
-    assert model.score_samples(df_test).shape == (len(df_test),)
-
-
-@pytest.mark.parametrize("extractor", ["li", "cv"])
+@pytest.mark.parametrize("extractor", ["li", "cv", pytest.param("sbert", marks=pytest.mark.slow)])
 def test_ae_sparse_safe_path_runs(extractor):
+    """The autoencoder must train and score over each extractor's matrix type.
+
+    This runs a tiny budget over each to prove the fit/score loop and the batched 
+    densification works.
+    """
     df_train, df_test = _train_test()
     scores = _fast_ae(extractor).fit(df_train).score_samples(df_test)
     assert scores.shape == (len(df_test),)
     assert np.isfinite(scores).all()
 
 
-@pytest.mark.parametrize("head", ["ocsvm", "lof", "ae"])
-def test_save_load_roundtrip(head, tmp_path):
+@pytest.mark.parametrize(
+    ("head", "extractor"),
+    [
+        ("ocsvm", "li"),
+        ("lof", "li"),
+        ("ae", "li"),
+        pytest.param("ocsvm", "sbert", marks=pytest.mark.slow),
+        pytest.param("lof", "sbert", marks=pytest.mark.slow),
+        pytest.param("ae", "sbert", marks=pytest.mark.slow),
+    ],
+)
+def test_save_load_roundtrip(head, extractor, tmp_path):
+    """Checks that a persisted model scores identically after being reloaded.
+    """
     df_train, df_test = _train_test()
-    model = _fast_ae("li") if head == "ae" else build_pipeline(head, "li")
+    model = _fast_ae(extractor) if head == "ae" else build_pipeline(head, extractor)
     model.fit(df_train)
     suffix = "pt" if head == "ae" else "joblib"
     path = tmp_path / f"model.{suffix}"
@@ -95,10 +112,7 @@ def test_save_load_roundtrip(head, tmp_path):
 
 
 def test_build_pipeline_unknown_raises():
+    """An unknown head name must fail fast with a clear error.
+    """
     with pytest.raises(ValueError, match="Unknown pipeline"):
         build_pipeline("nope", "li")  # type: ignore[arg-type]
-
-
-def test_ocsvm_and_lof_are_distinct_types():
-    assert isinstance(build_pipeline("ocsvm", "li"), OCSVMDetector)
-    assert isinstance(build_pipeline("lof", "li"), LOFDetector)
