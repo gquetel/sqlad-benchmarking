@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from mlops_sqldetect.datasets import superviz25, superviz26
+from mlops_sqldetect.datasets import superviz25, superviz26, superviz26_big
 from mlops_sqldetect.datasets.superviz25 import Superviz25
 from mlops_sqldetect.datasets.superviz26 import (
     IN_DOMAIN,
@@ -60,6 +60,18 @@ FAMILIES: dict[str, DatasetFamily] = {
         manifest=superviz25.manifest,
         default_root=superviz25.default_root,
         resolve_path=superviz25.resolve_path,
+    ),
+    "superviz26-big": DatasetFamily(
+        name="superviz26-big",
+        suites={
+            "in_domain": superviz26_big.IN_DOMAIN,
+            "lodo": superviz26_big.LODO,
+            "all": superviz26_big.IN_DOMAIN + superviz26_big.LODO,
+        },
+        load_split=superviz26_big.load_split,
+        manifest=superviz26_big.manifest,
+        default_root=superviz26_big.default_root,
+        resolve_path=superviz26_big.resolve_path,
     ),
 }
 
