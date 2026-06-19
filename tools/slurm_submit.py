@@ -40,6 +40,9 @@ SUBMIT_DIR = "reports/slurm"
 # built once on the login node (`uv sync --frozen`) and reused from the shared filesystem;
 # array tasks only activate it (no concurrent `uv sync`, which would race).
 ENV_SETUP = "source .venv/bin/activate"
+# The activate script every array task sources on the compute node. Checked on the submit
+# node before sbatch so a missing .venv fails once here, not silently in N array tasks.
+VENV_ACTIVATE = REPO_ROOT / ".venv" / "bin" / "activate"
 
 
 # GPU cells try A100 first then fall back to V100 via the config's partition list; cells
@@ -71,6 +74,14 @@ def _resolve_resources(cfg: dict, bucket: str) -> dict:
     if bucket == "gpu_a100":
         res["partition"] = "A100"
     return res
+
+
+def _check_venv(activate: Path = VENV_ACTIVATE) -> None:
+    """Fail fast if the shared .venv is missing; every array task sources it on the compute node."""
+    if not activate.exists():
+        raise typer.BadParameter(
+            f"{activate} not found; build it on the login node with `uv sync --frozen` before submitting."
+        )
 
 
 def _write_manifest(path: Path, cells: list[Cell]) -> None:
@@ -173,6 +184,11 @@ def submit(
     cfg = yaml.safe_load(config.read_text())
     cfg["register"] = register
     track = not no_track
+
+    # Fail fast on the submit node: a dry run only prints scripts, but a real submit needs
+    # the shared .venv the compute nodes will source.
+    if not dry_run:
+        _check_venv()
 
     cells = enumerate_cells(dataset, suite, pipelines, extractors)
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S")

@@ -7,7 +7,7 @@ import typer
 
 from mlops_sqldetect.datasets import FAMILIES
 from mlops_sqldetect.evaluate_suite import Cell, _validate_grid, enumerate_cells
-from tools.slurm_submit import _bucket, _is_forced_a100, _needs_gpu, _write_job_script
+from tools.slurm_submit import _bucket, _check_venv, _is_forced_a100, _needs_gpu, _write_job_script
 
 _JOB_CFG = {
     "cpu": {"partition": "cpu", "cpus_per_task": 4, "mem": "8G", "time": "01:00:00"},
@@ -89,3 +89,14 @@ def test_job_script_includes_limit_when_set(tmp_path):
 
 def test_job_script_omits_limit_when_none(tmp_path):
     assert "--limit" not in _write_cpu_script(tmp_path, limit=None)
+
+
+def test_check_venv_raises_when_missing(tmp_path):
+    with pytest.raises(typer.BadParameter, match="uv sync"):
+        _check_venv(tmp_path / ".venv" / "bin" / "activate")
+
+
+def test_check_venv_passes_when_present(tmp_path):
+    activate = tmp_path / "activate"
+    activate.touch()
+    _check_venv(activate)
