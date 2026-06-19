@@ -61,6 +61,7 @@ def test_validate_grid_rejects_unknown_scenario():
 def test_needs_gpu_rule():
     assert _needs_gpu(Cell("a-a", "ae", "li")) is True
     assert _needs_gpu(Cell("a-a", "ocsvm", "sbert")) is True
+    assert _needs_gpu(Cell("a-a", "ocsvm", "codet5")) is True
     assert _needs_gpu(Cell("a-a", "ocsvm", "li")) is False
 
 

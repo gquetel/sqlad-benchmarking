@@ -2,8 +2,8 @@
 
 Each cell ``(scenario, pipeline, extractor)`` becomes one array task that runs through
 :func:`evaluate_suite` and writes its own per-cell CSV under ``reports/{dataset}/cells/``
-(no shared writer, no merge step). Cells needing a GPU (``pipeline == "ae"`` or
-``extractor == "sbert"``) go to a GPU array on the config's partition list (A100 first,
+(no shared writer, no merge step). Cells needing a GPU (``pipeline == "ae"`` or an
+embedding extractor — ``sbert``/``codet5``) go to a GPU array on the config's partition list (A100 first,
 V100 fallback); cells whose extractor or ``pipeline:extractor`` is listed in ``force_a100``
 get an A100-only array; the rest go to a CPU array. Resources and the environment setup
 come from ``configs/slurm.yaml``.
@@ -51,8 +51,8 @@ BUCKETS = ("gpu_a100", "gpu", "cpu")
 
 
 def _needs_gpu(cell: Cell) -> bool:
-    """A cell needs a GPU when it trains an autoencoder or uses the SecureBERT extractor."""
-    return cell.pipeline == "ae" or cell.extractor == "sbert"
+    """A cell needs a GPU when it trains an autoencoder or uses an embedding extractor (SecureBERT, CodeT5+)."""
+    return cell.pipeline == "ae" or cell.extractor in ("sbert", "codet5")
 
 
 def _is_forced_a100(cell: Cell, cfg: dict) -> bool:
@@ -167,7 +167,7 @@ def submit(
     dataset: Annotated[str, typer.Option(help="Dataset family: superviz26 or superviz25.")] = "superviz26",
     suite: Annotated[str, typer.Option(help="Suite name (e.g. in_domain, lodo, all).")] = "all",
     pipelines: Annotated[str, typer.Option(help="Comma-separated decision-head names (ocsvm, lof, ae).")] = "ocsvm,ae",
-    extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names (li, loginov, cv, sbert).")] = "li",
+    extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names (li, loginov, cv, sbert, codet5).")] = "li",
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     target_fpr: Annotated[float, typer.Option(help="Target false-positive rate for the calibrated threshold.")] = 0.001,
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,

@@ -41,12 +41,13 @@ PIPELINE_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoen
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    CountVectorizer counts and SecureBERT embeddings are fed to OCSVM/LOF unscaled
-    (an identity transform): word counts go in raw, and SecureBERT's pooler_output
-    is already tanh-bounded to [-1, 1] (the reference applies no scaler). Li dense
-    features use StandardScaler, where centring and unit variance help.
+    CountVectorizer counts and SecureBERT/CodeT5+ embeddings are fed to OCSVM/LOF
+    unscaled (an identity transform): word counts go in raw, SecureBERT's
+    pooler_output is tanh-bounded to [-1, 1], and CodeT5+ embeddings are
+    L2-normalized (the references apply no scaler). Li dense features use
+    StandardScaler, where centring and unit variance help.
     """
-    return FunctionTransformer() if extractor in ("cv", "sbert") else StandardScaler()
+    return FunctionTransformer() if extractor in ("cv", "sbert", "codet5") else StandardScaler()
 
 
 # ----- OCSVM -----------------------------------------------------------------
@@ -408,10 +409,10 @@ def build_pipeline(
     extractor_instance = build_extractor(extractor)
     cdir = resolve_cache_dir(cache, cache_dir)
     if name == "ocsvm":
-        # Raw word counts (cv) and 768-d SecureBERT embeddings have a wider spread
-        # than Li features, so the QP solver needs a higher iteration budget to
-        # converge; Li keeps the default.
-        config = OCSVMConfig(max_iter=10000) if extractor in ("cv", "sbert") else OCSVMConfig()
+        # Raw word counts (cv) and the SecureBERT/CodeT5+ embeddings have a wider
+        # spread than Li features, so the QP solver needs a higher iteration budget
+        # to converge; Li keeps the default.
+        config = OCSVMConfig(max_iter=10000) if extractor in ("cv", "sbert", "codet5") else OCSVMConfig()
         return OCSVMDetector(
             config=config, extractor=maybe_wrap(extractor_instance, cdir), scaler=_scaler_for(extractor)
         )
@@ -430,10 +431,11 @@ def build_pipeline(
                 scaler=FunctionTransformer(),
                 output_activation="relu",
             )
-        if extractor == "sbert":
-            # SecureBERT pooler_output is tanh-bounded to [-1, 1]: train directly on
-            # the raw embeddings (no scaler) with a tanh output so reconstruction can
-            # span the negative range, mirroring the reference MyAutoEncoderTanh.
+        if extractor in ("sbert", "codet5"):
+            # SecureBERT pooler_output is tanh-bounded and CodeT5+ embeddings are
+            # L2-normalized, both within [-1, 1]: train directly on the raw
+            # embeddings (no scaler) with a tanh output so reconstruction can span
+            # the negative range, mirroring the reference MyAutoEncoderTanh.
             return AEDetector(
                 config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=512),
                 extractor=maybe_wrap(extractor_instance, cdir),

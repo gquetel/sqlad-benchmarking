@@ -11,9 +11,9 @@ scenarios become 8 jobs).
 class**. Cells are bucketed by their needs:
 
 - **CPU** — cells that need no GPU (e.g. `ocsvm/li`) → the `cpu` partition.
-- **GPU (fallback)** — cells that train an autoencoder (`pipeline == "ae"`) or use
-  SecureBERT (`extractor == "sbert"`) → the `gpu` partition, which may be a list such as
-  `A100,V100` so SLURM places the job wherever it can start first.
+- **GPU (fallback)** — cells that train an autoencoder (`pipeline == "ae"`) or use an
+  embedding extractor (`extractor in {"sbert", "codet5"}`) → the `gpu` partition, which may be
+  a list such as `A100,V100` so SLURM places the job wherever it can start first.
 - **GPU (A100-only)** — cells whose extractor or `pipeline:extractor` is listed in
   `force_a100` (pinned for VRAM) → the `A100` partition only.
 

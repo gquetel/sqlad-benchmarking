@@ -15,6 +15,7 @@ from collections.abc import Callable
 from sklearn.base import TransformerMixin
 
 from mlops_sqldetect.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
+from mlops_sqldetect.features.codet5 import CodeT5Extractor
 from mlops_sqldetect.features.countvect import CountVectorizerExtractor
 from mlops_sqldetect.features.li import LiExtractor, extract_li_features
 from mlops_sqldetect.features.loginov import LoginovExtractor, extract_loginov_features
@@ -26,6 +27,7 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "cv": CountVectorizerExtractor,
     "sbert": SecureBertExtractor,
     "loginov": LoginovExtractor,
+    "codet5": CodeT5Extractor,
 }
 
 # Default extractor used when a caller does not specify one.
@@ -38,6 +40,7 @@ EXTRACTOR_LABELS: dict[str, str] = {
     "cv": "CountVectorizer",
     "sbert": "SecureBERT",
     "loginov": "Loginov",
+    "codet5": "CodeT5+",
 }
 
 
@@ -60,6 +63,7 @@ __all__ = [
     "EXTRACTORS",
     "EXTRACTOR_LABELS",
     "CachingExtractor",
+    "CodeT5Extractor",
     "CountVectorizerExtractor",
     "LiExtractor",
     "LoginovExtractor",
