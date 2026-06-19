@@ -48,14 +48,15 @@ def test_scaler_for_routes_per_extractor():
     """Each extractor must be paired with the scaler its feature space needs.
     """
     # cv (raw counts) and sbert (tanh-bounded embeddings) go to OCSVM/LOF unscaled;
-    # only Li dense features are standardised.
+    # the Li and Loginov dense features are standardised.
     assert isinstance(_scaler_for("cv"), FunctionTransformer)
     assert isinstance(_scaler_for("sbert"), FunctionTransformer)
     assert isinstance(_scaler_for("li"), StandardScaler)
+    assert isinstance(_scaler_for("loginov"), StandardScaler)
 
 
 @pytest.mark.parametrize("head", ["ocsvm", "lof"])
-@pytest.mark.parametrize("extractor", ["li", "cv", pytest.param("sbert", marks=pytest.mark.slow)])
+@pytest.mark.parametrize("extractor", ["li", "loginov", "cv", pytest.param("sbert", marks=pytest.mark.slow)])
 def test_sklearn_heads_rank_attacks_above_normals(head, extractor):
     """End-to-end smoke test of the OCSVM/LOF heads across every extractor.
 
@@ -74,7 +75,7 @@ def test_sklearn_heads_rank_attacks_above_normals(head, extractor):
     assert roc_auc_score(df_test["label"], scores) >= 0.9
 
 
-@pytest.mark.parametrize("extractor", ["li", "cv", pytest.param("sbert", marks=pytest.mark.slow)])
+@pytest.mark.parametrize("extractor", ["li", "loginov", "cv", pytest.param("sbert", marks=pytest.mark.slow)])
 def test_ae_sparse_safe_path_runs(extractor):
     """The autoencoder must train and score over each extractor's matrix type.
 

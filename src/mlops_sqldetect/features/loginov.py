@@ -1,0 +1,234 @@
+"""Loginov et al. hand-crafted SQL feature extractor.
+
+Produces a fixed-width 9-dim numeric matrix from a column of raw SQL queries.
+Each query is tokenised twice (special chars treated as separators, then with
+``+`` kept) and tokens are classified as SQL keyword / alphabetic / numeric /
+mixed. Unlike Li this extractor is *stateful*: the set of "valid" special-char
+substrings is learned at ``fit`` time from the training queries, and feature 1
+counts substrings absent from that set (anomalous punctuation).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+
+import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.utils.validation import check_is_fitted
+
+# Union of MySQL reserved keywords and built-in function names (upper-cased),
+# ported from the reference constants module. Used to flag keyword tokens.
+_SQL_KEYWORDS: frozenset[str] = frozenset({
+    "!", "ABS", "ACCESSIBLE", "ACOS", "ADD", "ADDDATE", "ADDTIME", "AES_DECRYPT", "AES_ENCRYPT",
+    "ALL", "ALTER", "ANALYZE", "AND", "ANY_VALUE", "AS", "ASC", "ASCII", "ASENSITIVE", "ASIN",
+    "ASYNCHRONOUS_CONNECTION_FAILOVER_ADD_MANAGED", "ASYNCHRONOUS_CONNECTION_FAILOVER_ADD_SOURCE",
+    "ASYNCHRONOUS_CONNECTION_FAILOVER_DELETE_MANAGED",
+    "ASYNCHRONOUS_CONNECTION_FAILOVER_DELETE_SOURCE", "ASYNCHRONOUS_CONNECTION_FAILOVER_RESET",
+    "ATAN", "ATAN2", "AVG", "BEFORE", "BENCHMARK", "BETWEEN", "BIGINT", "BIN", "BINARY",
+    "BIN_TO_UUID", "BIT_AND", "BIT_COUNT", "BIT_LENGTH", "BIT_OR", "BIT_XOR", "BLOB", "BOTH", "BY",
+    "CALL", "CAN_ACCESS_COLUMN", "CAN_ACCESS_DATABASE", "CAN_ACCESS_TABLE", "CAN_ACCESS_USER",
+    "CAN_ACCESS_VIEW", "CASCADE", "CASE", "CAST", "CEIL", "CEILING", "CHANGE", "CHAR", "CHARACTER",
+    "CHARACTER_LENGTH", "CHARSET", "CHAR_LENGTH", "CHECK", "COALESCE", "COERCIBILITY", "COLLATE",
+    "COLLATION", "COLUMN", "COMPRESS", "CONCAT", "CONCAT_WS", "CONDITION", "CONNECTION_ID",
+    "CONSTRAINT", "CONTINUE", "CONV", "CONVERT", "CONVERT_TZ", "COS", "COT", "COUNT",
+    "COUNT_DISTINCT", "CRC32", "CREATE", "CROSS", "CUME_DIST", "CURDATE", "CURRENT_DATE",
+    "CURRENT_ROLE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "CURRENT_USER", "CURSOR", "CURTIME",
+    "DATABASE", "DATABASES", "DATE", "DATEDIFF", "DATE_ADD", "DATE_FORMAT", "DATE_SUB", "DAY",
+    "DAYNAME", "DAYOFMONTH", "DAYOFWEEK", "DAYOFYEAR", "DAY_HOUR", "DAY_MICROSECOND", "DAY_MINUTE",
+    "DAY_SECOND", "DEC", "DECIMAL", "DECLARE", "DEFAULT", "DEGREES", "DELAYED", "DELETE",
+    "DENSE_RANK", "DESC", "DESCRIBE", "DETERMINISTIC", "DISTINCT", "DISTINCTROW", "DIV", "DOUBLE",
+    "DROP", "DUAL", "EACH", "ELSE", "ELSEIF", "ELT", "EMPTY", "ENCLOSED", "ESCAPED", "EXCEPT",
+    "EXISTS", "EXIT", "EXP", "EXPLAIN", "EXPORT_SET", "EXTRACT", "EXTRACTVALUE", "FALSE", "FETCH",
+    "FIELD", "FIND_IN_SET", "FIRST_VALUE", "FLOAT", "FLOAT4", "FLOAT8", "FLOOR", "FOR", "FORCE",
+    "FOREIGN", "FORMAT", "FORMAT_BYTES", "FORMAT_PICO_TIME", "FOUND_ROWS", "FROM", "FROM_BASE64",
+    "FROM_DAYS", "FROM_UNIXTIME", "FULLTEXT", "FUNCTION", "GENERATED", "GEOMCOLLECTION",
+    "GEOMETRYCOLLECTION", "GET", "GET_FORMAT", "GET_LOCK", "GRANT", "GREATEST", "GROUP",
+    "GROUPING", "GROUPS", "GROUP_CONCAT", "GROUP_REPLICATION_DISABLE_MEMBER_ACTION",
+    "GROUP_REPLICATION_ENABLE_MEMBER_ACTION", "GROUP_REPLICATION_GET_COMMUNICATION_PROTOCOL",
+    "GROUP_REPLICATION_GET_WRITE_CONCURRENCY", "GROUP_REPLICATION_RESET_MEMBER_ACTIONS",
+    "GROUP_REPLICATION_SET_AS_PRIMARY", "GROUP_REPLICATION_SET_COMMUNICATION_PROTOCOL",
+    "GROUP_REPLICATION_SET_WRITE_CONCURRENCY", "GROUP_REPLICATION_SWITCH_TO_MULTI_PRIMARY_MODE",
+    "GROUP_REPLICATION_SWITCH_TO_SINGLE_PRIMARY_MODE", "HAVING", "HEX", "HIGH_PRIORITY", "HOUR",
+    "HOUR_MICROSECOND", "HOUR_MINUTE", "HOUR_SECOND", "ICU_VERSION", "IF", "IFNULL", "IGNORE",
+    "IN", "INDEX", "INET_ATON", "INET_NTOA", "INFILE", "INNER", "INOUT", "INSENSITIVE", "INSERT",
+    "INSTR", "INT", "INT1", "INT2", "INT3", "INT4", "INT8", "INTEGER", "INTERNAL_AUTO_INCREMENT",
+    "INTERNAL_AVG_ROW_LENGTH", "INTERNAL_CHECKSUM", "INTERNAL_CHECK_TIME", "INTERNAL_DATA_FREE",
+    "INTERNAL_DATA_LENGTH", "INTERNAL_DD_CHAR_LENGTH", "INTERNAL_GET_COMMENT_OR_ERROR",
+    "INTERNAL_GET_ENABLED_ROLE_JSON", "INTERNAL_GET_HOSTNAME",
+    "INTERNAL_GET_VIEW_WARNING_OR_ERROR", "INTERNAL_INDEX_COLUMN_CARDINALITY",
+    "INTERNAL_INDEX_LENGTH", "INTERNAL_IS_ENABLED_ROLE", "INTERNAL_IS_MANDATORY_ROLE",
+    "INTERNAL_KEYS_DISABLED", "INTERNAL_MAX_DATA_LENGTH", "INTERNAL_TABLE_ROWS",
+    "INTERNAL_UPDATE_TIME", "INTERSECT", "INTERVAL", "INTO", "IO_AFTER_GTIDS", "IO_BEFORE_GTIDS",
+    "IS", "ISNULL", "IS_FREE_LOCK", "IS_NOT", "IS_NOT_NULL", "IS_NULL", "IS_USED_LOCK", "IS_UUID",
+    "ITERATE", "JOIN", "JSON_ARRAY", "JSON_ARRAYAGG", "JSON_ARRAY_APPEND", "JSON_ARRAY_INSERT",
+    "JSON_CONTAINS", "JSON_CONTAINS_PATH", "JSON_DEPTH", "JSON_EXTRACT", "JSON_INSERT",
+    "JSON_KEYS", "JSON_LENGTH", "JSON_MERGE", "JSON_MERGE_PATCH", "JSON_MERGE_PRESERVE",
+    "JSON_OBJECT", "JSON_OBJECTAGG", "JSON_OVERLAPS", "JSON_PRETTY", "JSON_QUOTE", "JSON_REMOVE",
+    "JSON_REPLACE", "JSON_SCHEMA_VALID", "JSON_SCHEMA_VALIDATION_REPORT", "JSON_SEARCH",
+    "JSON_SET", "JSON_STORAGE_FREE", "JSON_STORAGE_SIZE", "JSON_TABLE", "JSON_TYPE",
+    "JSON_UNQUOTE", "JSON_VALID", "JSON_VALUE", "KEY", "KEYS", "KILL", "LAG", "LAST_DAY",
+    "LAST_INSERT_ID", "LAST_VALUE", "LATERAL", "LCASE", "LEAD", "LEADING", "LEAST", "LEAVE",
+    "LEFT", "LENGTH", "LIKE", "LIMIT", "LINEAR", "LINES", "LINESTRING", "LN", "LOAD", "LOAD_FILE",
+    "LOCALTIME", "LOCALTIMESTAMP", "LOCATE", "LOCK", "LOG", "LOG10", "LOG2", "LONG", "LONGBLOB",
+    "LONGTEXT", "LOOP", "LOWER", "LOW_PRIORITY", "LPAD", "LTRIM", "MAKEDATE", "MAKETIME",
+    "MAKE_SET", "MASTER_POS_WAIT", "MATCH", "MAX", "MAXVALUE", "MBRCONTAINS", "MBRCOVEREDBY",
+    "MBRCOVERS", "MBRDISJOINT", "MBREQUALS", "MBRINTERSECTS", "MBROVERLAPS", "MBRTOUCHES",
+    "MBRWITHIN", "MD5", "MEDIUMBLOB", "MEDIUMINT", "MEDIUMTEXT", "MEMBER OF", "MICROSECOND", "MID",
+    "MIDDLEINT", "MIN", "MINUTE", "MINUTE_MICROSECOND", "MINUTE_SECOND", "MOD", "MODIFIES",
+    "MONTH", "MONTHNAME", "MULTILINESTRING", "MULTIPOINT", "MULTIPOLYGON", "NAME_CONST", "NATURAL",
+    "NOT", "NOT BETWEEN", "NOT EXISTS", "NOT IN", "NOT LIKE", "NOT REGEXP", "NOW",
+    "NO_WRITE_TO_BINLOG", "NTH_VALUE", "NTILE", "NULL", "NULLIF", "NUMERIC", "OCT", "OCTET_LENGTH",
+    "OF", "ON", "OPTIMIZE", "OPTIMIZER_COSTS", "OPTION", "OPTIONALLY", "OR", "ORD", "ORDER", "OUT",
+    "OUTER", "OUTFILE", "OVER", "PARTITION", "PERCENT_RANK", "PERIOD_ADD", "PERIOD_DIFF", "PI",
+    "POINT", "POLYGON", "POSITION", "POW", "POWER", "PRECISION", "PRIMARY", "PROCEDURE",
+    "PS_CURRENT_THREAD_ID", "PS_THREAD_ID", "PURGE", "QUARTER", "QUOTE", "RADIANS", "RAND",
+    "RANDOM_BYTES", "RANGE", "RANK", "READ", "READS", "READ_WRITE", "REAL", "RECURSIVE",
+    "REFERENCES", "REGEXP", "REGEXP_INSTR", "REGEXP_LIKE", "REGEXP_REPLACE", "REGEXP_SUBSTR",
+    "RELEASE", "RELEASE_ALL_LOCKS", "RELEASE_LOCK", "RENAME", "REPEAT", "REPLACE", "REQUIRE",
+    "RESIGNAL", "RESTRICT", "RETURN", "REVERSE", "REVOKE", "RIGHT", "RLIKE", "ROLES_GRAPHML",
+    "ROUND", "ROW", "ROWS", "ROW_COUNT", "ROW_NUMBER", "RPAD", "RTRIM", "SCHEMA", "SCHEMAS",
+    "SECOND", "SECOND_MICROSECOND", "SEC_TO_TIME", "SELECT", "SENSITIVE", "SEPARATOR",
+    "SESSION_USER", "SET", "SHA", "SHA1", "SHA2", "SHOW", "SIGN", "SIGNAL", "SIN", "SLEEP",
+    "SMALLINT", "SOUNDEX", "SOUNDS LIKE", "SOURCE_POS_WAIT", "SPACE", "SPATIAL", "SPECIFIC", "SQL",
+    "SQLEXCEPTION", "SQLSTATE", "SQLWARNING", "SQL_BIG_RESULT", "SQL_CALC_FOUND_ROWS",
+    "SQL_SMALL_RESULT", "SQRT", "SSL", "STARTING", "STATEMENT_DIGEST", "STATEMENT_DIGEST_TEXT",
+    "STD", "STDDEV", "STDDEV_POP", "STDDEV_SAMP", "STORED", "STRAIGHT_JOIN", "STRCMP",
+    "STR_TO_DATE", "ST_AREA", "ST_ASBINARY", "ST_ASGEOJSON", "ST_ASTEXT", "ST_BUFFER",
+    "ST_BUFFER_STRATEGY", "ST_CENTROID", "ST_COLLECT", "ST_CONTAINS", "ST_CONVEXHULL",
+    "ST_CROSSES", "ST_DIFFERENCE", "ST_DIMENSION", "ST_DISJOINT", "ST_DISTANCE",
+    "ST_DISTANCE_SPHERE", "ST_ENDPOINT", "ST_ENVELOPE", "ST_EQUALS", "ST_EXTERIORRING",
+    "ST_FRECHETDISTANCE", "ST_GEOHASH", "ST_GEOMCOLLFROMTEXT", "ST_GEOMCOLLFROMWKB",
+    "ST_GEOMETRYN", "ST_GEOMETRYTYPE", "ST_GEOMFROMGEOJSON", "ST_GEOMFROMTEXT", "ST_GEOMFROMWKB",
+    "ST_HAUSDORFFDISTANCE", "ST_INTERIORRINGN", "ST_INTERSECTION", "ST_INTERSECTS", "ST_ISCLOSED",
+    "ST_ISEMPTY", "ST_ISSIMPLE", "ST_ISVALID", "ST_LATFROMGEOHASH", "ST_LATITUDE", "ST_LENGTH",
+    "ST_LINEFROMTEXT", "ST_LINEFROMWKB", "ST_LINEINTERPOLATEPOINT", "ST_LINEINTERPOLATEPOINTS",
+    "ST_LONGFROMGEOHASH", "ST_LONGITUDE", "ST_MAKEENVELOPE", "ST_MLINEFROMTEXT", "ST_MLINEFROMWKB",
+    "ST_MPOINTFROMTEXT", "ST_MPOINTFROMWKB", "ST_MPOLYFROMTEXT", "ST_MPOLYFROMWKB",
+    "ST_NUMGEOMETRIES", "ST_NUMINTERIORRINGS", "ST_NUMPOINTS", "ST_OVERLAPS", "ST_POINTATDISTANCE",
+    "ST_POINTFROMGEOHASH", "ST_POINTFROMTEXT", "ST_POINTFROMWKB", "ST_POINTN", "ST_POLYFROMTEXT",
+    "ST_POLYFROMWKB", "ST_SIMPLIFY", "ST_SRID", "ST_STARTPOINT", "ST_SWAPXY", "ST_SYMDIFFERENCE",
+    "ST_TOUCHES", "ST_TRANSFORM", "ST_UNION", "ST_VALIDATE", "ST_WITHIN", "ST_X", "ST_Y",
+    "SUBDATE", "SUBSTR", "SUBSTRING", "SUBSTRING_INDEX", "SUBTIME", "SUM", "SYSDATE", "SYSTEM",
+    "SYSTEM_USER", "TABLE", "TAN", "TERMINATED", "THEN", "TIME", "TIMEDIFF", "TIMESTAMP",
+    "TIMESTAMPADD", "TIMESTAMPDIFF", "TIME_FORMAT", "TIME_TO_SEC", "TINYBLOB", "TINYINT",
+    "TINYTEXT", "TO", "TO_BASE64", "TO_DAYS", "TO_SECONDS", "TRAILING", "TRIGGER", "TRIM", "TRUE",
+    "TRUNCATE", "UCASE", "UNCOMPRESS", "UNCOMPRESSED_LENGTH", "UNDO", "UNHEX", "UNION", "UNIQUE",
+    "UNIX_TIMESTAMP", "UNLOCK", "UNSIGNED", "UPDATE", "UPDATEXML", "UPPER", "USAGE", "USE", "USER",
+    "USING", "UTC_DATE", "UTC_TIME", "UTC_TIMESTAMP", "UUID", "UUID_SHORT", "UUID_TO_BIN",
+    "VALIDATE_PASSWORD_STRENGTH", "VALUES", "VARBINARY", "VARCHAR", "VARCHARACTER", "VARIANCE",
+    "VARYING", "VAR_POP", "VAR_SAMP", "VERSION", "VIRTUAL", "WAIT_FOR_EXECUTED_GTID_SET", "WEEK",
+    "WEEKDAY", "WEEKOFYEAR", "WEIGHT_STRING", "WHEN", "WHERE", "WHILE", "WINDOW", "WITH", "WRITE",
+    "XOR", "YEAR", "YEARWEEK", "YEAR_MONTH", "ZEROFILL",
+})
+
+_SCHAR_RE = re.compile(r"[^a-zA-Z0-9\s]+")
+_S2_SEP_RE = re.compile(r"[\s+]+")
+_S2_STRIP_RE = re.compile(r"[^a-zA-Z0-9\s+]+")
+
+FEATURE_NAMES: tuple[str, ...] = (
+    "n_anomalous_schars",
+    "s1_n_keywords",
+    "s1_n_alpha",
+    "s1_n_numeric",
+    "s1_n_mixed",
+    "s2_n_keywords",
+    "s2_n_alpha",
+    "s2_n_numeric",
+    "s2_n_mixed",
+)
+
+
+def _extract_schars(query: str) -> list[str]:
+    """Return the special-character substrings of ``query`` (non-alnum, non-space)."""
+    return _SCHAR_RE.findall(query)
+
+
+def _classify_tokens(tokens: list[str]) -> tuple[int, int, int, int]:
+    """Count keyword, pure-alpha, pure-numeric and mixed alphanumeric tokens."""
+    n_kw = n_alpha = n_num = n_mix = 0
+    for tok in tokens:
+        if not tok:
+            continue
+        if tok.upper() in _SQL_KEYWORDS:
+            n_kw += 1
+        elif tok.isalpha():
+            n_alpha += 1
+        elif tok.isnumeric():
+            n_num += 1
+        elif any(c.isalpha() for c in tok) and any(c.isdigit() for c in tok):
+            n_mix += 1
+    return n_kw, n_alpha, n_num, n_mix
+
+
+def extract_loginov_features(query: str, valid_schars: frozenset[str]) -> dict[str, int]:
+    """Extract the 9 Loginov features from a single SQL query.
+
+    Args:
+        query: Raw SQL query string.
+        valid_schars: Special-char substrings seen in training; substrings outside
+            this set are counted as anomalous (feature 1).
+
+    Returns:
+        Dict mapping each name in :data:`FEATURE_NAMES` to an int value.
+    """
+    f1 = sum(1 for sc in _extract_schars(query) if sc not in valid_schars)
+
+    # s1: special chars become separators; s2: keep ``+`` so it can join tokens.
+    s1_tokens = [t for t in _SCHAR_RE.sub(" ", query).split() if t]
+    f2, f3, f4, f5 = _classify_tokens(s1_tokens)
+
+    s2 = _S2_STRIP_RE.sub("", query)
+    s2_tokens = [t for t in _S2_SEP_RE.split(s2) if t]
+    f6, f7, f8, f9 = _classify_tokens(s2_tokens)
+
+    return dict(zip(FEATURE_NAMES, (f1, f2, f3, f4, f5, f6, f7, f8, f9), strict=True))
+
+
+def _as_queries(X) -> list[str]:  # noqa: N803
+    if isinstance(X, pd.DataFrame):
+        return X["full_query"].astype(str).tolist()
+    return [str(q) for q in X]
+
+
+class LoginovExtractor(BaseEstimator, TransformerMixin):
+    """Sklearn transformer producing the 9-dim Loginov feature matrix.
+
+    Stateful: ``fit`` learns ``valid_schars_`` (the special-char substrings seen in
+    the training queries) so it must be fitted before ``transform``. ``transform``
+    accepts a DataFrame with a ``full_query`` column or any iterable of strings and
+    returns a ``(n_samples, 9)`` float32 ndarray ordered as :data:`FEATURE_NAMES`.
+    """
+
+    def fit(self, X, y=None) -> "LoginovExtractor":  # noqa: N803
+        seen: set[str] = set()
+        for q in _as_queries(X):
+            seen.update(_extract_schars(q))
+        self.valid_schars_ = frozenset(seen)
+        return self
+
+    def transform(self, X) -> np.ndarray:  # noqa: N803
+        check_is_fitted(self, "valid_schars_")
+        rows = [extract_loginov_features(q, self.valid_schars_) for q in _as_queries(X)]
+        return np.asarray(
+            [[r[name] for name in FEATURE_NAMES] for r in rows],
+            dtype=np.float32,
+        )
+
+    def get_feature_names_out(self, input_features=None) -> np.ndarray:
+        return np.asarray(FEATURE_NAMES, dtype=object)
+
+    def cache_key_state(self) -> str:
+        """Fold the learned ``valid_schars_`` into the cache key (see CachingExtractor).
+
+        Feature 1 depends on the fitted set, so the key must change when it does.
+        """
+        schars = getattr(self, "valid_schars_", None)
+        if schars is None:
+            return ""
+        h = hashlib.blake2b(digest_size=16)
+        for sc in sorted(schars):
+            h.update(sc.encode("utf-8", "surrogatepass"))
+            h.update(b"\0")
+        return h.hexdigest()

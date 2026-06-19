@@ -26,7 +26,7 @@ PAPER_FONT = "CMU Serif"
 
 # Combined-figure styling: extractor sets the colour, pipeline sets the dash so a
 # (pipeline, extractor) cell is identifiable from either axis of comparison.
-EXTRACTOR_COLORS = {"li": "#ffd54f", "sbert": "#7E57C2", "cv": "#6490f6"}
+EXTRACTOR_COLORS = {"li": "#ffd54f", "sbert": "#7E57C2", "cv": "#6490f6", "loginov": "#26a69a"}
 PIPELINE_DASHES = {"ae": "solid", "lof": "dash", "ocsvm": "dot"}
 
 

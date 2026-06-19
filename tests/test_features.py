@@ -13,6 +13,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from mlops_sqldetect.features import EXTRACTORS, build_extractor
 from mlops_sqldetect.features.cache import CachingExtractor
 from mlops_sqldetect.features.countvect import CountVectorizerExtractor
+from mlops_sqldetect.features.loginov import FEATURE_NAMES, LoginovExtractor, extract_loginov_features
 
 
 def _frame() -> pd.DataFrame:
@@ -28,7 +29,7 @@ def _frame() -> pd.DataFrame:
 
 
 def test_registry_exposes_all_three_extractors():
-    assert set(EXTRACTORS) == {"li", "cv", "sbert"}
+    assert set(EXTRACTORS) == {"li", "cv", "sbert", "loginov"}
 
 
 def test_build_extractor_unknown_name_raises():
@@ -60,6 +61,49 @@ def test_li_extractor_is_dense_fixed_width():
     assert isinstance(matrix, np.ndarray)
     assert matrix.shape[0] == 3
     assert matrix.dtype == np.float32
+
+
+# ----- Loginov ---------------------------------------------------------------
+
+
+def test_loginov_features_keys_and_token_counts():
+    # With nothing whitelisted, every special-char group counts as anomalous.
+    feats = extract_loginov_features("select * from t where id = 1", frozenset())
+    assert set(feats) == set(FEATURE_NAMES)
+    # '*' and '=' are the two special-char groups.
+    assert feats["n_anomalous_schars"] == 2
+    # SELECT / FROM / WHERE are keywords; t / id are alpha; 1 is numeric.
+    assert feats["s1_n_keywords"] == 3
+    assert feats["s1_n_alpha"] == 2
+    assert feats["s1_n_numeric"] == 1
+    assert feats["s1_n_mixed"] == 0
+
+
+def test_loginov_is_stateful_and_dense():
+    df = _frame()
+    ext = LoginovExtractor()
+    # transform before fit must fail: valid_schars is learned at fit time.
+    with pytest.raises(Exception):  # noqa: B017 - sklearn raises NotFittedError
+        ext.transform(df)
+    matrix = ext.fit(df).transform(df)
+    assert isinstance(matrix, np.ndarray)
+    assert matrix.shape == (len(df), len(FEATURE_NAMES))
+    assert matrix.dtype == np.float32
+
+
+def test_loginov_flags_special_chars_unseen_in_training():
+    # Training queries only ever use '=' as punctuation; a '#' in the test query
+    # is then an anomalous special-char group.
+    ext = LoginovExtractor().fit(pd.DataFrame({"full_query": ["select a from t where id = 1"]}))
+    out = ext.transform(pd.DataFrame({"full_query": ["select a from t where id = 1 or 1=1#"]}))
+    assert out[0, 0] == 1  # n_anomalous_schars is the first column
+
+
+def test_loginov_cache_key_tracks_learned_state():
+    a = LoginovExtractor().fit(pd.DataFrame({"full_query": ["select a from t where id = 1"]}))
+    b = LoginovExtractor().fit(pd.DataFrame({"full_query": ["select a from t where id like '%x%'"]}))
+    # Different training punctuation -> different state -> different cache key.
+    assert a.cache_key_state() != b.cache_key_state()
 
 
 # ----- CachingExtractor ------------------------------------------------------

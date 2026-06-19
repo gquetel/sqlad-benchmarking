@@ -156,7 +156,7 @@ def submit(
     dataset: Annotated[str, typer.Option(help="Dataset family: superviz26 or superviz25.")] = "superviz26",
     suite: Annotated[str, typer.Option(help="Suite name (e.g. in_domain, lodo, all).")] = "all",
     pipelines: Annotated[str, typer.Option(help="Comma-separated decision-head names (ocsvm, lof, ae).")] = "ocsvm,ae",
-    extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names (li, cv, sbert).")] = "li",
+    extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names (li, loginov, cv, sbert).")] = "li",
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     target_fpr: Annotated[float, typer.Option(help="Target false-positive rate for the calibrated threshold.")] = 0.001,
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,

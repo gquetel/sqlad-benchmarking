@@ -1,6 +1,6 @@
 # mlops_sqldetect
 
-An MLOps pipeline for one-class SQL injection detection: anomaly-detection heads (One-Class SVM, LOF, AutoEncoder) over pluggable SQL feature extractors (Li hand-crafted features, CountVectorizer, SecureBERT), evaluated on the Superviz SQL datasets with MLflow experiment tracking.
+An MLOps pipeline for one-class SQL injection detection: anomaly-detection heads (One-Class SVM, LOF, AutoEncoder) over pluggable SQL feature extractors (Li hand-crafted features, Loginov hand-crafted features, CountVectorizer, SecureBERT), evaluated on the Superviz SQL datasets with MLflow experiment tracking.
 
 ## Opinionated 
 
@@ -72,7 +72,7 @@ The directory structure of the project looks like this:
 │       ├── detector_model.py  # MLflow model-from-code wrapper
 │       ├── evaluate.py        # CLI: score a saved pipeline on a CSV
 │       ├── evaluate_suite.py  # CLI: run an evaluation grid + MLflow logging
-│       ├── features/          # Feature extractors (li, countvect, securebert)
+│       ├── features/          # Feature extractors (li, loginov, countvect, securebert)
 │       ├── metrics.py         # Threshold calibration and metric computation
 │       ├── model.py           # Detector heads (OCSVM, LOF, AutoEncoder) + factory
 │       ├── tracking.py        # MLflow configuration and helpers

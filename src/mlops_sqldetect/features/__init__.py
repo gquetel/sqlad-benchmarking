@@ -17,6 +17,7 @@ from sklearn.base import TransformerMixin
 from mlops_sqldetect.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
 from mlops_sqldetect.features.countvect import CountVectorizerExtractor
 from mlops_sqldetect.features.li import LiExtractor, extract_li_features
+from mlops_sqldetect.features.loginov import LoginovExtractor, extract_loginov_features
 from mlops_sqldetect.features.securebert import SecureBertExtractor
 
 # Short name -> zero-arg factory returning a fresh, unfitted extractor.
@@ -24,6 +25,7 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "li": LiExtractor,
     "cv": CountVectorizerExtractor,
     "sbert": SecureBertExtractor,
+    "loginov": LoginovExtractor,
 }
 
 # Default extractor used when a caller does not specify one.
@@ -31,7 +33,12 @@ DEFAULT_EXTRACTOR = "li"
 
 # Human-readable labels for logs and MLflow run names. Acronyms stay uppercase;
 # labels mirror their reference works (Li et al., SecureBERT).
-EXTRACTOR_LABELS: dict[str, str] = {"li": "Li", "cv": "CountVectorizer", "sbert": "SecureBERT"}
+EXTRACTOR_LABELS: dict[str, str] = {
+    "li": "Li",
+    "cv": "CountVectorizer",
+    "sbert": "SecureBERT",
+    "loginov": "Loginov",
+}
 
 
 def build_extractor(name: str = DEFAULT_EXTRACTOR, cache_dir: str | os.PathLike | None = None) -> TransformerMixin:
@@ -55,8 +62,10 @@ __all__ = [
     "CachingExtractor",
     "CountVectorizerExtractor",
     "LiExtractor",
+    "LoginovExtractor",
     "SecureBertExtractor",
     "build_extractor",
     "extract_li_features",
+    "extract_loginov_features",
     "resolve_cache_dir",
 ]
