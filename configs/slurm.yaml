@@ -7,12 +7,19 @@ cpu:
   time: "08:00:00"
 
 gpu:
-  partition: A100,V100   # fallback list: SLURM starts on whichever frees first
   gres: gpu:1
   cpus_per_task: 32
   mem: 64G
   time: "08:00:00"
+  # GPU partitions and their per-GPU VRAM. A cell runs on every partition whose VRAM meets its requirement.
+  partitions:
+    V100-16GB: 16
+    A30: 24
+    V100-32GB: 32
+    A100: 40  
+    A40: 46
 
-# Models pinned to A100 only (high VRAM usage). 
-# Accepts an extractor or a pipeline:extractor
-force_a100: []
+# Minimum per-GPU VRAM per cell, keyed by extractor or pipeline:extractor (the latter wins)
+min_vram_gb:
+  default: 0
+  codet5: 24

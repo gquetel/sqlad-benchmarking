@@ -11,17 +11,18 @@ scenarios become 8 jobs).
 class**. Cells are bucketed by their needs:
 
 - **CPU** — cells that need no GPU (e.g. `ocsvm/li`) → the `cpu` partition.
-- **GPU (fallback)** — cells that train an autoencoder (`pipeline == "ae"`) or use an
-  embedding extractor (`extractor in {"sbert", "codet5"}`) → the `gpu` partition, which may be
-  a list such as `A100,V100` so SLURM places the job wherever it can start first.
-- **GPU (A100-only)** — cells whose extractor or `pipeline:extractor` is listed in
-  `force_a100` (pinned for VRAM) → the `A100` partition only.
+- **GPU** — cells that train an autoencoder (`pipeline == "ae"`) or use an embedding
+  extractor (`extractor in {"sbert", "codet5"}`) → a GPU array whose partition list is the
+  GPU partitions with **enough VRAM** for that cell. Each cell's minimum comes from
+  `min_vram_gb` (keyed by `extractor` or `pipeline:extractor`, else `default`); partitions
+  are tried largest-VRAM first so cells prefer the fastest GPU. A hungry model like CodeT5+
+  (`codet5: 24`) is thus never scheduled on the 16 GB V100.
 
 Each array task runs one cell through `evaluate_suite` and writes its **own** per-cell CSV
 to `reports/{dataset}/cells/{pipeline}_{extractor}_{scenario}.csv` — so the parallel jobs
 never share a writer and a rerun simply overwrites its own file.
 
-Site settings (partitions, resources, `force_a100`) live in
+Site settings (partitions, resources, `min_vram_gb`) live in
 [`configs/slurm.yaml`](https://github.com/gquetel/mlops-sqldetect/blob/main/configs/slurm.yaml);
 the full `#SBATCH` header is baked into each generated script. Each job `cd`s into the repo
 and activates the uv `.venv` with `source .venv/bin/activate` on the compute node. That
@@ -29,10 +30,11 @@ and activates the uv `.venv` with `source .venv/bin/activate` on the compute nod
 filesystem; array tasks only activate it and never run `uv sync` concurrently (which would
 race on the shared `.venv`).
 
-!!! note "A100-first preference"
-    `--partition=A100,V100` lets SLURM pick whichever frees up first. A *strict* A100-first
-    preference requires the admin to give A100 a higher `PriorityTier`
-    (`scontrol show partition A100 | grep PriorityTier`); list order alone is not a guarantee.
+!!! note "Largest-VRAM-first preference"
+    The generated `--partition=A40,A100,V100-32GB,...` list lets SLURM pick whichever frees up
+    first. A *strict* largest-first preference requires the admin to give the bigger-GPU
+    partitions a higher `PriorityTier` (`scontrol show partition A40 | grep PriorityTier`);
+    list order alone is not a guarantee.
 
 ## Submitting
 

@@ -4,8 +4,9 @@ Maps SQL queries to 256-d dense embeddings using the code-domain model
 ``Salesforce/codet5p-110m-embedding`` (mirrors the reference ``codet5.py``).
 The model is pretrained, so ``fit`` is a no-op; the tokenizer/model are lazy-loaded
 on first use to keep ``build_extractor`` cheap and avoid the download in tests that
-never touch this extractor. Like SecureBERT it is GPU-only in practice (the SLURM
-submitter routes it to a GPU partition); disk caching is layered on externally via
+never touch this extractor. Like SecureBERT it is GPU-only in practice, and OOMs on a 16 GB
+V100, so the SLURM submitter pins it to GPUs with >16 GB VRAM (``min_vram_gb`` in
+``configs/slurm.yaml``); disk caching is layered on externally via
 :class:`~mlops_sqldetect.features.cache.CachingExtractor`.
 """
 

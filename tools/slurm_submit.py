@@ -3,10 +3,10 @@
 Each cell ``(scenario, pipeline, extractor)`` becomes one array task that runs through
 :func:`evaluate_suite` and writes its own per-cell CSV under ``reports/{dataset}/cells/``
 (no shared writer, no merge step). Cells needing a GPU (``pipeline == "ae"`` or an
-embedding extractor — ``sbert``/``codet5``) go to a GPU array on the config's partition list (A100 first,
-V100 fallback); cells whose extractor or ``pipeline:extractor`` is listed in ``force_a100``
-get an A100-only array; the rest go to a CPU array. Resources and the environment setup
-come from ``configs/slurm.yaml``.
+embedding extractor — ``sbert``/``codet5``) go to a GPU array whose partition list is the
+GPU partitions with enough VRAM for that cell (per-cell minimum from ``min_vram_gb``, so a
+hungry model like CodeT5+ skips the 16 GB V100); the rest go to a CPU array. Resources and
+the environment setup come from ``configs/slurm.yaml``.
 
 Usage:
     python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors li
@@ -45,34 +45,41 @@ ENV_SETUP = "source .venv/bin/activate"
 VENV_ACTIVATE = REPO_ROOT / ".venv" / "bin" / "activate"
 
 
-# GPU cells try A100 first then fall back to V100 via the config's partition list; cells
-# whose extractor or pipeline:extractor combo is pinned in force_a100 (VRAM) get A100 only.
-BUCKETS = ("gpu_a100", "gpu", "cpu")
-
-
 def _needs_gpu(cell: Cell) -> bool:
     """A cell needs a GPU when it trains an autoencoder or uses an embedding extractor (SecureBERT, CodeT5+)."""
     return cell.pipeline == "ae" or cell.extractor in ("sbert", "codet5")
 
 
-def _is_forced_a100(cell: Cell, cfg: dict) -> bool:
-    """A cell is pinned to A100 when its extractor or pipeline:extractor combo is in force_a100."""
-    forced = cfg.get("force_a100", [])
-    return cell.extractor in forced or f"{cell.pipeline}:{cell.extractor}" in forced
+def _min_vram(cell: Cell, cfg: dict) -> int:
+    """Per-GPU VRAM (GB) a cell needs: pipeline:extractor overrides extractor, else the default."""
+    reqs = cfg.get("min_vram_gb", {})
+    key = f"{cell.pipeline}:{cell.extractor}"
+    return int(reqs.get(key, reqs.get(cell.extractor, reqs.get("default", 0))))
+
+
+def _eligible_partitions(cfg: dict, req: int) -> list[str]:
+    """GPU partitions meeting req GB of VRAM, largest-VRAM first so cells prefer the fastest GPU."""
+    parts = sorted(cfg["gpu"]["partitions"].items(), key=lambda kv: kv[1], reverse=True)
+    eligible = [name for name, gb in parts if gb >= req]
+    if not eligible:
+        raise typer.BadParameter(f"no GPU partition has >= {req} GB VRAM; check configs/slurm.yaml.")
+    return eligible
 
 
 def _bucket(cell: Cell, cfg: dict) -> str:
-    """Resource bucket for a cell: cpu, gpu (A100/V100 fallback), or gpu_a100 (pinned)."""
+    """Bucket label for a cell's array: cpu, gpu (any GPU), or gpu-{req}gb for VRAM-pinned cells."""
     if not _needs_gpu(cell):
         return "cpu"
-    return "gpu_a100" if _is_forced_a100(cell, cfg) else "gpu"
+    req = _min_vram(cell, cfg)
+    return "gpu" if req <= 0 else f"gpu-{req}gb"
 
 
-def _resolve_resources(cfg: dict, bucket: str) -> dict:
-    """Resource block for a bucket; gpu_a100 reuses the gpu block but pins the partition to A100."""
-    res = dict(cfg["cpu"] if bucket == "cpu" else cfg["gpu"])
-    if bucket == "gpu_a100":
-        res["partition"] = "A100"
+def _resolve_resources(cfg: dict, cell: Cell) -> dict:
+    """SBATCH resource block for a cell: the cpu block, or the gpu block with a VRAM-filtered partition list."""
+    if not _needs_gpu(cell):
+        return dict(cfg["cpu"])
+    res = {k: v for k, v in cfg["gpu"].items() if k != "partitions"}
+    res["partition"] = ",".join(_eligible_partitions(cfg, _min_vram(cell, cfg)))
     return res
 
 
@@ -92,6 +99,7 @@ def _write_job_script(
     path: Path,
     *,
     bucket: str,
+    res: dict,
     cfg: dict,
     dataset: str,
     manifest: Path,
@@ -103,7 +111,6 @@ def _write_job_script(
     limit: int | None,
 ) -> None:
     """Generate a self-contained array script: full #SBATCH header, then dispatch one cell per index."""
-    res = _resolve_resources(cfg, bucket)
     directives = [
         f"#SBATCH --job-name=sqldetect-{bucket}",
         f"#SBATCH --output={log_pattern}",
@@ -207,16 +214,15 @@ def submit(
     for cell in cells:
         buckets.setdefault(_bucket(cell, cfg), []).append(cell)
     job_ids: list[str] = []
-    for bucket in BUCKETS:
-        group_cells = buckets.get(bucket, [])
-        if not group_cells:
-            continue
+    for bucket, group_cells in sorted(buckets.items()):
+        res = _resolve_resources(cfg, group_cells[0])
         manifest = submit_dir / f"cells_{bucket}.jsonl"
         script = submit_dir / f"eval_cell_{bucket}.sbatch"
         _write_manifest(manifest, group_cells)
         _write_job_script(
             script,
             bucket=bucket,
+            res=res,
             cfg=cfg,
             dataset=dataset,
             manifest=manifest,
@@ -227,7 +233,7 @@ def submit(
             track=track,
             limit=limit,
         )
-        logger.info(f"{bucket}: {len(group_cells)} cells (partition {_resolve_resources(cfg, bucket)['partition']})")
+        logger.info(f"{bucket}: {len(group_cells)} cells (partition {res['partition']})")
         job_id = _submit_array(script, dry_run)
         if job_id:
             job_ids.append(job_id)

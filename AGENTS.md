@@ -33,8 +33,9 @@ versions or regenerate the lock without explicit instruction.
   on any of them to see options.
 * To parallelize the evaluation grid on a SLURM cluster, `tools.slurm_submit` fans each
   `(scenario, pipeline, extractor)` cell out as a job array (one array per resource class:
-  `cpu`, `gpu` for `ae`/`sbert` cells on a partition list like `A100,V100`, and an A100-only
-  array for cells matched by `force_a100`). Site settings live in `configs/slurm.yaml`; jobs
+  `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough
+  VRAM for it, from `min_vram_gb` in the config, so e.g. CodeT5+ skips the 16 GB V100). Site
+  settings live in `configs/slurm.yaml`; jobs
   activate the uv `.venv` (built once on the login node). Each cell writes its row to `reports/{dataset}/cells/*.csv`;
   MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --dry-run`.
