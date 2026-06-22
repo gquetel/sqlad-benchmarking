@@ -24,6 +24,7 @@ _EXPERIMENT_NAMES = {
     "superviz25": "Superviz25-SQL",
     "superviz26-big": "Big-Superviz26-SQL",
     "superviz26-drift": "Drift-Superviz26-SQL",
+    "superviz26-fsl": "FSL-Superviz26-SQL",
 }
 
 
@@ -32,7 +33,8 @@ def _experiment_name(dataset: str) -> str:
 
     Superviz25 → "Superviz25-SQL"; the size-sufficiency variant superviz26-big →
     "Big-Superviz26-SQL"; the concept-drift variant superviz26-drift →
-    "Drift-Superviz26-SQL"; every other family → "Superviz26-SQL".
+    "Drift-Superviz26-SQL"; the few-shot variant superviz26-fsl →
+    "FSL-Superviz26-SQL"; every other family → "Superviz26-SQL".
     """
     return _EXPERIMENT_NAMES.get(dataset, "Superviz26-SQL")
 

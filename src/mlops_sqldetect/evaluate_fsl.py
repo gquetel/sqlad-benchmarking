@@ -45,7 +45,7 @@ from sklearn.metrics import average_precision_score, f1_score, recall_score, roc
 
 from mlops_sqldetect.data import split_normals
 from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
-from mlops_sqldetect.datasets.superviz26_fsl import Superviz26FSL, load_fsl, lodo_source
+from mlops_sqldetect.datasets.superviz26_fsl import Superviz26, Superviz26FSL, load_fsl, lodo_source
 from mlops_sqldetect.evaluate_suite import _model_filename, _validate_grid, parent_run_spec
 from mlops_sqldetect.features import EXTRACTOR_LABELS
 from mlops_sqldetect.metrics import threshold_for_fpr, wilson_ci
@@ -107,20 +107,124 @@ def _score_with_insider_mask(model: AEDetector, df_test: pd.DataFrame, capture_i
     return scores
 
 
-def _reps(ks: tuple[int, ...], seeds: tuple[int, ...]) -> list[tuple[int, int]]:
-    """Expand the sweep into ``(k, seed)`` repetitions.
+def _reps(ks: tuple[int, ...], seeds: tuple[int, ...]) -> list[tuple[int, tuple[int, ...]]]:
+    """Group the sweep into one ``(k, seeds)`` entry per adaptation budget.
 
     ``k = 0`` is the unmodified LODO model, so it is independent of the adaptation
-    seed and contributes a single repetition; every ``k > 0`` is repeated over all
-    seeds.
+    seed and uses a single seed; every ``k > 0`` is repeated over all seeds. The
+    seeds for one ``k`` are merged into a single MLflow run downstream.
     """
-    reps: list[tuple[int, int]] = []
-    for k in ks:
-        if k == 0:
-            reps.append((0, seeds[0]))
-        else:
-            reps.extend((k, seed) for seed in seeds)
-    return reps
+    return [(k, (seeds[0],) if k == 0 else seeds) for k in ks]
+
+
+def _run_repetition(
+    model: AEDetector,
+    *,
+    family: DatasetFamily,
+    target: Superviz26FSL,
+    extractor: str,
+    lodo: Superviz26,
+    train_normal: pd.DataFrame,
+    target_test: pd.DataFrame,
+    labels: np.ndarray,
+    n_attacks: int,
+    base_model_path: Path,
+    k: int,
+    seed: int,
+    lr_scale: float,
+    target_fpr: float,
+    capture_insider: bool,
+) -> FSLResultRow:
+    """Adapt one freshly-loaded checkpoint for a single (k, seed) and score the target."""
+    n_finetune = 0
+    threshold = math.nan
+    ft_seconds = 0.0
+    if k > 0:
+        df_k = train_normal.sample(n=min(k, len(train_normal)), random_state=seed).reset_index(drop=True)
+        n_finetune = len(df_k)
+        ft_lr = model.config.learning_rate * lr_scale
+        t0 = time.perf_counter()
+        model.fine_tune(df_k, learning_rate=ft_lr, seed=seed)
+        ft_seconds = time.perf_counter() - t0
+        # Recompute the operating point from the same k benign samples.
+        threshold = threshold_for_fpr(model.score_samples(df_k), target_fpr)
+
+    t0 = time.perf_counter()
+    scores = _score_with_insider_mask(model, target_test, capture_insider)
+    score_seconds = time.perf_counter() - t0
+
+    auroc = float(roc_auc_score(labels, scores))
+    auprc = float(average_precision_score(labels, scores))
+    if math.isnan(threshold):
+        f1 = recall = math.nan
+    else:
+        preds = (scores > threshold).astype(int)
+        f1 = float(f1_score(labels, preds, zero_division=0))
+        recall = float(recall_score(labels, preds, zero_division=0))
+
+    logger.info(f"  k={k:>5} seed={seed}: AUROC {auroc:.4f}  AUPRC {auprc:.4f}")
+
+    return FSLResultRow(
+        dataset=family.name,
+        target=target.value,
+        pipeline="ae",
+        extractor=extractor,
+        lodo_source=lodo.value,
+        k=k,
+        seed=seed,
+        n_finetune=n_finetune,
+        n_test=int(len(target_test)),
+        n_attacks=n_attacks,
+        auroc=auroc,
+        auprc=auprc,
+        f1=f1,
+        recall=recall,
+        auroc_ci=wilson_ci(auroc, len(scores)),
+        threshold=float(threshold),
+        finetune_seconds=round(ft_seconds, 3),
+        score_seconds=round(score_seconds, 3),
+        base_model_path=str(base_model_path),
+    )
+
+
+def _log_merged_k(rows: list[FSLResultRow], *, target: str, lodo: str, extractor: str, suite: str, **params) -> None:
+    """Log one nested run for an adaptation budget, averaging the per-seed rows over seeds."""
+    k = rows[0].k
+    mlflow.log_params(
+        {
+            "target": target,
+            "lodo_source": lodo,
+            "k": k,
+            "seeds": ",".join(str(r.seed) for r in rows),
+            "n_seeds": len(rows),
+            "n_finetune": rows[0].n_finetune,
+            **params,
+        }
+    )
+    mlflow.set_tags(
+        {
+            "pipeline": "ae",
+            "feature_extractor": extractor,
+            "target": target,
+            "kind": "few_shot",
+            "suite": suite,
+        }
+    )
+    metrics = {
+        "auroc": float(np.mean([r.auroc for r in rows])),
+        "auprc": float(np.mean([r.auprc for r in rows])),
+        "auroc_ci": float(np.mean([r.auroc_ci for r in rows])),
+        "auroc_std": float(np.std([r.auroc for r in rows])),
+        "auprc_std": float(np.std([r.auprc for r in rows])),
+    }
+    # k=0 has no threshold to calibrate, so its threshold-dependent metrics are NaN.
+    if not math.isnan(rows[0].threshold):
+        metrics |= {
+            "f1": float(np.mean([r.f1 for r in rows])),
+            "recall": float(np.mean([r.recall for r in rows])),
+            "threshold": float(np.mean([r.threshold for r in rows])),
+        }
+    mlflow.log_metrics(metrics)
 
 
 def _run_target(
@@ -164,95 +268,44 @@ def _run_target(
     )
 
     rows: list[FSLResultRow] = []
-    for k, seed in _reps(ks, seeds):
-        run_ctx = (
-            mlflow.start_run(run_name=f"{target.value}@k{k}-s{seed}#{time.strftime('%Y%m%d-%H%M%S')}", nested=True)
-            if track
-            else nullcontext()
-        )
-        with run_ctx:
-            # Every repetition restarts from the pretrained weights: re-loading the
-            # checkpoint also restores the frozen extractor and scaler.
-            model = AEDetector.load(base_model_path)
-
-            n_finetune = 0
-            threshold = math.nan
-            ft_seconds = 0.0
-            if k > 0:
-                df_k = train_normal.sample(n=min(k, len(train_normal)), random_state=seed).reset_index(drop=True)
-                n_finetune = len(df_k)
-                ft_lr = model.config.learning_rate * lr_scale
-                epoch_cb = (lambda epoch, loss: mlflow.log_metric("finetune_loss", loss, step=epoch)) if track else None
-                t0 = time.perf_counter()
-                model.fine_tune(df_k, learning_rate=ft_lr, seed=seed, epoch_callback=epoch_cb)
-                ft_seconds = time.perf_counter() - t0
-                # Recompute the operating point from the same k benign samples.
-                threshold = threshold_for_fpr(model.score_samples(df_k), target_fpr)
-
-            t0 = time.perf_counter()
-            scores = _score_with_insider_mask(model, target_test, capture_insider)
-            score_seconds = time.perf_counter() - t0
-
-            auroc = float(roc_auc_score(labels, scores))
-            auprc = float(average_precision_score(labels, scores))
-            if math.isnan(threshold):
-                f1 = recall = math.nan
-            else:
-                preds = (scores > threshold).astype(int)
-                f1 = float(f1_score(labels, preds, zero_division=0))
-                recall = float(recall_score(labels, preds, zero_division=0))
-
-            logger.info(f"  k={k:>5} seed={seed}: AUROC {auroc:.4f}  AUPRC {auprc:.4f}")
-
-            row = FSLResultRow(
-                dataset=family.name,
-                target=target.value,
-                pipeline="ae",
+    # All seeds for a given k are merged into a single nested run (their metrics are
+    # averaged); the per-seed rows are still returned individually for the CSV.
+    for k, k_seeds in _reps(ks, seeds):
+        k_rows = [
+            _run_repetition(
+                # Every repetition restarts from the pretrained weights: re-loading the
+                # checkpoint also restores the frozen extractor and scaler.
+                AEDetector.load(base_model_path),
+                family=family,
+                target=target,
                 extractor=extractor,
-                lodo_source=lodo.value,
+                lodo=lodo,
+                train_normal=train_normal,
+                target_test=target_test,
+                labels=labels,
+                n_attacks=n_attacks,
+                base_model_path=base_model_path,
                 k=k,
                 seed=seed,
-                n_finetune=n_finetune,
-                n_test=int(len(target_test)),
-                n_attacks=n_attacks,
-                auroc=auroc,
-                auprc=auprc,
-                f1=f1,
-                recall=recall,
-                auroc_ci=wilson_ci(auroc, len(scores)),
-                threshold=float(threshold),
-                finetune_seconds=round(ft_seconds, 3),
-                score_seconds=round(score_seconds, 3),
-                base_model_path=str(base_model_path),
+                lr_scale=lr_scale,
+                target_fpr=target_fpr,
+                capture_insider=capture_insider,
             )
-            rows.append(row)
-
-            if track:
-                mlflow.log_params(
-                    {
-                        "target": target.value,
-                        "lodo_source": lodo.value,
-                        "k": k,
-                        "seed": seed,
-                        "lr_scale": lr_scale,
-                        "target_fpr": target_fpr,
-                        "test_limit": test_limit,
-                        "n_finetune": n_finetune,
-                    }
+            for seed in k_seeds
+        ]
+        rows.extend(k_rows)
+        if track:
+            with mlflow.start_run(run_name=f"{target.value}@k{k}#{time.strftime('%Y%m%d-%H%M%S')}", nested=True):
+                _log_merged_k(
+                    k_rows,
+                    target=target.value,
+                    lodo=lodo.value,
+                    extractor=extractor,
+                    suite=suite,
+                    lr_scale=lr_scale,
+                    target_fpr=target_fpr,
+                    test_limit=test_limit,
                 )
-                mlflow.set_tags(
-                    {
-                        "pipeline": "ae",
-                        "feature_extractor": extractor,
-                        "target": target.value,
-                        "kind": "few_shot",
-                        "suite": suite,
-                    }
-                )
-                metrics = {"auroc": auroc, "auprc": auprc, "auroc_ci": row.auroc_ci}
-                if not math.isnan(threshold):
-                    metrics |= {"f1": f1, "recall": recall, "threshold": row.threshold}
-                mlflow.log_metrics(metrics)
 
     return rows
 
