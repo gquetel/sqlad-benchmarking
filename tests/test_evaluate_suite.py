@@ -28,7 +28,7 @@ _GPU_CFG = {
         "cpus_per_task": 32,
         "mem": "64G",
         "time": "08:00:00",
-        "partitions": {"V100-16GB": 16, "A30": 24, "V100-32GB": 32, "A100": 40, "A40": 46},
+        "partitions": {"A100": 40, "A40": 46, "A30": 24, "V100-32GB": 32, "V100-16GB": 16},
     },
     "min_vram_gb": {"default": 0, "codet5": 24},
 }
@@ -94,9 +94,9 @@ def test_min_vram_resolves_extractor_combo_and_default():
     assert _min_vram(Cell("a-a", "ocsvm", "sbert"), cfg) == 16
 
 
-def test_eligible_partitions_filters_by_vram_largest_first():
-    # codet5 (24 GB) drops the 16 GB V100; the rest come back largest-VRAM first.
-    assert _eligible_partitions(_GPU_CFG, 24) == ["A40", "A100", "V100-32GB", "A30"]
+def test_eligible_partitions_filters_by_vram_preference_order():
+    # codet5 (24 GB) drops the 16 GB V100; the rest come back in config (preference) order.
+    assert _eligible_partitions(_GPU_CFG, 24) == ["A100", "A40", "A30", "V100-32GB"]
     assert "V100-16GB" not in _eligible_partitions(_GPU_CFG, 24)
 
 
