@@ -74,9 +74,10 @@ three partitions apart:
 | `(test,  origin)`    | `origin_test`   | S1 reference AUROC                    |
 | `(test,  shifted)`   | `shifted_test`  | S2 post-drift AUROC                  |
 
-The CSVs are built outside the repo by `experiments/build_concept_drift.py` (legacy
-generator) and read from `~/datasets/concept-drift/`. Load them with the three-way
-loader:
+The CSVs are read from `~/datasets/concept-drift/`. They are not vendored; either
+build them locally with `experiments/build_concept_drift.py` (legacy generator) or
+download the pre-built copies (see *Heavy supplementary datasets* below). Load them
+with the three-way loader:
 
 ```python
 from mlops_sqldetect.datasets.superviz26_drift import Superviz26Drift, load_drift
@@ -94,3 +95,39 @@ python -m mlops_sqldetect.evaluate_drift --pipelines ocsvm,lof,ae --extractors l
 Each cell appends one row — `auroc_s1`, `auroc_s2`, `delta_auroc`, … — to
 `reports/superviz26-drift_results.csv`; average the per-domain rows to obtain the
 per-pipeline drift table. The grid also fans out to SLURM (see *Running on SLURM*).
+
+## Heavy supplementary datasets (`big`, `drift`)
+
+The size-sufficiency (`superviz26-big`, 200k train sets) and concept-drift
+(`superviz26-drift`) experiments read multi-GB CSVs that are **not** vendored and are
+**not** part of the default `fetch_data` flow. Zenodo bundles them in a single
+`supplementary-materials.zip` archive
+([record 20795955](https://zenodo.org/records/20795955), DOI
+`10.5281/zenodo.20795955`). The helper downloads that archive once (MD5-verified,
+resumable), extracts the requested group(s) into their loader default roots
+(`~/datasets/200k-training/` and `~/datasets/concept-drift/`), and verifies each CSV's
+size and SHA-256 against
+[`data/raw/supplementary/MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/supplementary/MANIFEST.json).
+
+```bash
+# Both groups (downloads the ~1.2 GB zip, extracts ~6 GB of CSVs)
+python -m tools.fetch_supplementary
+
+# Just one group
+python -m tools.fetch_supplementary --groups drift
+
+# Verify already-extracted files without downloading
+python -m tools.fetch_supplementary --check
+```
+
+The zip is deleted after a successful extraction; pass `--keep-archive` to retain it.
+Equivalent invoke alias:
+
+```bash
+invoke fetch-supplementary --groups big,drift
+```
+
+You usually do not need to run this by hand: the `superviz26-big` and `superviz26-drift`
+loaders **auto-download** their group the first time a file is missing from the default
+root, then reuse it on subsequent runs. Auto-fetch only triggers for the default root
+(a custom `root=` is yours to manage).

@@ -72,6 +72,26 @@ def resolve_path(name: Superviz26Drift, root: Path | None = None) -> Path:
     return (root or default_root()) / f"{name.value}.csv"
 
 
+def _ensure_csv(name: Superviz26Drift, root: Path | None) -> Path:
+    """Resolve the domain CSV, auto-downloading it from Zenodo if absent from the default root.
+
+    Auto-fetch only applies when ``root`` is the default location (a custom ``root`` is
+    caller-managed). Raises ``FileNotFoundError`` (hinting at the fetcher/builder) if the
+    CSV is still missing.
+    """
+    path = resolve_path(name, root)
+    if not path.exists() and root is None:
+        from tools.fetch_supplementary import ensure_group
+
+        ensure_group("drift")
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found. Download it: python -m tools.fetch_supplementary --groups drift "
+            f"(or rebuild: python -m experiments.build_concept_drift --domain {name.value})"
+        )
+    return path
+
+
 def load_split(
     name: Superviz26Drift,
     split: Split,
@@ -87,11 +107,7 @@ def load_split(
     three-way :func:`load_drift` instead, because a single split mixes the origin and
     shifted partitions that the protocol must keep apart.
     """
-    path = resolve_path(name, root)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"{path} not found. Build it with: python -m experiments.build_concept_drift --domain {name.value}"
-        )
+    path = _ensure_csv(name, root)
     return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)
 
 
@@ -111,14 +127,10 @@ def load_drift(
     is set, each partition is independently label-stratified down for smoke runs.
 
     Raises:
-        FileNotFoundError: If the domain CSV is not on disk. Hints at the builder.
+        FileNotFoundError: If the domain CSV is missing and could not be auto-fetched.
         ValueError: If the ``split`` or ``drift_set`` column is missing.
     """
-    path = resolve_path(name, root)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"{path} not found. Build it with: python -m experiments.build_concept_drift --domain {name.value}"
-        )
+    path = _ensure_csv(name, root)
     cols = tuple({*columns, "full_query", "label", "split", "drift_set"})
     df = load_dataset(path, usecols=cols)
     for required in ("split", "drift_set"):

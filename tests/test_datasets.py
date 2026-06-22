@@ -66,8 +66,27 @@ def test_load_drift_partitions_origin_train_origin_test_shifted_test(tmp_path):
 
 
 def test_load_drift_missing_file_hints_at_builder(tmp_path):
+    # A custom root is caller-managed: no auto-fetch, just the hint.
     with pytest.raises(FileNotFoundError, match="build_concept_drift"):
         load_drift(Superviz26Drift.A, root=tmp_path)
+
+
+def test_load_drift_auto_fetches_missing_default_root_file(tmp_path, monkeypatch):
+    import tools.fetch_supplementary as fetch_mod
+    from mlops_sqldetect.datasets import superviz26_drift
+
+    monkeypatch.setattr(superviz26_drift, "default_root", lambda: tmp_path)
+    calls = []
+
+    def fake_ensure_group(group, **kwargs):
+        calls.append(group)
+        _write_drift_csv(tmp_path / "a.csv")
+
+    monkeypatch.setattr(fetch_mod, "ensure_group", fake_ensure_group)
+
+    origin_train, _, _ = load_drift(Superviz26Drift.A)
+    assert calls == ["drift"]
+    assert len(origin_train) == 2
 
 
 def test_fsl_family_is_an_fsl_protocol_with_four_targets():

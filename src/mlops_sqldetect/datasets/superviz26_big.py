@@ -48,12 +48,18 @@ def load_split(
     """Load rows of the Big Superviz26 CSV that belong to ``split``.
 
     The train split is the 200k benign-only Big set; the test split is the same 1M
-    split as the Normal Superviz26 runs. Raises ``FileNotFoundError`` (pointing at
-    the prep script) if the CSV has not been built yet.
+    split as the Normal Superviz26 runs. When the CSV is absent from the default root it
+    is auto-downloaded from Zenodo; a ``FileNotFoundError`` (pointing at the
+    fetcher/builder) is raised only if it is still missing afterwards.
     """
     path = resolve_path(name, root)
+    if not path.exists() and root is None:
+        from tools.fetch_supplementary import ensure_group
+
+        ensure_group("big")
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. Run: python -m experiments.build_big_trainsets --scenario {name.value}"
+            f"{path} not found. Download it: python -m tools.fetch_supplementary --groups big "
+            f"(or rebuild: python -m experiments.build_big_trainsets --scenario {name.value})"
         )
     return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)

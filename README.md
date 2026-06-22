@@ -87,7 +87,8 @@ The directory structure of the project looks like this:
 │   └── test_model.py
 ├── tools/                    # Dataset download scripts
 │   ├── fetch_superviz25.py
-│   └── fetch_superviz26.py
+│   ├── fetch_superviz26.py
+│   └── fetch_supplementary.py  # Heavy Big/concept-drift CSVs (opt-in)
 ├── .env.example              # Example MLflow tracking configuration
 ├── .gitignore
 ├── .pre-commit-config.yaml

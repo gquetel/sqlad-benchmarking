@@ -58,9 +58,8 @@ def _min_vram(cell: Cell, cfg: dict) -> int:
 
 
 def _eligible_partitions(cfg: dict, req: int) -> list[str]:
-    """GPU partitions meeting req GB of VRAM, largest-VRAM first so cells prefer the fastest GPU."""
-    parts = sorted(cfg["gpu"]["partitions"].items(), key=lambda kv: kv[1], reverse=True)
-    eligible = [name for name, gb in parts if gb >= req]
+    """GPU partitions meeting req GB of VRAM, in config (preference) order so cells prefer the fastest GPU."""
+    eligible = [name for name, gb in cfg["gpu"]["partitions"].items() if gb >= req]
     if not eligible:
         raise typer.BadParameter(f"no GPU partition has >= {req} GB VRAM; check configs/slurm.yaml.")
     return eligible

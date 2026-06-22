@@ -11,13 +11,14 @@ gpu:
   cpus_per_task: 32
   mem: 64G
   time: "08:00:00"
-  # GPU partitions and their per-GPU VRAM. A cell runs on every partition whose VRAM meets its requirement.
+  # GPU partitions and their per-GPU VRAM, listed in preference order (fastest GPU first). A cell
+  # runs on every partition whose VRAM meets its requirement, in this order.
   partitions:
-    V100-16GB: 16
+    A100: 40
+    A40: 46
     A30: 24
     V100-32GB: 32
-    A100: 40  
-    A40: 46
+    V100-16GB: 16
 
 # Minimum per-GPU VRAM per cell, keyed by extractor or pipeline:extractor (the latter wins)
 min_vram_gb:

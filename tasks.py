@@ -55,6 +55,23 @@ def fetch_data(ctx: Context, force: bool = False, check: bool = False) -> None:
     fetch_superviz25(ctx, force=force, check=check)
 
 
+@task(help={"groups": "Comma-separated groups: 'big', 'drift'; empty for both."})
+def fetch_supplementary(
+    ctx: Context, groups: str = "", force: bool = False, check: bool = False, keep_archive: bool = False
+) -> None:
+    """Download the heavy Big/concept-drift CSVs from Zenodo (NOT part of fetch_data; several GB)."""
+    cmd = "python -m tools.fetch_supplementary"
+    if groups:
+        cmd += f" --groups {groups}"
+    if force:
+        cmd += " --force"
+    if check:
+        cmd += " --check"
+    if keep_archive:
+        cmd += " --keep-archive"
+    ctx.run(cmd, echo=True, pty=not NO_PTY)
+
+
 @task(
     help={
         "limit": "Total stratified samples per split (default 1000).",
