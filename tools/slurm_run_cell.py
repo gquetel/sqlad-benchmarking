@@ -18,6 +18,8 @@ from typing import Annotated
 
 import typer
 
+from mlops_sqldetect.datasets import FAMILIES
+from mlops_sqldetect.evaluate_drift import evaluate_drift
 from mlops_sqldetect.evaluate_suite import evaluate_suite
 
 logger = logging.getLogger(__name__)
@@ -40,17 +42,31 @@ def run_cell(
         raise typer.BadParameter(f"--index {index} out of range for {len(lines)} cells in {manifest}")
     cell = json.loads(lines[index])
     logger.info(f"Running cell {index}/{len(lines) - 1}: {cell}")
-    evaluate_suite(
-        dataset=dataset,
-        scenario=cell["scenario"],
-        pipelines=cell["pipeline"],
-        extractors=cell["extractor"],
-        target_fpr=target_fpr,
-        seed=seed,
-        register=register,
-        track=track,
-        limit=limit,
-    )
+    # Dispatch on the family's protocol: the concept-drift families train once and
+    # evaluate two test sets per cell, so they run through evaluate_drift instead.
+    if dataset in FAMILIES and FAMILIES[dataset].protocol == "drift":
+        evaluate_drift(
+            dataset=dataset,
+            scenario=cell["scenario"],
+            pipelines=cell["pipeline"],
+            extractors=cell["extractor"],
+            target_fpr=target_fpr,
+            seed=seed,
+            track=track,
+            limit=limit,
+        )
+    else:
+        evaluate_suite(
+            dataset=dataset,
+            scenario=cell["scenario"],
+            pipelines=cell["pipeline"],
+            extractors=cell["extractor"],
+            target_fpr=target_fpr,
+            seed=seed,
+            register=register,
+            track=track,
+            limit=limit,
+        )
 
 
 if __name__ == "__main__":

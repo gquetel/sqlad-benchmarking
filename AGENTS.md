@@ -29,8 +29,14 @@ versions or regenerate the lock without explicit instruction.
 * The project uses `invoke` for setup/orchestration tasks (e.g. `sync`, `lock`, `test`, docs,
   docker, dataset fetch). Refer to `tasks.py` for available tasks. The train/eval/SLURM entry
   points are Typer CLIs run directly via `python -m mlops_sqldetect.<module>` (e.g. `train`,
-  `evaluate`, `evaluate_suite`) or `python -m tools.<module>` (e.g. `slurm_submit`); use `--help`
-  on any of them to see options.
+  `evaluate`, `evaluate_suite`, `evaluate_drift`) or `python -m tools.<module>` (e.g.
+  `slurm_submit`); use `--help` on any of them to see options.
+  * `evaluate_suite` runs the standard train-once/evaluate-once grid (in-domain + LODO).
+    `evaluate_drift` runs the same-domain concept-drift protocol (`superviz26-drift` family):
+    it trains once per `(domain, pipeline, extractor)` cell and scores the origin (S1) and
+    shifted (S2) test sets, writing `auroc_s1`/`auroc_s2`/`delta_auroc` rows. The two
+    protocols are selected by a `DatasetFamily.protocol` field; `slurm_run_cell` dispatches
+    on it, so `slurm_submit --dataset superviz26-drift` fans the drift grid out the same way.
 * To parallelize the evaluation grid on a SLURM cluster, `tools.slurm_submit` fans each
   `(scenario, pipeline, extractor)` cell out as a job array (one array per resource class:
   `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough

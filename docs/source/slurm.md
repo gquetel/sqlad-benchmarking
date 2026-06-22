@@ -52,6 +52,20 @@ python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --e
 Manifests, generated job scripts, and `.out` logs are written under
 `reports/slurm/<run-id>/` (git-ignored).
 
+### Concept drift
+
+The concept-drift family (`superviz26-drift`) fans out the same way — its four domains
+are the scenarios — but each cell trains once and evaluates two test sets (S1/S2).
+`slurm_run_cell` dispatches such cells to `evaluate_drift` automatically (it keys off the
+family's `protocol == "drift"`), so the submit command is identical:
+
+```bash
+python -m tools.slurm_submit --dataset superviz26-drift --suite all --pipelines ocsvm,lof,ae --extractors li
+```
+
+Each cell writes one row (`auroc_s1`, `auroc_s2`, `delta_auroc`, …) to
+`reports/superviz26-drift/cells/{pipeline}_{extractor}_{domain}.csv`.
+
 ## Results
 
 MLflow is the canonical store: each cell logs an independent run, nested under a parent

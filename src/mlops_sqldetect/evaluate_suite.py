@@ -292,7 +292,9 @@ def _run_one(
         # Calibrate the decision threshold on the held-out validation normals at the
         # target FPR (out-of-sample), then binarise the test scores for the metrics.
         threshold = threshold_for_fpr(model.score_samples(df_val), target_fpr)
-        m = compute_metrics(df_test["label"], scores, threshold, f"{pipeline}_{extractor}_{family.name}_{dataset.value}")
+        m = compute_metrics(
+            df_test["label"], scores, threshold, f"{pipeline}_{extractor}_{family.name}_{dataset.value}"
+        )
         preds = (scores > threshold).astype(int)
         rpa = recall_per_attack(df_test["label"], preds, df_test["attack_technique"])
 
@@ -412,6 +414,10 @@ def evaluate_suite(
     Returns the results table as a DataFrame for programmatic use.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    if dataset in FAMILIES and FAMILIES[dataset].protocol == "drift":
+        raise typer.BadParameter(
+            f"{dataset!r} uses the concept-drift protocol; run it through `python -m mlops_sqldetect.evaluate_drift`."
+        )
     family, datasets, requested_pipelines, requested_extractors = _validate_grid(
         dataset, suite, pipelines, extractors, scenario
     )

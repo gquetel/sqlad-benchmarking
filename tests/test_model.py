@@ -45,8 +45,7 @@ def _fast_ae(extractor: str) -> AEDetector:
 
 
 def test_scaler_for_routes_per_extractor():
-    """Each extractor must be paired with the scaler its feature space needs.
-    """
+    """Each extractor must be paired with the scaler its feature space needs."""
     # cv (raw counts) and the sbert/codet5 embeddings go to OCSVM/LOF unscaled;
     # the Li and Loginov dense features are standardised.
     assert isinstance(_scaler_for("cv"), FunctionTransformer)
@@ -59,12 +58,18 @@ def test_scaler_for_routes_per_extractor():
 @pytest.mark.parametrize("head", ["ocsvm", "lof"])
 @pytest.mark.parametrize(
     "extractor",
-    ["li", "loginov", "cv", pytest.param("sbert", marks=pytest.mark.slow), pytest.param("codet5", marks=pytest.mark.slow)],
+    [
+        "li",
+        "loginov",
+        "cv",
+        pytest.param("sbert", marks=pytest.mark.slow),
+        pytest.param("codet5", marks=pytest.mark.slow),
+    ],
 )
 def test_sklearn_heads_rank_attacks_above_normals(head, extractor):
     """End-to-end smoke test of the OCSVM/LOF heads across every extractor.
 
-    This checks that the pipeline runs correctly, we expect a ROC superior to a 
+    This checks that the pipeline runs correctly, we expect a ROC superior to a
     threshold, when not the case, it might exhibit a ranking issue.
     """
     df_train, df_test = _train_test()
@@ -81,12 +86,18 @@ def test_sklearn_heads_rank_attacks_above_normals(head, extractor):
 
 @pytest.mark.parametrize(
     "extractor",
-    ["li", "loginov", "cv", pytest.param("sbert", marks=pytest.mark.slow), pytest.param("codet5", marks=pytest.mark.slow)],
+    [
+        "li",
+        "loginov",
+        "cv",
+        pytest.param("sbert", marks=pytest.mark.slow),
+        pytest.param("codet5", marks=pytest.mark.slow),
+    ],
 )
 def test_ae_sparse_safe_path_runs(extractor):
     """The autoencoder must train and score over each extractor's matrix type.
 
-    This runs a tiny budget over each to prove the fit/score loop and the batched 
+    This runs a tiny budget over each to prove the fit/score loop and the batched
     densification works.
     """
     df_train, df_test = _train_test()
@@ -110,8 +121,7 @@ def test_ae_sparse_safe_path_runs(extractor):
     ],
 )
 def test_save_load_roundtrip(head, extractor, tmp_path):
-    """Checks that a persisted model scores identically after being reloaded.
-    """
+    """Checks that a persisted model scores identically after being reloaded."""
     df_train, df_test = _train_test()
     model = _fast_ae(extractor) if head == "ae" else build_pipeline(head, extractor)
     model.fit(df_train)
@@ -123,7 +133,6 @@ def test_save_load_roundtrip(head, extractor, tmp_path):
 
 
 def test_build_pipeline_unknown_raises():
-    """An unknown head name must fail fast with a clear error.
-    """
+    """An unknown head name must fail fast with a clear error."""
     with pytest.raises(ValueError, match="Unknown pipeline"):
         build_pipeline("nope", "li")  # type: ignore[arg-type]

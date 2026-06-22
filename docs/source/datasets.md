@@ -53,4 +53,44 @@ df_train = load_split(Superviz26.A_A, "train")
 df_test  = load_split(Superviz26.A_A, "test")
 ```
 
-By default only `full_query`, `label`, and `split` are read from disk. 
+By default only `full_query`, `label`, and `split` are read from disk.
+
+## Concept-drift protocol (`superviz26-drift`)
+
+The same-domain concept-drift protocol re-partitions a *single* domain through its
+per-template metadata to simulate an abrupt within-domain shift. For each domain the
+query templates are split 50/50 per statement type into an **origin** set (S1) and a
+held-out **shifted** set (S2). A detector is trained on the benign S1 train rows and
+evaluated twice — on the S1 test set (reference) and on the never-seen S2 set
+(post-drift); drift robustness is the AUROC drop `Δ = AUROC(S1) − AUROC(S2)`.
+
+The four per-domain CSVs (`a.csv` … `d.csv`) carry the standard Superviz26 columns
+plus a `drift_set` column (`origin`/`shifted`) that, together with `split`, tells the
+three partitions apart:
+
+| `(split, drift_set)` | Partition       | Use                                  |
+| -------------------- | --------------- | ------------------------------------ |
+| `(train, origin)`    | `origin_train`  | train the detector (benign rows)     |
+| `(test,  origin)`    | `origin_test`   | S1 reference AUROC                    |
+| `(test,  shifted)`   | `shifted_test`  | S2 post-drift AUROC                  |
+
+The CSVs are built outside the repo by `experiments/build_concept_drift.py` (legacy
+generator) and read from `~/datasets/concept-drift/`. Load them with the three-way
+loader:
+
+```python
+from mlops_sqldetect.datasets.superviz26_drift import Superviz26Drift, load_drift
+
+origin_train, origin_test, shifted_test = load_drift(Superviz26Drift.A)
+```
+
+Run the whole grid (15 pipelines × 4 domains) with the dedicated evaluator, which
+trains once per cell and scores both test sets:
+
+```bash
+python -m mlops_sqldetect.evaluate_drift --pipelines ocsvm,lof,ae --extractors li,loginov,cv,sbert,codet5
+```
+
+Each cell appends one row — `auroc_s1`, `auroc_s2`, `delta_auroc`, … — to
+`reports/superviz26-drift_results.csv`; average the per-domain rows to obtain the
+per-pipeline drift table. The grid also fans out to SLURM (see *Running on SLURM*).

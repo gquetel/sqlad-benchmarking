@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _EXPERIMENT_NAMES = {
     "superviz25": "Superviz25-SQL",
     "superviz26-big": "Big-Superviz26-SQL",
+    "superviz26-drift": "Drift-Superviz26-SQL",
 }
 
 
@@ -30,9 +31,11 @@ def _experiment_name(dataset: str) -> str:
     """Map a dataset family to its MLflow experiment name.
 
     Superviz25 → "Superviz25-SQL"; the size-sufficiency variant superviz26-big →
-    its own "Big-Superviz26-SQL"; every other family → "Superviz26-SQL".
+    "Big-Superviz26-SQL"; the concept-drift variant superviz26-drift →
+    "Drift-Superviz26-SQL"; every other family → "Superviz26-SQL".
     """
     return _EXPERIMENT_NAMES.get(dataset, "Superviz26-SQL")
+
 
 # Path to the importable mlops_sqldetect package, bundled into pyfunc models
 # via ``code_paths`` so the detector can be unpickled and scored anywhere.

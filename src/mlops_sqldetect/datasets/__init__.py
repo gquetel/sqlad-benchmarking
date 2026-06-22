@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from mlops_sqldetect.datasets import superviz25, superviz26, superviz26_big
+from mlops_sqldetect.datasets import superviz25, superviz26, superviz26_big, superviz26_drift
 from mlops_sqldetect.datasets.superviz25 import Superviz25
 from mlops_sqldetect.datasets.superviz26 import (
     IN_DOMAIN,
@@ -30,7 +30,13 @@ from mlops_sqldetect.datasets.superviz26 import (
 
 @dataclass(frozen=True)
 class DatasetFamily:
-    """A registered dataset and its named evaluation suites."""
+    """A registered dataset and its named evaluation suites.
+
+    ``protocol`` selects the evaluator a family is run through: ``"suite"`` for the
+    standard train-once/evaluate-once grid (:mod:`mlops_sqldetect.evaluate_suite`),
+    ``"drift"`` for the train-once/evaluate-twice concept-drift protocol
+    (:mod:`mlops_sqldetect.evaluate_drift`). The SLURM runner dispatches on it.
+    """
 
     name: str
     suites: dict[str, tuple[StrEnum, ...]]
@@ -38,6 +44,7 @@ class DatasetFamily:
     manifest: Callable[[], dict]
     default_root: Callable[[], Path]
     resolve_path: Callable[..., Path]
+    protocol: str = "suite"
 
 
 FAMILIES: dict[str, DatasetFamily] = {
@@ -72,6 +79,17 @@ FAMILIES: dict[str, DatasetFamily] = {
         manifest=superviz26_big.manifest,
         default_root=superviz26_big.default_root,
         resolve_path=superviz26_big.resolve_path,
+    ),
+    "superviz26-drift": DatasetFamily(
+        name="superviz26-drift",
+        # One scenario per domain; the drift evaluator trains once and evaluates the
+        # origin (S1) and shifted (S2) test sets of that domain.
+        suites={"all": superviz26_drift.DOMAINS},
+        load_split=superviz26_drift.load_split,
+        manifest=superviz26_drift.manifest,
+        default_root=superviz26_drift.default_root,
+        resolve_path=superviz26_drift.resolve_path,
+        protocol="drift",
     ),
 }
 

@@ -6,7 +6,8 @@ import pytest
 import typer
 
 from mlops_sqldetect.datasets import FAMILIES
-from mlops_sqldetect.evaluate_suite import Cell, _validate_grid, enumerate_cells
+from mlops_sqldetect.evaluate_drift import evaluate_drift
+from mlops_sqldetect.evaluate_suite import Cell, _validate_grid, enumerate_cells, evaluate_suite
 from tools.slurm_submit import (
     _bucket,
     _check_venv,
@@ -112,6 +113,31 @@ def test_bucket_assignment():
 
 def test_family_scenario_count_matches_suite_all():
     assert len(FAMILIES["superviz26"].suites["all"]) == 8
+
+
+def test_enumerate_cells_works_for_drift_family():
+    # The drift family reuses the generic Cell enumeration: 4 domains x 1 pipeline x 1 extractor.
+    cells = enumerate_cells("superviz26-drift", "all", "ocsvm", "li")
+    assert len(cells) == 4
+    assert [c.scenario for c in cells] == ["a", "b", "c", "d"]
+    assert all(c.pipeline == "ocsvm" and c.extractor == "li" for c in cells)
+
+
+def test_drift_cells_bucket_like_the_suite():
+    # GPU bucketing keys off pipeline/extractor, so drift cells route identically.
+    assert _bucket(Cell("a", "ocsvm", "li"), _GPU_CFG) == "cpu"
+    assert _bucket(Cell("a", "ae", "li"), _GPU_CFG) == "gpu"
+    assert _bucket(Cell("a", "ocsvm", "codet5"), _GPU_CFG) == "gpu-24gb"
+
+
+def test_evaluate_suite_rejects_drift_family():
+    with pytest.raises(typer.BadParameter, match="evaluate_drift"):
+        evaluate_suite(dataset="superviz26-drift", suite="all", pipelines="ocsvm", extractors="li")
+
+
+def test_evaluate_drift_rejects_non_drift_family():
+    with pytest.raises(typer.BadParameter, match="drift family"):
+        evaluate_drift(dataset="superviz26", suite="all", pipelines="ocsvm", extractors="li")
 
 
 def test_job_script_includes_limit_when_set(tmp_path):

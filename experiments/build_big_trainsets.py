@@ -62,7 +62,7 @@ def _build_extra(sources: list[str], full_root: Path, seed: int, chunksize: int)
     """Draw the 100k Extra for one scenario, one-third per source domain in LODO."""
     counts = _per_source_counts(EXTRA_TOTAL, len(sources))
     parts: list[pd.DataFrame] = []
-    for i, (domain, n) in enumerate(zip(sources, counts)):
+    for i, (domain, n) in enumerate(zip(sources, counts, strict=True)):
         pool_path = full_root / DOMAIN_POOL[domain]
         part = _load_pool_extra(pool_path, n, seed=seed + i, chunksize=chunksize)
         logger.info(f"  extra[{domain}]: {len(part)} from {pool_path.name}")
@@ -84,13 +84,17 @@ def _build_scenario(
     big_train["split"] = "train"
 
     # Fail-fast invariants: exact size, Normal kept verbatim (superset), Extra benign.
-    assert len(big_train) == BIG_TRAIN_SIZE, f"{scenario}: big train is {len(big_train)}, expected {BIG_TRAIN_SIZE}"
-    assert len(extra) == EXTRA_TOTAL, f"{scenario}: extra is {len(extra)}, expected {EXTRA_TOTAL}"
+    if len(big_train) != BIG_TRAIN_SIZE:
+        raise RuntimeError(f"{scenario}: big train is {len(big_train)}, expected {BIG_TRAIN_SIZE}")
+    if len(extra) != EXTRA_TOTAL:
+        raise RuntimeError(f"{scenario}: extra is {len(extra)}, expected {EXTRA_TOTAL}")
     # Compare as strings: all-NaN attack columns infer different dtypes per source but
     # write identically to CSV, so value (not dtype) equality is the right invariant.
     front = big_train.iloc[: len(normal)][columns].reset_index(drop=True).astype(str)
-    assert front.equals(normal[columns].reset_index(drop=True).astype(str)), f"{scenario}: Normal not preserved in Big"
-    assert (extra["label"] == 0).all(), f"{scenario}: Extra contains non-benign rows"
+    if not front.equals(normal[columns].reset_index(drop=True).astype(str)):
+        raise RuntimeError(f"{scenario}: Normal not preserved in Big")
+    if not (extra["label"] == 0).all():
+        raise RuntimeError(f"{scenario}: Extra contains non-benign rows")
 
     out = pd.concat([big_train, test], ignore_index=True)
     return out[columns]
@@ -100,7 +104,9 @@ def build(
     scenario: Annotated[str, typer.Option(help="Scenario name (a-a … abc-d) or 'all'.")] = "all",
     seed: Annotated[int, typer.Option(help="Base random state for sampling Extra (recorded in logs).")] = 7,
     full_root: Annotated[Path, typer.Option(help="Directory of the full per-domain pools.")] = Path("~/datasets/full"),
-    out_root: Annotated[Path, typer.Option(help="Output directory for the Big CSVs.")] = Path("~/datasets/200k-training"),
+    out_root: Annotated[Path, typer.Option(help="Output directory for the Big CSVs.")] = Path(
+        "~/datasets/200k-training"
+    ),
     source_root: Annotated[Path | None, typer.Option(help="Directory of the Normal Superviz26 CSVs.")] = None,
     overwrite: Annotated[bool, typer.Option(help="Rebuild scenarios whose output CSV already exists.")] = False,
     chunksize: Annotated[int, typer.Option(help="Rows per chunk when streaming the full pools.")] = 500_000,
