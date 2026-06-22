@@ -20,6 +20,7 @@ import typer
 
 from mlops_sqldetect.datasets import FAMILIES
 from mlops_sqldetect.evaluate_drift import evaluate_drift
+from mlops_sqldetect.evaluate_fsl import evaluate_fsl
 from mlops_sqldetect.evaluate_suite import evaluate_suite
 
 logger = logging.getLogger(__name__)
@@ -42,9 +43,11 @@ def run_cell(
         raise typer.BadParameter(f"--index {index} out of range for {len(lines)} cells in {manifest}")
     cell = json.loads(lines[index])
     logger.info(f"Running cell {index}/{len(lines) - 1}: {cell}")
-    # Dispatch on the family's protocol: the concept-drift families train once and
-    # evaluate two test sets per cell, so they run through evaluate_drift instead.
-    if dataset in FAMILIES and FAMILIES[dataset].protocol == "drift":
+    # Dispatch on the family's protocol: concept-drift cells train once and evaluate
+    # two test sets, few-shot cells adapt a pretrained LODO model over a k-sweep, so
+    # each runs through its own evaluator instead of the standard suite.
+    protocol = FAMILIES[dataset].protocol if dataset in FAMILIES else "suite"
+    if protocol == "drift":
         evaluate_drift(
             dataset=dataset,
             scenario=cell["scenario"],
@@ -54,6 +57,17 @@ def run_cell(
             seed=seed,
             track=track,
             limit=limit,
+        )
+    elif protocol == "fsl":
+        # The few-shot evaluator runs its own k/seed sweep, so the array's --seed and
+        # --limit (calibration-split knobs) do not apply; it keeps its own defaults.
+        evaluate_fsl(
+            dataset=dataset,
+            scenario=cell["scenario"],
+            pipelines=cell["pipeline"],
+            extractors=cell["extractor"],
+            target_fpr=target_fpr,
+            track=track,
         )
     else:
         evaluate_suite(

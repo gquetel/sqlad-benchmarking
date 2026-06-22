@@ -66,6 +66,31 @@ python -m tools.slurm_submit --dataset superviz26-drift --suite all --pipelines 
 Each cell writes one row (`auroc_s1`, `auroc_s2`, `delta_auroc`, …) to
 `reports/superviz26-drift/cells/{pipeline}_{extractor}_{domain}.csv`.
 
+### Few-shot adaptation
+
+The few-shot family (`superviz26-fsl`) fans out the same way — its four target domains
+are the scenarios — but each cell *adapts a pretrained LODO autoencoder* rather than
+training from scratch. For a target domain it loads the matching LODO checkpoint (e.g.
+`bcd-a` for target `a`), fine-tunes only the autoencoder on `k` benign target-domain
+samples (frozen extractor, learning rate ÷ 10), recalibrates the threshold from those
+`k` samples, and scores the target test set — sweeping `k ∈ {0, 5, …, 10000}` over
+several seeds. It is **autoencoder-only**, and the pretrained LODO models must already
+exist under `models/` (run the `superviz26` `lodo` AE grid first). `slurm_run_cell`
+dispatches such cells to `evaluate_fsl` (it keys off `protocol == "fsl"`):
+
+```bash
+# 1. Pretrain the LODO autoencoders (produces models/ae_<extractor>_superviz26_<lodo>.pt):
+python -m tools.slurm_submit --dataset superviz26 --suite lodo --pipelines ae --extractors li
+
+# 2. Run the few-shot sweep on top of them:
+python -m tools.slurm_submit --dataset superviz26-fsl --suite all --pipelines ae --extractors li
+```
+
+Each cell writes one row per `(target, k, seed)` (`auroc`, `auprc`, `n_finetune`, …) to
+`reports/superviz26-fsl/cells/ae_{extractor}_{target}.csv`; the per-seed AUROCs are
+averaged downstream and compared against the in-domain table
+(`reports/superviz26_results.csv`), where recovery is "within 0.01 AUROC of in-domain".
+
 ## Results
 
 MLflow is the canonical store: each cell logs an independent run, nested under a parent

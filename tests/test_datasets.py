@@ -7,7 +7,11 @@ import pytest
 
 from mlops_sqldetect.datasets import FAMILIES
 from mlops_sqldetect.datasets.superviz25 import Superviz25, load_split
+from mlops_sqldetect.datasets.superviz26 import Superviz26
+from mlops_sqldetect.datasets.superviz26_drift import DOMAINS as DRIFT_DOMAINS
 from mlops_sqldetect.datasets.superviz26_drift import Superviz26Drift, load_drift
+from mlops_sqldetect.datasets.superviz26_fsl import DOMAINS as FSL_DOMAINS
+from mlops_sqldetect.datasets.superviz26_fsl import Superviz26FSL, load_fsl, lodo_source
 
 
 def _write_csv(path):
@@ -36,7 +40,7 @@ def _write_drift_csv(path):
 
 
 def test_family_registry_resolves_all_datasets():
-    assert set(FAMILIES) == {"superviz25", "superviz26", "superviz26-big", "superviz26-drift"}
+    assert set(FAMILIES) == {"superviz25", "superviz26", "superviz26-big", "superviz26-drift", "superviz26-fsl"}
     assert FAMILIES["superviz25"].suites == {"all": (Superviz25.MAIN,)}
     assert set(FAMILIES["superviz26"].suites) == {"in_domain", "lodo", "all"}
 
@@ -44,7 +48,7 @@ def test_family_registry_resolves_all_datasets():
 def test_drift_family_is_a_drift_protocol_with_four_domains():
     family = FAMILIES["superviz26-drift"]
     assert family.protocol == "drift"
-    assert family.suites["all"] == Superviz26Drift.DOMAINS
+    assert family.suites["all"] == DRIFT_DOMAINS
     assert FAMILIES["superviz26"].protocol == "suite"
 
 
@@ -64,6 +68,34 @@ def test_load_drift_partitions_origin_train_origin_test_shifted_test(tmp_path):
 def test_load_drift_missing_file_hints_at_builder(tmp_path):
     with pytest.raises(FileNotFoundError, match="build_concept_drift"):
         load_drift(Superviz26Drift.A, root=tmp_path)
+
+
+def test_fsl_family_is_an_fsl_protocol_with_four_targets():
+    family = FAMILIES["superviz26-fsl"]
+    assert family.protocol == "fsl"
+    assert family.suites["all"] == FSL_DOMAINS
+
+
+def test_fsl_lodo_source_maps_each_target_to_its_held_out_lodo_split():
+    assert lodo_source(Superviz26FSL.A) == Superviz26.BCD_A
+    assert lodo_source(Superviz26FSL.D) == Superviz26.ABC_D
+
+
+def test_load_fsl_returns_target_train_and_test_from_the_in_domain_file(tmp_path):
+    # The few-shot loader reads the target's in-domain (x-x) CSV: train rows (both
+    # labels, for the benign k-draw) and the test split (with attack_technique).
+    _write_csv(tmp_path / "a-a.csv")
+    train, test = load_fsl(Superviz26FSL.A, root=tmp_path)
+    assert len(train) == 2
+    assert set(train["label"]) == {0}
+    assert len(test) == 2
+    assert set(test["label"]) == {0, 1}
+    assert "attack_technique" in test.columns
+
+
+def test_load_fsl_missing_file_hints_at_fetcher(tmp_path):
+    with pytest.raises(FileNotFoundError, match="fetch_superviz26"):
+        load_fsl(Superviz26FSL.A, root=tmp_path)
 
 
 def test_superviz25_load_split_filters_by_split(tmp_path):

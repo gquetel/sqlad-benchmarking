@@ -414,9 +414,11 @@ def evaluate_suite(
     Returns the results table as a DataFrame for programmatic use.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    if dataset in FAMILIES and FAMILIES[dataset].protocol == "drift":
+    if dataset in FAMILIES and FAMILIES[dataset].protocol != "suite":
+        evaluator = {"drift": "evaluate_drift", "fsl": "evaluate_fsl"}.get(FAMILIES[dataset].protocol, "its evaluator")
         raise typer.BadParameter(
-            f"{dataset!r} uses the concept-drift protocol; run it through `python -m mlops_sqldetect.evaluate_drift`."
+            f"{dataset!r} uses the {FAMILIES[dataset].protocol!r} protocol; "
+            f"run it through `python -m mlops_sqldetect.{evaluator}`."
         )
     family, datasets, requested_pipelines, requested_extractors = _validate_grid(
         dataset, suite, pipelines, extractors, scenario

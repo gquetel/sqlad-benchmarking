@@ -293,6 +293,40 @@ class AEDetector:
         arr = rows.toarray() if issparse(rows) else np.asarray(rows)
         return torch.from_numpy(arr.astype(np.float32)).to(self.device)
 
+    def _train(
+        self,
+        x,
+        optimizer: torch.optim.Optimizer,
+        epochs: int,
+        epoch_callback: Callable[[int, float], None] | None,
+    ) -> None:
+        """Run ``epochs`` of MSE reconstruction training over the feature matrix ``x``.
+
+        Shared by :meth:`fit` (fresh network) and :meth:`fine_tune` (pretrained
+        network at a reduced learning rate); the caller owns network creation and the
+        optimizer so this only drives the batch loop.
+        """
+        if self.net is None:
+            raise RuntimeError("network must be created before training")
+        n_samples = x.shape[0]
+        loss_fn = nn.MSELoss()
+        self.net.train()
+        for epoch in range(epochs):
+            # Sequential (un-shuffled) batching: batches follow the row order of x.
+            epoch_loss = 0.0
+            n_batches = 0
+            for start in range(0, n_samples, self.config.batch_size):
+                batch = self._batch_tensor(x[start : start + self.config.batch_size])
+                optimizer.zero_grad()
+                loss = loss_fn(self.net(batch), batch)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+                n_batches += 1
+            if epoch_callback is not None and n_batches:
+                epoch_callback(epoch, epoch_loss / n_batches)
+        self.net.eval()
+
     def fit(
         self,
         df: pd.DataFrame,
@@ -307,28 +341,47 @@ class AEDetector:
         """
         torch.manual_seed(self.config.seed)
         x = self._featurize(df, fit=True)
-        n_samples, input_dim = x.shape
+        input_dim = x.shape[1]
 
         self.net = _AutoEncoderNet(input_dim=input_dim, output_activation=self.output_activation).to(self.device)
         optimizer = torch.optim.Adam(self.net.parameters(), lr=self.config.learning_rate)
-        loss_fn = nn.MSELoss()
+        self._train(x, optimizer, self.config.epochs, epoch_callback)
+        return self
 
-        self.net.train()
-        for epoch in range(self.config.epochs):
-            # Sequential (un-shuffled) batching: batches follow the row order of x.
-            epoch_loss = 0.0
-            n_batches = 0
-            for start in range(0, n_samples, self.config.batch_size):
-                batch = self._batch_tensor(x[start : start + self.config.batch_size])
-                optimizer.zero_grad()
-                loss = loss_fn(self.net(batch), batch)
-                loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
-                n_batches += 1
-            if epoch_callback is not None:
-                epoch_callback(epoch, epoch_loss / n_batches)
-        self.net.eval()
+    def fine_tune(
+        self,
+        df: pd.DataFrame,
+        *,
+        learning_rate: float,
+        epochs: int | None = None,
+        seed: int | None = None,
+        epoch_callback: Callable[[int, float], None] | None = None,
+    ) -> "AEDetector":
+        """Continue training the pretrained network on ``df`` with a frozen front-end.
+
+        Used by the few-shot adaptation protocol: the autoencoder keeps the weights it
+        was loaded with and only they are updated, while the already-fitted feature
+        extractor and scaler are reused unchanged (``df`` is featurised with
+        ``fit=False``). The caller passes the reduced ``learning_rate`` (the
+        pretraining rate divided by ten) and the per-repetition ``seed``; every other
+        setting follows the loaded :class:`AEConfig`.
+
+        Args:
+            df: Benign target-domain samples to adapt on.
+            learning_rate: Optimizer learning rate for the adaptation phase.
+            epochs: Number of epochs (defaults to the config's ``epochs``).
+            seed: Torch seed for this run (defaults to the config's ``seed``).
+            epoch_callback: Optional ``(epoch, mean_loss)`` hook called once per epoch.
+
+        Raises:
+            RuntimeError: If no network has been fitted or loaded yet.
+        """
+        if self.net is None:
+            raise RuntimeError("fine_tune requires a fitted or loaded model")
+        torch.manual_seed(self.config.seed if seed is None else seed)
+        x = self._featurize(df, fit=False)
+        optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
+        self._train(x, optimizer, self.config.epochs if epochs is None else epochs, epoch_callback)
         return self
 
     @torch.no_grad()

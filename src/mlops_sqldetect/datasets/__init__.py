@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from mlops_sqldetect.datasets import superviz25, superviz26, superviz26_big, superviz26_drift
+from mlops_sqldetect.datasets import superviz25, superviz26, superviz26_big, superviz26_drift, superviz26_fsl
 from mlops_sqldetect.datasets.superviz25 import Superviz25
 from mlops_sqldetect.datasets.superviz26 import (
     IN_DOMAIN,
@@ -35,7 +35,9 @@ class DatasetFamily:
     ``protocol`` selects the evaluator a family is run through: ``"suite"`` for the
     standard train-once/evaluate-once grid (:mod:`mlops_sqldetect.evaluate_suite`),
     ``"drift"`` for the train-once/evaluate-twice concept-drift protocol
-    (:mod:`mlops_sqldetect.evaluate_drift`). The SLURM runner dispatches on it.
+    (:mod:`mlops_sqldetect.evaluate_drift`), ``"fsl"`` for the few-shot
+    domain-adaptation protocol that fine-tunes a pretrained LODO autoencoder
+    (:mod:`mlops_sqldetect.evaluate_fsl`). The SLURM runner dispatches on it.
     """
 
     name: str
@@ -90,6 +92,18 @@ FAMILIES: dict[str, DatasetFamily] = {
         default_root=superviz26_drift.default_root,
         resolve_path=superviz26_drift.resolve_path,
         protocol="drift",
+    ),
+    "superviz26-fsl": DatasetFamily(
+        name="superviz26-fsl",
+        # One scenario per target domain; the few-shot evaluator adapts that domain's
+        # pretrained LODO autoencoder on k benign target samples and evaluates it on
+        # the domain's own test set. Data is re-used from the base superviz26 family.
+        suites={"all": superviz26_fsl.DOMAINS},
+        load_split=superviz26_fsl.load_split,
+        manifest=superviz26_fsl.manifest,
+        default_root=superviz26_fsl.default_root,
+        resolve_path=superviz26_fsl.resolve_path,
+        protocol="fsl",
     ),
 }
 
