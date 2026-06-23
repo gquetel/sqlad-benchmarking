@@ -43,7 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPERIMENT = "Superviz26-SQL"
 
 # Pipelines in display order: (feature_extractor, engine, paper label, figure short label).
-# Labels are paper-facing (AE, Secure-BERT) and intentionally differ from the repo's
+# Labels are paper-facing (AE, SecureBERT) and intentionally differ from the repo's
 # canonical PIPELINE_LABELS / EXTRACTOR_LABELS ("Autoencoder", "SecureBERT").
 PIPELINES: list[tuple[str, str, str, str]] = [
     ("cv", "ae", "CountVectorizer + AE", "CV+AE"),
@@ -55,9 +55,9 @@ PIPELINES: list[tuple[str, str, str, str]] = [
     ("loginov", "ae", "Loginov + AE", "Loginov+AE"),
     ("loginov", "lof", "Loginov + LOF", "Loginov+LOF"),
     ("loginov", "ocsvm", "Loginov + OCSVM", "Loginov+OCSVM"),
-    ("sbert", "ae", "Secure-BERT + AE", "SBERT+AE"),
-    ("sbert", "lof", "Secure-BERT + LOF", "SBERT+LOF"),
-    ("sbert", "ocsvm", "Secure-BERT + OCSVM", "SBERT+OCSVM"),
+    ("sbert", "ae", "SecureBERT + AE", "SecureBERT+AE"),
+    ("sbert", "lof", "SecureBERT + LOF", "SecureBERT+LOF"),
+    ("sbert", "ocsvm", "SecureBERT + OCSVM", "SecureBERT+OCSVM"),
     ("codet5", "ae", "CodeT5+ + AE", "CodeT5+AE"),
     ("codet5", "lof", "CodeT5+ + LOF", "CodeT5+LOF"),
     ("codet5", "ocsvm", "CodeT5+ + OCSVM", "CodeT5+OCSVM"),
@@ -91,11 +91,9 @@ LODO_CAPTION = (
     r"reported. Missing entries (--) correspond to runs not yet available."
 )
 FIGURE_CAPTION = (
-    r"In-domain (\textcolor{blue!70!black}{\textbullet}) vs.\ LODO "
-    r"(\textcolor{red!70!black}{$\blacksquare$}) detection performance per pipeline, averaged "
-    r"over the four scenarios of each regime; the connector length is the cross-domain gap "
-    r"$\Delta = \text{LODO} - \text{ID}$. CV~=~CountVectorizer, SBERT~=~Secure-BERT, "
-    r"CodeT5~=~CodeT5+."
+    r"In-domain (\textbullet) vs.\ LODO ($\blacksquare$) detection performance per pipeline, "
+    r"averaged over the four scenarios of each regime; the connector length is the cross-domain "
+    r"gap $\Delta = \text{LODO} - \text{ID}$, shown in green when small ($> -0.05$) and red otherwise."
 )
 SUMMARY_CAPTION = (
     r"In-domain (ID) vs.\ leave-one-domain-out (LODO) detection performance of the fifteen "
@@ -109,7 +107,7 @@ def _num(x: object) -> float | None:
     """Coerce an MLflow metric cell to a float, mapping missing/NaN to None."""
     try:
         v = float(x)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return None if math.isnan(v) else v
 
@@ -287,17 +285,55 @@ def render_summary_table(data: Results) -> str:
 
 # --- dumbbell figure ---------------------------------------------------------
 
-# Decision-head order within each feature-extractor group (top-to-bottom in the figure).
+# Places the gap label by each connector; \dumbthresh/\dumbthreshR are set per subfigure.
+DUMBDELTA_MACRO = r"""  % \dumbdelta{leftx}{rightx}{ycoord}{value}: place the delta label left of the left marker;
+  % flip it right of the right marker if it would overflow (leftx<thresh), else onto the midpoint.
+  \def\dumbdelta#1#2#3#4{%
+    \pgfmathsetmacro{\dmid}{(#1+#2)/2}%
+    \pgfmathparse{#1<\dumbthresh}%
+    \ifdim\pgfmathresult pt>0.5pt
+      \pgfmathparse{#2>\dumbthreshR}%
+      \ifdim\pgfmathresult pt>0.5pt
+        \node[font=\tiny, fill=white, fill opacity=0.9, text opacity=1, inner sep=0.4pt] at (axis cs:\dmid,#3) {$#4$};
+      \else
+        \node[font=\tiny, anchor=west, xshift=3pt] at (axis cs:#2,#3) {$#4$};
+      \fi
+    \else
+      \node[font=\tiny, anchor=east, xshift=-3pt] at (axis cs:#1,#3) {$#4$};
+    \fi}"""
+
+# Decision-engine rows inside each per-feature-extractor mini-plot. ENGINE_ORDER is the
+# top-to-bottom screen order; the symbolic y coords list them bottom-to-top (ENGINE_BTT).
 ENGINE_ORDER = {"lof": 0, "ocsvm": 1, "ae": 2}
+ENGINE_BTT = sorted(ENGINE_ORDER, key=lambda e: ENGINE_ORDER[e], reverse=True)  # ae, ocsvm, lof
+
+# Paper-facing short labels: feature extractor names title each mini-plot, decision engines
+# label the (shared) y ticks.
+EXTRACTOR_SHORT = {"cv": "CV", "li": "Li", "loginov": "Loginov", "sbert": "SecureBERT", "codet5": "CodeT5+"}
+ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
+SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in PIPELINES}
+
+# x ticks shared by both panels; a panel renders only those within its x-range.
+_XTICK_GRID = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
 
 
-def _grouped_order() -> list[str]:
-    """Figure short labels top-to-bottom: grouped by feature extractor, then LOF, OCSVM, AE."""
-    extractor_pos: dict[str, int] = {}
-    for extractor, _, _, _ in PIPELINES:
-        extractor_pos.setdefault(extractor, len(extractor_pos))
-    ordered = sorted(PIPELINES, key=lambda p: (extractor_pos[p[0]], ENGINE_ORDER.get(p[1], 99)))
-    return [short for _, _, _, short in ordered]
+def _fmt_tick(v: float) -> str:
+    """Format an x tick: a bare ``0`` for the origin, one decimal otherwise (e.g. ``0.2``, ``1.0``)."""
+    return "0" if abs(v) < 1e-9 else f"{v:.1f}"
+
+
+def _xticks(xmin: float) -> str:
+    """Comma-separated ticks from ``_XTICK_GRID`` that fall within ``[xmin, 1]``."""
+    return ",".join(_fmt_tick(v) for v in _XTICK_GRID if v >= xmin - 1e-9)
+
+
+def _extractor_order() -> list[str]:
+    """Feature extractors top-to-bottom in the figure: the reverse of their PIPELINES order."""
+    seen: list[str] = []
+    for extractor, *_ in PIPELINES:
+        if extractor not in seen:
+            seen.append(extractor)
+    return list(reversed(seen))
 
 
 def _averages(data: Results) -> dict[str, Metrics]:
@@ -323,74 +359,184 @@ def _averages(data: Results) -> dict[str, Metrics]:
     return out
 
 
-def _panel(
-    order: list[str],
+def _pgfplotsset(auroc_xmin: float, ycoords: str, bottom_title: str) -> str:
+    """The shared ``dumbstack``/``dumbstackp`` mini-plot styles (one x scale per panel)."""
+    return (
+        "  % shared style for the per-feature-extractor AUROC mini-plots: identical x scale,\n"
+        f"  % x ticks/label hidden by default and re-enabled only on the bottom ({bottom_title}) plot.\n"
+        "  \\pgfplotsset{\n"
+        "    dumbstack/.style={\n"
+        "      width=\\linewidth, height=2.4cm,\n"
+        f"      xmin={auroc_xmin:.2f}, xmax=1.00,\n"
+        f"      xtick={{{_xticks(auroc_xmin)}}},\n"
+        f"      symbolic y coords={{{ycoords}}},\n"
+        "      ytick=data,\n"
+        f"      yticklabels={{{ycoords}}},\n"
+        "      tick label style={font=\\scriptsize},\n"
+        "      yticklabel style={font=\\tiny},\n"
+        "      enlarge y limits=0.12,\n"
+        "      xmajorgrids, grid style={dotted},\n"
+        "      tick align=outside,\n"
+        "      xticklabels={},\n"
+        "      title style={font=\\scriptsize, at={(0.01,1)}, anchor=south west, yshift=-5pt},\n"
+        "    },\n"
+        "    % AUPRC variant: wider x range, no y labels (shared from the AUROC panel).\n"
+        f"    dumbstackp/.style={{dumbstack, xmin=0.00, xtick={{{_xticks(0.0)}}}, yticklabels={{}}}},\n"
+        "  }"
+    )
+
+
+def _fe_plot(
+    extractor: str,
     avgs: dict[str, Metrics],
     id_key: str,
     lodo_key: str,
+    style: str,
+    *,
+    is_bottom: bool,
+    xticklabels: str,
+    bottom_shows_label: bool,
+) -> str:
+    """Render one feature-extractor mini-plot (three decision-engine dumbbell rows)."""
+    title = EXTRACTOR_SHORT[extractor]
+    if is_bottom:
+        extra = " + label" if bottom_shows_label else ""
+        comment = f"    % --- {title} (bottom plot: x-axis ticks{extra} shown here only) ---"
+    else:
+        comment = f"    % --- {title} ---"
+    axis_opts = f"{style}, title={title}"
+    if is_bottom:
+        axis_opts += f", xticklabels={{{xticklabels}}}"
+
+    cells = {e: avgs[SHORT_BY_CELL[(extractor, e)]] for e in ENGINE_BTT}
+    connectors = "\n".join(
+        f"        \\addplot[gray, line width=0.8pt, forget plot] coordinates "
+        f"{{({cells[e][lodo_key]:.4f},{ENGINE_SHORT[e]}) ({cells[e][id_key]:.4f},{ENGINE_SHORT[e]})}};"
+        for e in ENGINE_BTT
+    )
+    lodo_marks = " ".join(f"({cells[e][lodo_key]:.4f},{ENGINE_SHORT[e]})" for e in ENGINE_BTT)
+    id_marks = " ".join(f"({cells[e][id_key]:.4f},{ENGINE_SHORT[e]})" for e in ENGINE_BTT)
+    # Gap label per engine: green when the gap is small (> -0.05), red otherwise.
+    deltas = []
+    for e in ENGINE_BTT:
+        idv, lodov = cells[e][id_key], cells[e][lodo_key]
+        delta = lodov - idv
+        color = "green!50!black" if delta > -0.05 else "red!80!black"
+        value = rf"\textcolor{{{color}}}{{{delta:+.2f}}}"
+        deltas.append(
+            f"        \\dumbdelta{{{min(idv, lodov):.4f}}}{{{max(idv, lodov):.4f}}}{{{ENGINE_SHORT[e]}}}{{{value}}}"
+        )
+    delta_block = "\n".join(deltas)
+    suffix = "" if is_bottom else "\\\\[-6pt]"
+    return (
+        f"{comment}\n"
+        "    \\begin{tikzpicture}\n"
+        f"      \\begin{{axis}}[{axis_opts}]\n"
+        f"{connectors}\n"
+        f"        \\addplot[only marks, mark=square*, mark size=2pt, black] coordinates {{{lodo_marks}}};\n"
+        f"        \\addplot[only marks, mark=*, mark size=2pt, black] coordinates {{{id_marks}}};\n"
+        f"{delta_block}\n"
+        "      \\end{axis}\n"
+        f"    \\end{{tikzpicture}}{suffix}"
+    )
+
+
+def _panel(
+    extractors: list[str],
+    avgs: dict[str, Metrics],
+    id_key: str,
+    lodo_key: str,
+    style: str,
+    xticklabels: str,
     xmin: float,
     xmax: float,
     *,
-    yticklabels: bool,
     caption: str,
+    bottom_shows_label: bool,
 ) -> str:
-    """Render one dumbbell subfigure (``order`` lists pipelines bottom-to-top)."""
-    coords = ",".join(order)
-    connector_style = r"\addplot[gray, line width=0.8pt, forget plot]"
-    connectors = "\n".join(
-        f"        {connector_style} coordinates {{({avgs[s][lodo_key]:.4f},{s}) ({avgs[s][id_key]:.4f},{s})}};"
-        for s in order
-    )
-    lodo_marks = " ".join(f"({avgs[s][lodo_key]:.4f},{s})" for s in order)
-    id_marks = " ".join(f"({avgs[s][id_key]:.4f},{s})" for s in order)
-    ytick = "" if yticklabels else "\n        yticklabels={},"
-    return (
-        "  \\begin{subfigure}{0.49\\linewidth}\n"
-        "    \\centering\n"
-        "    \\begin{tikzpicture}\n"
-        "      \\begin{axis}[\n"
-        "        width=\\linewidth, height=5.2cm,\n"
-        f"        xmin={xmin:.2f}, xmax={xmax:.2f},\n"
-        f"        symbolic y coords={{{coords}}},\n"
-        f"        ytick=data,{ytick}\n"
-        "        tick label style={font=\\scriptsize},\n"
-        "        enlarge y limits=0.12,\n"
-        "        xmajorgrids, grid style={dotted},\n"
-        "        tick align=outside,\n"
-        "      ]\n"
-        f"{connectors}\n"
-        f"        \\addplot[only marks, mark=square*, mark size=2pt, red!70!black] coordinates {{{lodo_marks}}};\n"
-        f"        \\addplot[only marks, mark=*, mark size=2pt, blue!70!black] coordinates {{{id_marks}}};\n"
-        "      \\end{axis}\n"
-        "    \\end{tikzpicture}\n"
-        f"    \\caption{{{caption}}}\n"
-        "  \\end{subfigure}"
-    )
+    """Render one dumbbell subfigure: a stack of per-feature-extractor mini-plots."""
+    span = xmax - xmin
+    lines = [
+        "  \\begin{subfigure}{0.49\\linewidth}",
+        "    \\centering",
+        f"    \\def\\dumbthresh{{{xmin + 0.20 * span:.2f}}}",
+        f"    \\def\\dumbthreshR{{{xmax - 0.13 * span:.2f}}}",
+    ]
+    for i, extractor in enumerate(extractors):
+        lines.append(
+            _fe_plot(
+                extractor,
+                avgs,
+                id_key,
+                lodo_key,
+                style,
+                is_bottom=i == len(extractors) - 1,
+                xticklabels=xticklabels,
+                bottom_shows_label=bottom_shows_label,
+            )
+        )
+    lines.append(f"    \\caption{{{caption}}}")
+    lines.append("  \\end{subfigure}")
+    return "\n".join(lines)
 
 
 def render_figure(data: Results) -> str:
-    """Render the two-panel (AUROC, AUPRC) dumbbell figure for the fully-available pipelines."""
+    """Render the two-panel (AUROC, AUPRC) dumbbell figure for the fully-available extractors."""
     avgs = _averages(data)
     keys = ("id_auroc", "lodo_auroc", "id_auprc", "lodo_auprc")
-    top_to_bottom = [s for s in _grouped_order() if all(avgs[s][k] is not None for k in keys)]
-    if not top_to_bottom:
-        raise RuntimeError("No pipeline has the full in-domain and LODO averages required for the figure.")
-    # Rows grouped by feature extractor (FE+LOF, FE+OCSVM, FE+AE); symbolic y coords
-    # list bottom-to-top, so reverse the top-to-bottom display order.
-    order = list(reversed(top_to_bottom))
 
-    auroc_min = min(min(avgs[s]["id_auroc"], avgs[s]["lodo_auroc"]) for s in order)
+    def complete(extractor: str) -> bool:
+        return all(avgs[SHORT_BY_CELL[(extractor, e)]][k] is not None for e in ENGINE_BTT for k in keys)
+
+    extractors = [e for e in _extractor_order() if complete(e)]
+    if not extractors:
+        raise RuntimeError(
+            "No feature extractor has all three engines' in-domain and LODO averages required for the figure."
+        )
+
+    auroc_min = min(
+        min(avgs[SHORT_BY_CELL[(extractor, e)]]["id_auroc"], avgs[SHORT_BY_CELL[(extractor, e)]]["lodo_auroc"])
+        for extractor in extractors
+        for e in ENGINE_BTT
+    )
     auroc_xmin = max(0.0, math.floor(auroc_min * 20 - 1) / 20)
+
+    ycoords = ",".join(ENGINE_SHORT[e] for e in ENGINE_BTT)
+    pgfset = _pgfplotsset(auroc_xmin, ycoords, EXTRACTOR_SHORT[extractors[-1]])
 
     panels = "\n  \\hfill\n".join(
         [
-            _panel(order, avgs, "id_auroc", "lodo_auroc", auroc_xmin, 1.0, yticklabels=True, caption="AUROC"),
-            _panel(order, avgs, "id_auprc", "lodo_auprc", 0.0, 1.0, yticklabels=False, caption="AUPRC"),
+            _panel(
+                extractors,
+                avgs,
+                "id_auroc",
+                "lodo_auroc",
+                "dumbstack",
+                _xticks(auroc_xmin),
+                auroc_xmin,
+                1.0,
+                caption="AUROC",
+                bottom_shows_label=True,
+            ),
+            _panel(
+                extractors,
+                avgs,
+                "id_auprc",
+                "lodo_auprc",
+                "dumbstackp",
+                _xticks(0.0),
+                0.0,
+                1.0,
+                caption="AUPRC",
+                bottom_shows_label=False,
+            ),
         ]
     )
     return (
         "\\begin{figure}[!htb]\n"
         "  \\centering\n"
+        f"{DUMBDELTA_MACRO}\n"
+        f"{pgfset}\n"
         f"{panels}\n"
         f"  \\caption{{{FIGURE_CAPTION}}}\n"
         "  \\label{fig:superviz26-dumbbell}\n"
@@ -412,10 +558,9 @@ def _write(text: str, path: Path) -> None:
 
 @app.command()
 def main(
-    table_out: Annotated[Path, typer.Option(help="Path of the compact in-domain vs. LODO summary table (.tex).")] = REPO_ROOT
-    / "reports"
-    / "superviz26"
-    / "superviz26-baselines.tex",
+    table_out: Annotated[
+        Path, typer.Option(help="Path of the compact in-domain vs. LODO summary table (.tex).")
+    ] = REPO_ROOT / "reports" / "superviz26" / "superviz26-baselines.tex",
     figure_out: Annotated[Path, typer.Option(help="Path of the dumbbell figure (.tex).")] = REPO_ROOT
     / "reports"
     / "superviz26"
