@@ -287,6 +287,18 @@ def render_summary_table(data: Results) -> str:
 
 # --- dumbbell figure ---------------------------------------------------------
 
+# Decision-head order within each feature-extractor group (top-to-bottom in the figure).
+ENGINE_ORDER = {"lof": 0, "ocsvm": 1, "ae": 2}
+
+
+def _grouped_order() -> list[str]:
+    """Figure short labels top-to-bottom: grouped by feature extractor, then LOF, OCSVM, AE."""
+    extractor_pos: dict[str, int] = {}
+    for extractor, _, _, _ in PIPELINES:
+        extractor_pos.setdefault(extractor, len(extractor_pos))
+    ordered = sorted(PIPELINES, key=lambda p: (extractor_pos[p[0]], ENGINE_ORDER.get(p[1], 99)))
+    return [short for _, _, _, short in ordered]
+
 
 def _averages(data: Results) -> dict[str, Metrics]:
     """Per pipeline, average each metric over the in-domain and LODO scenarios."""
@@ -359,17 +371,13 @@ def _panel(
 def render_figure(data: Results) -> str:
     """Render the two-panel (AUROC, AUPRC) dumbbell figure for the fully-available pipelines."""
     avgs = _averages(data)
-    order_desc = [
-        s
-        for s, m in sorted(
-            avgs.items(), key=lambda kv: (kv[1]["lodo_auroc"] is not None, kv[1]["lodo_auroc"] or 0.0), reverse=True
-        )
-        if all(m[k] is not None for k in ("id_auroc", "lodo_auroc", "id_auprc", "lodo_auprc"))
-    ]
-    if not order_desc:
+    keys = ("id_auroc", "lodo_auroc", "id_auprc", "lodo_auprc")
+    top_to_bottom = [s for s in _grouped_order() if all(avgs[s][k] is not None for k in keys)]
+    if not top_to_bottom:
         raise RuntimeError("No pipeline has the full in-domain and LODO averages required for the figure.")
-    # Plot best-generalising pipeline on top: symbolic y coords list bottom-to-top.
-    order = list(reversed(order_desc))
+    # Rows grouped by feature extractor (FE+LOF, FE+OCSVM, FE+AE); symbolic y coords
+    # list bottom-to-top, so reverse the top-to-bottom display order.
+    order = list(reversed(top_to_bottom))
 
     auroc_min = min(min(avgs[s]["id_auroc"], avgs[s]["lodo_auroc"]) for s in order)
     auroc_xmin = max(0.0, math.floor(auroc_min * 20 - 1) / 20)
