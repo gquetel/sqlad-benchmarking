@@ -153,12 +153,12 @@ def _xticks(xmin: float) -> str:
 
 
 def _extractor_order() -> list[str]:
-    """Feature extractors top-to-bottom in the figure: the reverse of their PIPELINES order."""
+    """Feature extractors top-to-bottom in the figure, following their PIPELINES order."""
     seen: list[str] = []
     for extractor, *_ in PIPELINES:
         if extractor not in seen:
             seen.append(extractor)
-    return list(reversed(seen))
+    return seen
 
 
 def _averages(data: Results) -> dict[str, Metrics]:

@@ -43,8 +43,8 @@ EXPERIMENT_200K = "Big-Superviz26-SQL"
 # Pipelines in display order: (feature_extractor tag, paper label). All use the AE engine.
 PIPELINES: list[tuple[str, str]] = [
     ("li", "Li + AE"),
+    ("sbert", "SecureBERT + AE"),
     ("codet5", "CodeT5+ + AE"),
-    ("sbert", "Secure-BERT + AE"),
 ]
 
 # (scenario key as tagged in MLflow) for each regime.
