@@ -134,7 +134,7 @@ ENGINE_BTT = sorted(ENGINE_ORDER, key=lambda e: ENGINE_ORDER[e], reverse=True)  
 
 # Paper-facing short labels: feature extractor names title each mini-plot, decision engines
 # label the (shared) y ticks.
-EXTRACTOR_SHORT = {"cv": "CV", "li": "Li", "loginov": "Loginov", "sbert": "SecureBERT", "codet5": "CodeT5+"}
+EXTRACTOR_SHORT = {"cv": "CountVectorizer", "li": "Li", "loginov": "Loginov", "sbert": "SecureBERT", "codet5": "CodeT5+"}
 ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
 SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in PIPELINES}
 
@@ -246,8 +246,8 @@ def _fe_plot(
     for e in ENGINE_BTT:
         s1v, s2v = cells[e][s1_key], cells[e][s2_key]
         delta = s1v - s2v
-        color = "green!50!black" if delta < 0.05 else "red!80!black"
-        value = rf"\textcolor{{{color}}}{{{delta:+.2f}}}"
+        color = "66BB6A" if delta < 0.05 else "E57373"
+        value = rf"\textcolor[HTML]{{{color}}}{{{delta:+.2f}}}"
         deltas.append(
             f"        \\dumbdelta{{{min(s1v, s2v):.4f}}}{{{max(s1v, s2v):.4f}}}{{{ENGINE_SHORT[e]}}}{{{value}}}"
         )
