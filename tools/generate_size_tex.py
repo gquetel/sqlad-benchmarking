@@ -7,7 +7,7 @@ AE pipelines on the full per-domain training pools and re-evaluating on the test
 The two training-set sizes live in two MLflow experiments that share the same tags:
 
   * 100k (standard) -> ``Superviz26-SQL``     (see tracking._EXPERIMENT_NAMES)
-  * Full (Big)      -> ``Big-Superviz26-SQL``
+  * Full (Big)      -> ``Full-Superviz26-SQL``
 
 For each pipeline (AE on top of the Li, CodeT5+ and SecureBERT extractors) and each
 regime (in-domain, LODO), this emits the AUROC averaged over the four scenarios on the
@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # MLflow experiments holding the two training-set sizes (see tracking._EXPERIMENT_NAMES).
 EXPERIMENT_100K = "Superviz26-SQL"
-EXPERIMENT_BIG = "Big-Superviz26-SQL"
+EXPERIMENT_BIG = "Full-Superviz26-SQL"
 
 # Pipelines in display order: (feature_extractor tag, paper label). All use the AE engine.
 PIPELINES: list[tuple[str, str]] = [
