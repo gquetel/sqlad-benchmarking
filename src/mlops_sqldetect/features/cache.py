@@ -76,7 +76,7 @@ class CachingExtractor(BaseEstimator, TransformerMixin):
         path = Path(self.cache_dir) / f"{self._key(X)}.npz"
         cached = self._load(path)
         if cached is not None:
-            logger.info("Feature cache hit: %s", path.name)
+            logger.info("Feature cache hit: %s (%d samples)", path.name, cached.shape[0])
             return cached
         result = self.base.transform(X)
         self._save(path, result)

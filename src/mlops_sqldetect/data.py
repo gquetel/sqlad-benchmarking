@@ -7,12 +7,15 @@ as ``split`` are preserved when requested via ``usecols``.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from pathlib import Path
 
 import pandas as pd
 
 REQUIRED_COLUMNS = ("full_query", "label")
+
+logger = logging.getLogger(__name__)
 
 
 def load_dataset(
@@ -55,6 +58,8 @@ def load_dataset(
         for c in cols:
             dtype.setdefault(c, "str")
 
+    # Trace the exact file opened so a cache hit can be tied back to its source.
+    logger.info("Loading dataset: %s", data_path.resolve())
     df = pd.read_csv(data_path, **read_kwargs)
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
