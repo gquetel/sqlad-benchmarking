@@ -2,16 +2,16 @@
 
 The size experiment (Section "Size evaluation" of the benchmark paper) asks whether
 the 100k subsampled training sets are large enough, by retraining the most performant
-AE pipelines on a 200k superset and re-evaluating on the unchanged 1M test splits.
+AE pipelines on the full per-domain training pools and re-evaluating on the test splits.
 
 The two training-set sizes live in two MLflow experiments that share the same tags:
 
   * 100k (standard) -> ``Superviz26-SQL``     (see tracking._EXPERIMENT_NAMES)
-  * 200k (Big)      -> ``Big-Superviz26-SQL``
+  * Full (Big)      -> ``Big-Superviz26-SQL``
 
 For each pipeline (AE on top of the Li, CodeT5+ and SecureBERT extractors) and each
 regime (in-domain, LODO), this emits the AUROC averaged over the four scenarios on the
-100k and 200k sets, plus the larger-minus-standard difference Delta. MLflow is the
+100k and full sets, plus the full-minus-standard difference Delta. MLflow is the
 single source of truth: the latest finished full-run per ``(extractor, scenario)`` cell
 wins, so re-running this refreshes the table.
 
@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # MLflow experiments holding the two training-set sizes (see tracking._EXPERIMENT_NAMES).
 EXPERIMENT_100K = "Superviz26-SQL"
-EXPERIMENT_200K = "Big-Superviz26-SQL"
+EXPERIMENT_BIG = "Big-Superviz26-SQL"
 
 # Pipelines in display order: (feature_extractor tag, paper label). All use the AE engine.
 PIPELINES: list[tuple[str, str]] = [
@@ -57,10 +57,10 @@ def _caption() -> str:
     labels = [label.replace(" ", "~") for _, label in PIPELINES]
     listed = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
     return (
-        rf"Effect of doubling the training set size on the AUROC of the {listed} pipelines. "
-        r"For each pipeline and regime, the AUROC is averaged over the four scenarios on the "
-        r"standard (100k) and larger (200k) training sets; the $\Delta$ column reports the "
-        r"larger-minus-standard difference."
+        rf"Effect of enlarging the training set to the full per-domain pools on the AUROC of the "
+        rf"{listed} pipelines. For each pipeline and regime, the AUROC is averaged over the four "
+        r"scenarios on the standard (100k) and full training sets; the $\Delta$ column reports the "
+        r"full-minus-standard difference."
     )
 
 
@@ -99,7 +99,7 @@ def _avg(aurocs: dict[tuple[str, str], float], extractor: str, scenarios: list[s
 
 
 def render_table(small: dict[tuple[str, str], float], big: dict[tuple[str, str], float]) -> str:
-    """Render the size-sufficiency table (pipeline x regime: 100k, 200k, Delta)."""
+    """Render the size-sufficiency table (pipeline x regime: 100k, Full, Delta)."""
     out = [
         r"\begin{table}[htb]",
         r"  \centering",
@@ -108,7 +108,7 @@ def render_table(small: dict[tuple[str, str], float], big: dict[tuple[str, str],
         r"    \hline",
         r"    & & \multicolumn{3}{c}{\textbf{AUROC}} \\",
         r"    \cline{3-5}",
-        r"    \textbf{Pipeline} & \textbf{Regime} & \textbf{100k} & \textbf{200k} & \textbf{$\Delta$} \\",
+        r"    \textbf{Pipeline} & \textbf{Regime} & \textbf{100k} & \textbf{Full} & \textbf{$\Delta$} \\",
         r"    \hline",
     ]
     for extractor, label in PIPELINES:
@@ -137,12 +137,12 @@ def main(
     / "superviz26"
     / "superviz26-size.tex",
 ) -> None:
-    """Load the 100k/200k AE results from MLflow and write the size-sufficiency table."""
+    """Load the 100k/Full AE results from MLflow and write the size-sufficiency table."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if not setup_mlflow("superviz26"):
         raise typer.Exit(code=1)
     small = load_aurocs(EXPERIMENT_100K)
-    big = load_aurocs(EXPERIMENT_200K)
+    big = load_aurocs(EXPERIMENT_BIG)
     table_out.parent.mkdir(parents=True, exist_ok=True)
     table_out.write_text(render_table(small, big) + "\n")
     logger.info(f"Wrote {table_out}")

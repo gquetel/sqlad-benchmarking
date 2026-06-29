@@ -98,16 +98,33 @@ per-pipeline drift table. The grid also fans out to SLURM (see *Running on SLURM
 
 ## Heavy supplementary datasets (`big`, `drift`)
 
-The size-sufficiency (`superviz26-big`, 200k train sets) and concept-drift
-(`superviz26-drift`) experiments read multi-GB CSVs that are **not** vendored and are
-**not** part of the default `fetch_data` flow. Zenodo bundles them in a single
+The size-sufficiency (`superviz26-big`) and concept-drift (`superviz26-drift`)
+experiments read multi-GB CSVs that are **not** vendored and are **not** part of the
+default `fetch_data` flow.
+
+The **size-sufficiency** experiment retrains the AE pipelines on the *full* per-domain
+training pools instead of the 100k subsample, to check whether 100k is large enough.
+Its CSVs are **generated locally** (not on Zenodo) by the dataset generator's full-split
+mode and land in `~/datasets/full-lodo/`:
+
+```bash
+# In the legacy-sqlia-dataset-generator repo:
+python experiments/generate_splits.py --full
+```
+
+The `superviz26-big` loader reads those 8 scenario CSVs from `~/datasets/full-lodo/`; if
+a file is missing it raises a `FileNotFoundError` pointing back at this command (no
+auto-download).
+
+The **concept-drift** experiment's CSVs are hosted on Zenodo, bundled in a single
 `supplementary-materials.zip` archive
 ([record 20795955](https://zenodo.org/records/20795955), DOI
 `10.5281/zenodo.20795955`). The helper downloads that archive once (MD5-verified,
-resumable), extracts the requested group(s) into their loader default roots
-(`~/datasets/200k-training/` and `~/datasets/concept-drift/`), and verifies each CSV's
-size and SHA-256 against
+resumable), extracts the requested group(s) into their loader default roots, and
+verifies each CSV's size and SHA-256 against
 [`data/raw/supplementary/MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/supplementary/MANIFEST.json).
+The archive still also contains the legacy 200k `big` group, but it no longer backs the
+size-sufficiency experiment.
 
 ```bash
 # Both groups (downloads the ~1.2 GB zip, extracts ~6 GB of CSVs)
@@ -127,7 +144,8 @@ Equivalent invoke alias:
 invoke fetch-supplementary --groups big,drift
 ```
 
-You usually do not need to run this by hand: the `superviz26-big` and `superviz26-drift`
-loaders **auto-download** their group the first time a file is missing from the default
-root, then reuse it on subsequent runs. Auto-fetch only triggers for the default root
-(a custom `root=` is yours to manage).
+You usually do not need to run this by hand: the `superviz26-drift` loader
+**auto-downloads** its group the first time a file is missing from the default root,
+then reuses it on subsequent runs. Auto-fetch only triggers for the default root
+(a custom `root=` is yours to manage). The `superviz26-big` loader does **not**
+auto-download — its full-split CSVs are generated locally (see above).

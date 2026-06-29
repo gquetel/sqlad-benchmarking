@@ -20,6 +20,21 @@ gpu:
     V100-32GB: 32
     V100-16GB: 16
 
+# Long-wall-time GPU profile: identical to `gpu` but with a 24h reservation, for slow
+# runs like the full-split Big-Superviz size experiment. Select it with
+# `slurm_submit --gpu-section gpu-long`.
+gpu-long:
+  gres: gpu:1
+  cpus_per_task: 32
+  mem: 64G
+  time: "24:00:00"
+  partitions:
+    A100: 40
+    A40: 46
+    A30: 24
+    V100-32GB: 32
+    V100-16GB: 16
+
 # Minimum per-GPU VRAM per cell, keyed by extractor or pipeline:extractor (the latter wins)
 min_vram_gb:
   default: 0

@@ -1,10 +1,12 @@
 """Big-Superviz26-SQL dataset registry and split loader.
 
-The ANUBIS size-sufficiency variant of Superviz26: identical 8 scenarios and 1M
-test splits, but each train split is doubled to 200k (``Big = Normal ∪ Extra``, a
-strict superset of the 100k Normal train set). The CSVs are produced once by
-``experiments.build_big_trainsets`` and stored outside the repo under
-``~/datasets/200k-training/``. The scenario names, columns, and ``manifest`` are reused
+The size-sufficiency variant of Superviz26: identical 8 scenarios, but each split is
+drawn from the *full* per-domain pools instead of the 100k/1M Normal subsamples. The
+CSVs are produced by the dataset generator's full-split mode
+(``legacy-sqlia-dataset-generator``: ``python experiments/generate_splits.py --full``),
+which downsamples every domain to the smallest domain's train/test pool so all
+scenarios stay equal-sized, and stores them outside the repo under
+``~/datasets/full-lodo/``. The scenario names, columns, and ``manifest`` are reused
 verbatim from :mod:`superviz26` so both plug into the same ``DatasetFamily``.
 """
 
@@ -27,12 +29,12 @@ __all__ = ["IN_DOMAIN", "LODO", "Split", "Superviz26", "default_root", "load_spl
 
 
 def default_root() -> Path:
-    """Location of the 200k Big CSVs (outside the repo; see build_big_trainsets)."""
-    return Path("~/datasets/200k-training").expanduser()
+    """Location of the full-split Big CSVs (outside the repo; see generate_splits --full)."""
+    return Path("~/datasets/full-lodo").expanduser()
 
 
 def resolve_path(name: Superviz26, root: Path | None = None) -> Path:
-    """Absolute path to the Big CSV for ``name`` under ``root`` (default: ~/datasets/200k-training)."""
+    """Absolute path to the Big CSV for ``name`` under ``root`` (default: ~/datasets/full-lodo)."""
     return (root or default_root()) / f"{name.value}.csv"
 
 
@@ -45,21 +47,18 @@ def load_split(
     limit: int | None = None,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Load rows of the Big Superviz26 CSV that belong to ``split``.
+    """Load rows of the full-split Big Superviz26 CSV that belong to ``split``.
 
-    The train split is the 200k benign-only Big set; the test split is the same 1M
-    split as the Normal Superviz26 runs. When the CSV is absent from the default root it
-    is auto-downloaded from Zenodo; a ``FileNotFoundError`` (pointing at the
-    fetcher/builder) is raised only if it is still missing afterwards.
+    Both the train and test splits are drawn from the full per-domain pools, downsampled
+    to the smallest domain so every scenario stays equal-sized. The CSVs are generated
+    locally (not on Zenodo), so a missing file raises ``FileNotFoundError`` pointing at
+    the generator rather than triggering a download.
     """
     path = resolve_path(name, root)
-    if not path.exists() and root is None:
-        from tools.fetch_supplementary import ensure_group
-
-        ensure_group("big")
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. Download it: python -m tools.fetch_supplementary --groups big "
-            f"(or rebuild: python -m experiments.build_big_trainsets --scenario {name.value})"
+            f"{path} not found. Generate it with the dataset generator's full-split mode: "
+            f"`python experiments/generate_splits.py --full` (in legacy-sqlia-dataset-generator), "
+            f"which writes the 8 scenario CSVs to ~/datasets/full-lodo/."
         )
     return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)

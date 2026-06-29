@@ -11,6 +11,8 @@ the environment setup come from ``configs/slurm.yaml``.
 Usage:
     python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors li
     python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ocsvm,ae --dry-run
+    # Full-split Big experiment on a 24h GPU reservation:
+    python -m tools.slurm_submit --dataset superviz26-big --suite all --pipelines ae --gpu-section gpu-long
 """
 
 from __future__ import annotations
@@ -57,9 +59,9 @@ def _min_vram(cell: Cell, cfg: dict) -> int:
     return int(reqs.get(key, reqs.get(cell.extractor, reqs.get("default", 0))))
 
 
-def _eligible_partitions(cfg: dict, req: int) -> list[str]:
+def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
     """GPU partitions meeting req GB of VRAM, in config (preference) order so cells prefer the fastest GPU."""
-    eligible = [name for name, gb in cfg["gpu"]["partitions"].items() if gb >= req]
+    eligible = [name for name, gb in gpu_cfg["partitions"].items() if gb >= req]
     if not eligible:
         raise typer.BadParameter(f"no GPU partition has >= {req} GB VRAM; check configs/slurm.yaml.")
     return eligible
@@ -73,12 +75,15 @@ def _bucket(cell: Cell, cfg: dict) -> str:
     return "gpu" if req <= 0 else f"gpu-{req}gb"
 
 
-def _resolve_resources(cfg: dict, cell: Cell) -> dict:
-    """SBATCH resource block for a cell: the cpu block, or the gpu block with a VRAM-filtered partition list."""
+def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu") -> dict:
+    """SBATCH resource block for a cell: the cpu block, or ``gpu_section`` with a VRAM-filtered partition list."""
     if not _needs_gpu(cell):
         return dict(cfg["cpu"])
-    res = {k: v for k, v in cfg["gpu"].items() if k != "partitions"}
-    res["partition"] = ",".join(_eligible_partitions(cfg, _min_vram(cell, cfg)))
+    if gpu_section not in cfg:
+        raise typer.BadParameter(f"GPU section {gpu_section!r} not found in config; check configs/slurm.yaml.")
+    gpu_cfg = cfg[gpu_section]
+    res = {k: v for k, v in gpu_cfg.items() if k != "partitions"}
+    res["partition"] = ",".join(_eligible_partitions(gpu_cfg, _min_vram(cell, cfg)))
     return res
 
 
@@ -177,6 +182,9 @@ def submit(
         str, typer.Option(help="Comma-separated feature-extractor names (li, loginov, cv, sbert, codet5).")
     ] = "li",
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
+    gpu_section: Annotated[
+        str, typer.Option(help="GPU resource block in the config to use (e.g. 'gpu', 'gpu-long' for a 24h reservation).")
+    ] = "gpu",
     target_fpr: Annotated[float, typer.Option(help="Target false-positive rate for the calibrated threshold.")] = 0.001,
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,
     register: Annotated[bool, typer.Option(help="Register each fitted model in the MLflow Model Registry.")] = False,
@@ -216,7 +224,7 @@ def submit(
         buckets.setdefault(_bucket(cell, cfg), []).append(cell)
     job_ids: list[str] = []
     for bucket, group_cells in sorted(buckets.items()):
-        res = _resolve_resources(cfg, group_cells[0])
+        res = _resolve_resources(cfg, group_cells[0], gpu_section)
         manifest = submit_dir / f"cells_{bucket}.jsonl"
         script = submit_dir / f"eval_cell_{bucket}.sbatch"
         _write_manifest(manifest, group_cells)
