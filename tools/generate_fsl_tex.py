@@ -76,8 +76,8 @@ RECOVERY_MARGIN = 0.01
 
 CAPTION = (
     r"Few-shot adaptation of LODO autoencoders: AUROC vs.\ adaptation budget~$k$, averaged over "
-    r"the four target domains and five seeds ($k{=}0$ is the LODO model). A vertical tick marks "
-    r"the smallest~$k$ recovering in-domain performance (within $0.01$ AUROC)."
+    r"the four target domains and five seeds ($k{=}0$ is the LODO model). A black-bordered marker "
+    r"indicates the smallest~$k$ recovering in-domain performance (within $0.01$ AUROC)."
 )
 
 
@@ -260,8 +260,9 @@ def render_figure(curves: dict[str, dict[int, float]], refs: dict[str, float]) -
         rk = _recovery(curve, ref)
         if rk is not None:
             out += [
-                f"      % Recovery tick (within {RECOVERY_MARGIN} of in-domain {ref:.4f}): k={rk}",
-                rf"      \addplot[{color}, only marks, mark=|, mark size=5pt, line width=1.1pt,",
+                f"      % Recovery marker (within {RECOVERY_MARGIN} of in-domain {ref:.4f}): k={rk}",
+                rf"      \addplot[only marks, mark={mark}, mark size=2.6pt,",
+                rf"               mark options={{fill={color}, draw=black, line width=0.9pt}},",
                 rf"               forget plot] coordinates {{({_x(rk):.0f},{curve[rk]:.4f})}};",
             ]
         elif ref is not None:
