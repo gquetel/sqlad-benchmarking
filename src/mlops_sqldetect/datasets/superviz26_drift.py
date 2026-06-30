@@ -16,7 +16,7 @@ columns plus a ``drift_set`` column (``origin``/``shifted``) that, together with
   * ``(test,  shifted)`` -> ``shifted_test``  (S2 post-drift evaluation)
 
 They are built outside the repo by ``experiments/build_concept_drift.py`` and
-stored under ``~/datasets/concept-drift/``. The columns and ``manifest`` are reused
+stored under ``~/datasets/superviz26-cd/``. The columns and ``manifest`` are reused
 verbatim from :mod:`superviz26`.
 """
 
@@ -64,11 +64,11 @@ DOMAINS: tuple[Superviz26Drift, ...] = (
 
 def default_root() -> Path:
     """Location of the per-domain concept-drift CSVs (outside the repo)."""
-    return Path("~/datasets/concept-drift").expanduser()
+    return Path("~/datasets/superviz26-cd").expanduser()
 
 
 def resolve_path(name: Superviz26Drift, root: Path | None = None) -> Path:
-    """Absolute path to the drift CSV for ``name`` under ``root`` (default: ~/datasets/concept-drift)."""
+    """Absolute path to the drift CSV for ``name`` under ``root`` (default: ~/datasets/superviz26-cd)."""
     return (root or default_root()) / f"{name.value}.csv"
 
 

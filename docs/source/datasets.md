@@ -73,7 +73,7 @@ three partitions apart:
 | `(test,  origin)`    | `origin_test`   | S1 reference AUROC                    |
 | `(test,  shifted)`   | `shifted_test`  | S2 post-drift AUROC                  |
 
-The CSVs are read from `~/datasets/concept-drift/`. They are not vendored; either
+The CSVs are read from `~/datasets/superviz26-cd/`. They are not vendored; either
 build them locally with `experiments/build_concept_drift.py` (legacy generator) or
 download the pre-built copies (see *Heavy supplementary datasets* below). Load them
 with the three-way loader:

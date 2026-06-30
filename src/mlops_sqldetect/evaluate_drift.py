@@ -292,7 +292,7 @@ def evaluate_drift(
     extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names.")] = "li",
     data_root: Annotated[
         Path | None,
-        typer.Option(help="Directory holding the per-domain drift CSVs (default: ~/datasets/concept-drift)."),
+        typer.Option(help="Directory holding the per-domain drift CSVs (default: ~/datasets/superviz26-cd)."),
     ] = None,
     model_dir: Annotated[Path, typer.Option(help="Where to save fitted models.")] = Path("models"),
     report: Annotated[
