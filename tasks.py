@@ -55,11 +55,11 @@ def fetch_data(ctx: Context, force: bool = False, check: bool = False) -> None:
     fetch_superviz25(ctx, force=force, check=check)
 
 
-@task(help={"groups": "Comma-separated groups: 'big', 'drift'; empty for both."})
+@task(help={"groups": "Comma-separated groups: 'drift'; empty for all."})
 def fetch_supplementary(
     ctx: Context, groups: str = "", force: bool = False, check: bool = False, keep_archive: bool = False
 ) -> None:
-    """Download the heavy Big/concept-drift CSVs from Zenodo (NOT part of fetch_data; several GB)."""
+    """Download the heavy concept-drift CSVs from Zenodo (NOT part of fetch_data; several GB)."""
     cmd = "python -m tools.fetch_supplementary"
     if groups:
         cmd += f" --groups {groups}"

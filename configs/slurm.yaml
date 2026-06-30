@@ -4,15 +4,14 @@ cpu:
   partition: CPU
   cpus_per_task: 32
   mem: 32G
-  time: "08:00:00"
+  time: "12:00:00"
 
 gpu:
   gres: gpu:1
   cpus_per_task: 32
   mem: 64G
-  time: "08:00:00"
-  # GPU partitions and their per-GPU VRAM, listed in preference order (fastest GPU first). A cell
-  # runs on every partition whose VRAM meets its requirement, in this order.
+  time: "12:00:00"
+  # GPU partitions and their per-GPU VRAM, listed in preference order (fastest GPU first). A cell runs on every partition whose VRAM meets its requirement, in this order.
   partitions:
     A100: 40
     A40: 46
@@ -20,9 +19,6 @@ gpu:
     V100-32GB: 32
     V100-16GB: 16
 
-# Long-wall-time GPU profile: identical to `gpu` but with a 24h reservation, for slow
-# runs like the full-split Big-Superviz size experiment. Select it with
-# `slurm_submit --gpu-section gpu-long`.
 gpu-long:
   gres: gpu:1
   cpus_per_task: 32

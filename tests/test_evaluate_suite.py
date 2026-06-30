@@ -96,13 +96,13 @@ def test_min_vram_resolves_extractor_combo_and_default():
 
 def test_eligible_partitions_filters_by_vram_preference_order():
     # codet5 (24 GB) drops the 16 GB V100; the rest come back in config (preference) order.
-    assert _eligible_partitions(_GPU_CFG, 24) == ["A100", "A40", "A30", "V100-32GB"]
-    assert "V100-16GB" not in _eligible_partitions(_GPU_CFG, 24)
+    assert _eligible_partitions(_GPU_CFG["gpu"], 24) == ["A100", "A40", "A30", "V100-32GB"]
+    assert "V100-16GB" not in _eligible_partitions(_GPU_CFG["gpu"], 24)
 
 
 def test_eligible_partitions_raises_when_none_fit():
     with pytest.raises(typer.BadParameter, match="VRAM"):
-        _eligible_partitions(_GPU_CFG, 64)
+        _eligible_partitions(_GPU_CFG["gpu"], 64)
 
 
 def test_bucket_assignment():

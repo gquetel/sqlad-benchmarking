@@ -11,8 +11,8 @@ the environment setup come from ``configs/slurm.yaml``.
 Usage:
     python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors li
     python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ocsvm,ae --dry-run
-    # Full-split Big experiment on a 24h GPU reservation:
-    python -m tools.slurm_submit --dataset superviz26-big --suite all --pipelines ae --gpu-section gpu-long
+    # Full-split data is heavy; give the AE/CodeT5+ cells a 24h GPU reservation:
+    python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --gpu-section gpu-long
 """
 
 from __future__ import annotations

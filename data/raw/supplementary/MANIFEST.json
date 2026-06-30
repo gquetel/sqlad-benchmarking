@@ -9,21 +9,6 @@
     "md5": "1200567911d99c75e7871e17d8e2f390"
   },
   "groups": {
-    "big": {
-      "description": "200k benign Big train sets (ANUBIS size-sufficiency variant of Superviz26).",
-      "dataset": "superviz26-big",
-      "member_prefix": "Superviz26-SQL-BIG/",
-      "files": {
-        "a-a.csv":   {"bytes": 337552872, "sha256": "1a2af30329d8054b67f08d95c83bc89ae1c3a7e9d62bbda0b6fa6cba0428e9f2"},
-        "b-b.csv":   {"bytes": 289043547, "sha256": "7adf762276f790b8447c5d810a48cf3ae7aced91d0eee41e5deabf395e986825"},
-        "c-c.csv":   {"bytes": 364113454, "sha256": "c7f877ae4eacd5e89086824cba3ab3862db52c2c342595ea911a4026cba29249"},
-        "d-d.csv":   {"bytes": 242986376, "sha256": "7d9e78e3db102794a76dceb33272e7c0f6aeaddaf7d39c6c697102c1647dc413"},
-        "bcd-a.csv": {"bytes": 330740709, "sha256": "35314859cee9c003a0aeb780990ef36c96b7956cc34a71bca8ecce96b8900e30"},
-        "acd-b.csv": {"bytes": 296547695, "sha256": "1779de3cd2f9b707ec0b8e74ba7138262a7c2007304a510dc4f0311c5eacda2e"},
-        "abd-c.csv": {"bytes": 350946867, "sha256": "1b150e42fb83495c165a1c1440366eb28f7b7f9095e47ac1b7c38fc6ee96a1c8"},
-        "abc-d.csv": {"bytes": 255805027, "sha256": "dd58b084d5d6204f8441646e62a5080f663411ae4c1f5d04396137e226b8542a"}
-      }
-    },
     "drift": {
       "description": "Per-domain concept-drift CSVs (origin/shifted partitions).",
       "dataset": "superviz26-drift",

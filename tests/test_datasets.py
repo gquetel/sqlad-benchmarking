@@ -113,7 +113,7 @@ def test_load_fsl_returns_target_train_and_test_from_the_in_domain_file(tmp_path
 
 
 def test_load_fsl_missing_file_hints_at_fetcher(tmp_path):
-    with pytest.raises(FileNotFoundError, match="fetch_superviz26"):
+    with pytest.raises(FileNotFoundError, match="generate_splits"):
         load_fsl(Superviz26FSL.A, root=tmp_path)
 
 

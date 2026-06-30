@@ -19,28 +19,27 @@ Eight CSV files four for in-domain evaluation and four for leave-one-domain-out 
 | `abd-c.csv` | LODO      | OurAirports + Sakila + OracleHR         | AdventureWorks |
 | `abc-d.csv` | LODO      | OurAirports + Sakila + AdventureWorks   | OracleHR       |
 
-Each file holds ~1.1 M rows: 100 K benign training queries (`split == "train"`)
-and 1 M test samples (`split == "test"`, ~90 % benign / 10 % attack).
+Each scenario ships as one CSV whose `split` column separates the benign training rows
+(`split == "train"`) from the test rows (`split == "test"`, a mix of benign and attack
+queries). The detectors train on the **full-split** build of these scenarios, with every
+split drawn from the full per-domain pools (see [Acquisition](#acquisition) below).
 
 ## Acquisition
 
-The CSVs are not vendored; download them with the helper script:
+The default `superviz26` family is the **Superviz26-SQL-LODO** dataset (MLflow experiment
+`Superviz26-SQL`). Its **full-split** CSVs are read from `~/datasets/superviz26-lodo/` and
+are **generated locally** (not on Zenodo) by the dataset generator's full-split mode —
+every scenario is drawn from the full per-domain pools and downsampled to the smallest
+domain so all stay equal-sized:
 
 ```bash
-# All 8 files
-python -m tools.fetch_superviz26
-
-# Re-verify existing files
-python -m tools.fetch_superviz26 --check
+# In the legacy-sqlia-dataset-generator repo:
+python experiments/generate_splits.py --full
 ```
 
-The script streams each file to `data/raw/superviz26/`, resumes interrupted downloads, and verifies sizes plus SHA-256 sums against [`MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/superviz26/MANIFEST.json). The manifest is the single source of truth — editing it changes what the script accepts.
-
-Equivalent invoke alias:
-
-```bash
-invoke fetch-superviz26 --datasets a-a,bcd-a
-```
+A missing file raises a `FileNotFoundError` pointing back at this command (no
+auto-download). The shared column/scenario metadata comes from the vendored
+[`MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/superviz26/MANIFEST.json).
 
 ## Loading
 
@@ -96,42 +95,22 @@ Each cell appends one row — `auroc_s1`, `auroc_s2`, `delta_auroc`, … — to
 `reports/superviz26-drift_results.csv`; average the per-domain rows to obtain the
 per-pipeline drift table. The grid also fans out to SLURM (see *Running on SLURM*).
 
-## Heavy supplementary datasets (`big`, `drift`)
+## Heavy supplementary dataset (`drift`)
 
-The size-sufficiency (`superviz26-big`) and concept-drift (`superviz26-drift`)
-experiments read multi-GB CSVs that are **not** vendored and are **not** part of the
-default `fetch_data` flow.
+The concept-drift (`superviz26-drift`) experiment — the **Superviz26-SQL-CD** dataset —
+reads multi-GB CSVs that are **not** vendored and are **not** part of the default
+`fetch_data` flow.
 
-The **size-sufficiency** experiment retrains the AE pipelines on the *full* per-domain
-training pools instead of the 100k subsample, to check whether 100k is large enough.
-Its CSVs are **generated locally** (not on Zenodo) by the dataset generator's full-split
-mode and land in `~/datasets/full-lodo/`:
-
-```bash
-# In the legacy-sqlia-dataset-generator repo:
-python experiments/generate_splits.py --full
-```
-
-The `superviz26-big` loader reads those 8 scenario CSVs from `~/datasets/full-lodo/`; if
-a file is missing it raises a `FileNotFoundError` pointing back at this command (no
-auto-download).
-
-The **concept-drift** experiment's CSVs are hosted on Zenodo, bundled in a single
-`supplementary-materials.zip` archive
+Its CSVs are hosted on Zenodo, bundled in a single `supplementary-materials.zip` archive
 ([record 20795955](https://zenodo.org/records/20795955), DOI
 `10.5281/zenodo.20795955`). The helper downloads that archive once (MD5-verified,
-resumable), extracts the requested group(s) into their loader default roots, and
-verifies each CSV's size and SHA-256 against
+resumable), extracts the `drift` group into its loader default root, and verifies each
+CSV's size and SHA-256 against
 [`data/raw/supplementary/MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/supplementary/MANIFEST.json).
-The archive still also contains the legacy 200k `big` group, but it no longer backs the
-size-sufficiency experiment.
 
 ```bash
-# Both groups (downloads the ~1.2 GB zip, extracts ~6 GB of CSVs)
+# Download the ~1.2 GB zip and extract the drift CSVs
 python -m tools.fetch_supplementary
-
-# Just one group
-python -m tools.fetch_supplementary --groups drift
 
 # Verify already-extracted files without downloading
 python -m tools.fetch_supplementary --check
@@ -141,11 +120,11 @@ The zip is deleted after a successful extraction; pass `--keep-archive` to retai
 Equivalent invoke alias:
 
 ```bash
-invoke fetch-supplementary --groups big,drift
+invoke fetch-supplementary --groups drift
 ```
 
 You usually do not need to run this by hand: the `superviz26-drift` loader
 **auto-downloads** its group the first time a file is missing from the default root,
 then reuses it on subsequent runs. Auto-fetch only triggers for the default root
-(a custom `root=` is yours to manage). The `superviz26-big` loader does **not**
-auto-download — its full-split CSVs are generated locally (see above).
+(a custom `root=` is yours to manage). The default `superviz26` (LODO) loader does
+**not** auto-download — its full-split CSVs are generated locally (see *Acquisition*).

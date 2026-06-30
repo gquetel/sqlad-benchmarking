@@ -4,7 +4,7 @@ Loads every finished full-run cell of the ``Superviz26-SQL`` experiment and emit
 two LaTeX files for the benchmark paper:
 
   * the compact in-domain vs. LODO summary table (per pipeline: AUROC and AUPRC
-    averaged over each regime, plus the cross-domain gap Delta = LODO - ID), and
+    averaged over each setting, plus the cross-domain gap Delta = LODO - ID), and
   * the in-domain vs. LODO dumbbell figure (one AUROC panel and one AUPRC panel),
     which visualises the same gap per pipeline.
 
@@ -92,12 +92,12 @@ LODO_CAPTION = (
 )
 FIGURE_CAPTION = (
     r"In-domain (\textbullet) vs.\ LODO ($\blacksquare$) detection performance per pipeline, "
-    r"averaged over the four scenarios of each regime; the connector length is the cross-domain "
+    r"averaged over the four scenarios of each setting; the connector length is the cross-domain "
     r"gap $\Delta = \text{LODO} - \text{ID}$, shown in green when small ($> -0.05$) and red otherwise."
 )
 SUMMARY_CAPTION = (
     r"In-domain (ID) vs.\ leave-one-domain-out (LODO) detection performance of the fifteen "
-    r"reference pipelines on \datasetlodo{}, averaged over the four scenarios of each regime. "
+    r"reference pipelines on \datasetlodo{}, averaged over the four scenarios of each setting. "
     r"$\Delta = \text{LODO} - \text{ID}$ is the cross-domain gap. Missing entries (--) correspond "
     r"to runs not yet available."
 )
@@ -159,7 +159,7 @@ def _avg(values: list[Metrics], key: str) -> float | None:
 
 
 def _table_rows(data: Results, scenarios: list[tuple[str, str]]) -> list[tuple[str, str, str, str, str]]:
-    """Build (label, scenario, auroc, auprc, f1) rows for one regime, including the average."""
+    """Build (label, scenario, auroc, auprc, f1) rows for one setting, including the average."""
     rows: list[tuple[str, str, str, str, str]] = []
     for extractor, engine, label, _ in PIPELINES:
         present = [data.get((extractor, engine, sc)) for sc, _ in scenarios]

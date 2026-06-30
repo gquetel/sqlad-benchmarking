@@ -28,9 +28,11 @@ versions or regenerate the lock without explicit instruction.
     * To check formatting without writing: `treefmt --fail-on-change`.
 * The project uses `invoke` for setup/orchestration tasks (e.g. `sync`, `lock`, `test`, docs,
   docker, dataset fetch). Refer to `tasks.py` for available tasks. `fetch-data` pulls the
-  standard Superviz25/26 CSVs. The size-sufficiency Big experiment (`superviz26-big`) reads the
-  full-split CSVs from `~/datasets/full-lodo/`, generated locally by the dataset generator's
-  `generate_splits.py --full` (no auto-download). The heavy concept-drift CSVs that back the
+  standard Superviz25 CSVs. The default `superviz26` family now trains on the full-split CSVs
+  read from `~/datasets/superviz26-lodo/`, generated locally by the dataset generator's
+  `generate_splits.py --full` (no auto-download); `superviz26-big` is reserved for a future
+  even-larger training set (`~/datasets/superviz26-xl/`, not yet generated). The heavy
+  concept-drift CSVs that back the
   drift experiment live in a separate Zenodo zip and are fetched opt-in via
   `invoke fetch-supplementary` / `python -m tools.fetch_supplementary` (deliberately excluded
   from `fetch-data` because they are several GB); the `superviz26-drift` loader also

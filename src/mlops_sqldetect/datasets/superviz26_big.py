@@ -1,13 +1,10 @@
-"""Big-Superviz26-SQL dataset registry and split loader.
+"""Reserved Superviz26 variant with an even larger training set (future work).
 
-The size-sufficiency variant of Superviz26: identical 8 scenarios, but each split is
-drawn from the *full* per-domain pools instead of the 100k/1M Normal subsamples. The
-CSVs are produced by the dataset generator's full-split mode
-(``legacy-sqlia-dataset-generator``: ``python experiments/generate_splits.py --full``),
-which downsamples every domain to the smallest domain's train/test pool so all
-scenarios stay equal-sized, and stores them outside the repo under
-``~/datasets/full-lodo/``. The scenario names, columns, and ``manifest`` are reused
-verbatim from :mod:`superviz26` so both plug into the same ``DatasetFamily``.
+A placeholder family for a future training set larger than the standard full-split
+Superviz26 (which now backs the default ``superviz26`` family). Identical 8 scenarios,
+columns, and ``manifest`` reused verbatim from :mod:`superviz26` so both plug into the
+same ``DatasetFamily``; its CSVs are not yet generated and are expected outside the repo
+under ``~/datasets/superviz26-xl/``.
 """
 
 from __future__ import annotations
@@ -29,12 +26,12 @@ __all__ = ["IN_DOMAIN", "LODO", "Split", "Superviz26", "default_root", "load_spl
 
 
 def default_root() -> Path:
-    """Location of the full-split Big CSVs (outside the repo; see generate_splits --full)."""
-    return Path("~/datasets/full-lodo").expanduser()
+    """Location of the reserved XL CSVs (outside the repo; not yet generated)."""
+    return Path("~/datasets/superviz26-xl").expanduser()
 
 
 def resolve_path(name: Superviz26, root: Path | None = None) -> Path:
-    """Absolute path to the Big CSV for ``name`` under ``root`` (default: ~/datasets/full-lodo)."""
+    """Absolute path to the XL CSV for ``name`` under ``root`` (default: ~/datasets/superviz26-xl)."""
     return (root or default_root()) / f"{name.value}.csv"
 
 
@@ -47,18 +44,16 @@ def load_split(
     limit: int | None = None,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Load rows of the full-split Big Superviz26 CSV that belong to ``split``.
+    """Load rows of the reserved XL Superviz26 CSV that belong to ``split``.
 
-    Both the train and test splits are drawn from the full per-domain pools, downsampled
-    to the smallest domain so every scenario stays equal-sized. The CSVs are generated
-    locally (not on Zenodo), so a missing file raises ``FileNotFoundError`` pointing at
-    the generator rather than triggering a download.
+    The XL CSVs hold a training set larger than the standard full-split Superviz26 and
+    are generated locally (not on Zenodo); they are not yet produced, so a missing file
+    raises ``FileNotFoundError`` rather than triggering a download.
     """
     path = resolve_path(name, root)
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. Generate it with the dataset generator's full-split mode: "
-            f"`python experiments/generate_splits.py --full` (in legacy-sqlia-dataset-generator), "
-            f"which writes the 8 scenario CSVs to ~/datasets/full-lodo/."
+            f"{path} not found. The XL training set is reserved for future work and is not yet "
+            f"generated; it is expected at ~/datasets/superviz26-xl/."
         )
     return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)

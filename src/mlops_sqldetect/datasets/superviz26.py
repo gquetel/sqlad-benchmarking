@@ -1,10 +1,11 @@
 """Superviz26-SQL dataset registry and split loader.
 
-Wraps the 8 CSVs published at https://zenodo.org/records/19627322 in a typed
-enum, so callers cannot mistype dataset names, and exposes a single ``load_split``
-entry point that filters by the ``split`` column without materialising the whole
-file in memory unnecessarily. Use the ``tools.fetch_superviz26`` script to put
-the files on disk.
+Wraps the 8 full-split CSVs in a typed enum, so callers cannot mistype dataset
+names, and exposes a single ``load_split`` entry point that filters by the
+``split`` column without materialising the whole file in memory unnecessarily.
+The CSVs are generated locally by the dataset generator's full-split mode (no
+auto-download) and live under ``~/datasets/superviz26-lodo/``; the in-repo
+``MANIFEST.json`` supplies the shared column/scenario metadata.
 """
 
 from __future__ import annotations
@@ -55,8 +56,8 @@ LODO: tuple[Superviz26, ...] = (
 
 
 def default_root() -> Path:
-    """Repository default location for the downloaded CSVs."""
-    return _MANIFEST_PATH.parent
+    """Location of the full-split CSVs (outside the repo; see datasets.md)."""
+    return Path("~/datasets/superviz26-lodo").expanduser()
 
 
 def manifest() -> dict:
@@ -83,7 +84,7 @@ def load_split(
     Args:
         name: Which of the 8 datasets to load.
         split: ``train`` or ``test``.
-        root: Directory holding the CSVs. Defaults to ``data/raw/superviz26/``.
+        root: Directory holding the CSVs. Defaults to ``~/datasets/superviz26-lodo/``.
         columns: Columns to keep. The default trims the file to the three columns
             actually needed by the Li pipelines, cutting memory by ~10x.
 
@@ -96,5 +97,9 @@ def load_split(
     """
     path = resolve_path(name, root)
     if not path.exists():
-        raise FileNotFoundError(f"{path} not found. Run: python -m tools.fetch_superviz26 --datasets {name.value}")
+        raise FileNotFoundError(
+            f"{path} not found. Generate the full-split CSVs with the dataset generator's full-split "
+            f"mode: `python experiments/generate_splits.py --full` (in legacy-sqlia-dataset-generator), "
+            f"which writes the 8 scenario CSVs to ~/datasets/superviz26-lodo/."
+        )
     return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)

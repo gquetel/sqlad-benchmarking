@@ -1,15 +1,14 @@
-"""Download the heavy Superviz26-SQL supplementary datasets from Zenodo.
+"""Download the heavy Superviz26-SQL supplementary dataset from Zenodo.
 
-The Big (``200k-training``) and concept-drift (``concept-drift``) datasets back the
-size-sufficiency and concept-drift experiments. They are *not* vendored and are
-deliberately left out of the default ``fetch_data`` flow: extracted they are several
-GB. Zenodo hosts them inside a single ``supplementary-materials.zip`` archive (record
-20795955); this tool downloads that archive once (MD5-verified, HTTP-Range resume),
-extracts the requested group(s) into their loader default roots, and verifies each
-extracted CSV's size and SHA-256 against ``MANIFEST.json``.
+The concept-drift (``concept-drift``) dataset backs the concept-drift experiment. It is
+*not* vendored and is deliberately left out of the default ``fetch_data`` flow: extracted
+it is several GB. Zenodo hosts it inside a single ``supplementary-materials.zip`` archive
+(record 20795955); this tool downloads that archive once (MD5-verified, HTTP-Range
+resume), extracts the requested group(s) into their loader default roots, and verifies
+each extracted CSV's size and SHA-256 against ``MANIFEST.json``.
 
 Usage:
-    python -m tools.fetch_supplementary --groups big,drift
+    python -m tools.fetch_supplementary --groups drift
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from urllib.request import Request, urlopen
 
 import typer
 
-from mlops_sqldetect.datasets import superviz26_big, superviz26_drift
+from mlops_sqldetect.datasets import superviz26_drift
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,6 @@ CHUNK_BYTES = 1 << 20
 # Where each group's CSVs are extracted to. Sourced from the loader default roots so
 # the download target never drifts from where the dataset modules read from.
 GROUP_ROOTS: dict[str, Callable[[], Path]] = {
-    "big": superviz26_big.default_root,
     "drift": superviz26_drift.default_root,
 }
 
@@ -221,17 +219,17 @@ def ensure_group(group: str, *, root: Path | None = None, force: bool = False, k
 def fetch(
     groups: Annotated[
         str,
-        typer.Option(help="Comma-separated groups to fetch ('big', 'drift'). Omit for all."),
+        typer.Option(help="Comma-separated groups to fetch ('drift'). Omit for all."),
     ] = "",
     force: Annotated[bool, typer.Option(help="Re-download/re-extract even if valid files are present.")] = False,
     check: Annotated[bool, typer.Option(help="Verify checksums of present files; do not download.")] = False,
     keep_archive: Annotated[bool, typer.Option(help="Keep the downloaded zip after extraction.")] = False,
     archive_dir: Annotated[
         Path | None,
-        typer.Option(help="Where to cache the downloaded zip (default: parent of the Big root, i.e. ~/datasets)."),
+        typer.Option(help="Where to cache the downloaded zip (default: parent of the drift root, i.e. ~/datasets)."),
     ] = None,
 ) -> None:
-    """Download (or verify) the heavy Big/concept-drift CSVs from the Zenodo archive."""
+    """Download (or verify) the heavy concept-drift CSVs from the Zenodo archive."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     archive, all_groups = load_manifest()
 
@@ -262,7 +260,7 @@ def fetch(
         logger.info("All requested files already present and verified; nothing to do.")
         return
 
-    archive_path = (archive_dir or GROUP_ROOTS["big"]().parent) / archive.name
+    archive_path = (archive_dir or GROUP_ROOTS["drift"]().parent) / archive.name
     failures = _extract_pending(archive, pending, archive_path=archive_path, force=force, keep_archive=keep_archive)
     if failures:
         logger.error(f"{len(failures)} file(s) failed: {failures}")

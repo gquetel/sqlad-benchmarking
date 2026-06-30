@@ -8,7 +8,7 @@ set (S2, post-drift); the figure visualises the per-pipeline performance drop
 $\\Delta = \\text{S1} - \\text{S2}$ averaged over the four Superviz26 domains.
 
 This mirrors the figure side of :mod:`tools.generate_baselines_tex`, but compares
-the reference and post-drift regimes instead of in-domain and LODO, and writes
+the reference and post-drift settings instead of in-domain and LODO, and writes
 only the figure (no table).
 
 MLflow is the single source of truth: the latest finished full-run per

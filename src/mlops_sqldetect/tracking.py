@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _EXPERIMENT_NAMES = {
     "superviz25": "Superviz25-SQL",
-    "superviz26-big": "Full-Superviz26-SQL",
+    "superviz26-big": "XL-Superviz26-SQL",
     "superviz26-drift": "Drift-Superviz26-SQL",
     "superviz26-fsl": "FSL-Superviz26-SQL",
 }
@@ -31,10 +31,9 @@ _EXPERIMENT_NAMES = {
 def _experiment_name(dataset: str) -> str:
     """Map a dataset family to its MLflow experiment name.
 
-    Superviz25 → "Superviz25-SQL"; the size-sufficiency variant superviz26-big →
-    "Full-Superviz26-SQL"; the concept-drift variant superviz26-drift →
-    "Drift-Superviz26-SQL"; the few-shot variant superviz26-fsl →
-    "FSL-Superviz26-SQL"; every other family → "Superviz26-SQL".
+    The default superviz26 (the full LODO/in-domain dataset) → "Superviz26-SQL"; the
+    reserved larger-train variant superviz26-big → "XL-Superviz26-SQL"; concept-drift →
+    "Drift-Superviz26-SQL"; few-shot → "FSL-Superviz26-SQL"; Superviz25 → "Superviz25-SQL".
     """
     return _EXPERIMENT_NAMES.get(dataset, "Superviz26-SQL")
 
