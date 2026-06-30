@@ -1,8 +1,10 @@
 # Datasets
 
 This project trains and evaluates SQL injection detectors on the
-[**Superviz26-SQL**](https://zenodo.org/records/19627322) dataset
-(DOI: `10.5281/zenodo.19627322`).
+[**Superviz26-SQL**](https://zenodo.org/records/21068333) dataset
+(DOI: `10.5281/zenodo.21068333`). Every build — the main LODO/in-domain scenarios, the
+concept-drift CSVs, and the few-shot CSVs — ships inside a single `superviz26.zip`
+archive on that record.
 
 ## Layout
 
@@ -27,18 +29,22 @@ split drawn from the full per-domain pools (see [Acquisition](#acquisition) belo
 ## Acquisition
 
 The default `superviz26` family is the **Superviz26-SQL-LODO** dataset (MLflow experiment
-`Superviz26-SQL`). Its **full-split** CSVs are read from `~/datasets/superviz26-lodo/` and
-are **generated locally** (not on Zenodo) by the dataset generator's full-split mode —
-every scenario is drawn from the full per-domain pools and downsampled to the smallest
-domain so all stay equal-sized:
+`Superviz26-SQL`). Its **full-split** CSVs are read from `~/datasets/superviz26-lodo/`.
+They are either downloaded from the Zenodo archive (the `main` group) or generated locally
+by the dataset generator's full-split mode — every scenario is drawn from the full
+per-domain pools and downsampled to the smallest domain so all stay equal-sized:
 
 ```bash
-# In the legacy-sqlia-dataset-generator repo:
+# Download the 8 scenario CSVs from Zenodo:
+python -m tools.fetch_superviz26 --groups main     # or: invoke fetch-superviz26
+
+# ...or generate them locally, in the legacy-sqlia-dataset-generator repo:
 python experiments/generate_splits.py --full
 ```
 
-A missing file raises a `FileNotFoundError` pointing back at this command (no
-auto-download). The shared column/scenario metadata comes from the vendored
+A missing file raises a `FileNotFoundError` pointing back at both options (the `main`
+loader does not auto-download). The shared column/scenario metadata and the archive
+checksums come from the vendored
 [`MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/superviz26/MANIFEST.json).
 
 ## Loading
@@ -95,36 +101,38 @@ Each cell appends one row — `auroc_s1`, `auroc_s2`, `delta_auroc`, … — to
 `reports/superviz26-drift_results.csv`; average the per-domain rows to obtain the
 per-pipeline drift table. The grid also fans out to SLURM (see *Running on SLURM*).
 
-## Heavy supplementary dataset (`drift`)
+## Heavy supplementary datasets (`drift`, `fsl`)
 
-The concept-drift (`superviz26-drift`) experiment — the **Superviz26-SQL-CD** dataset —
-reads multi-GB CSVs that are **not** vendored and are **not** part of the default
-`fetch_data` flow.
+The concept-drift (`superviz26-drift`, the **Superviz26-SQL-CD** dataset) and few-shot
+(`superviz26-fsl`) experiments read multi-GB CSVs that are **not** part of the default
+`fetch_data` flow. The drift CSVs land in `~/datasets/superviz26-cd/`, the few-shot
+in-domain CSVs in `~/datasets/superviz26-fsl/`.
 
-Its CSVs are hosted on Zenodo, bundled in a single `supplementary-materials.zip` archive
-([record 20795955](https://zenodo.org/records/20795955), DOI
-`10.5281/zenodo.20795955`). The helper downloads that archive once (MD5-verified,
-resumable), extracts the `drift` group into its loader default root, and verifies each
-CSV's size and SHA-256 against
-[`data/raw/supplementary/MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/supplementary/MANIFEST.json).
+They live in the same `superviz26.zip` archive on Zenodo
+([record 21068333](https://zenodo.org/records/21068333), DOI `10.5281/zenodo.21068333`)
+as the main dataset. The helper downloads that archive once (MD5-verified, resumable),
+extracts the requested group(s) into their loader default roots, and verifies each CSV's
+size and SHA-256 against
+[`data/raw/superviz26/MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/superviz26/MANIFEST.json).
 
 ```bash
-# Download the ~1.2 GB zip and extract the drift CSVs
-python -m tools.fetch_supplementary
+# Download the zip and extract the drift + few-shot CSVs
+python -m tools.fetch_superviz26 --groups drift,fsl
 
 # Verify already-extracted files without downloading
-python -m tools.fetch_supplementary --check
+python -m tools.fetch_superviz26 --groups drift,fsl --check
 ```
 
-The zip is deleted after a successful extraction; pass `--keep-archive` to retain it.
-Equivalent invoke alias:
+The zip is deleted after a successful extraction; pass `--keep-archive` to retain it
+(handy, since every group comes from the same 2.4 GB download). Equivalent invoke alias:
 
 ```bash
-invoke fetch-supplementary --groups drift
+invoke fetch-supplementary           # both groups; or --groups drift
 ```
 
-You usually do not need to run this by hand: the `superviz26-drift` loader
-**auto-downloads** its group the first time a file is missing from the default root,
-then reuses it on subsequent runs. Auto-fetch only triggers for the default root
+You usually do not need to run this by hand: the `superviz26-drift` and `superviz26-fsl`
+loaders **auto-download** their group the first time a file is missing from the default
+root, then reuse it on subsequent runs. Auto-fetch only triggers for the default root
 (a custom `root=` is yours to manage). The default `superviz26` (LODO) loader does
-**not** auto-download — its full-split CSVs are generated locally (see *Acquisition*).
+**not** auto-download — its CSVs are fetched explicitly or generated locally (see
+*Acquisition*).

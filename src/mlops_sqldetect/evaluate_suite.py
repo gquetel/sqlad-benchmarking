@@ -218,7 +218,9 @@ def _run_one(
     )
     mf = family.manifest()
     file_key = f"{dataset.value}.csv"
-    file_entry = mf["files"][file_key]
+    # superviz26 bundles its scenarios under the "main" group; superviz25 keeps a
+    # flat top-level ``files`` map.
+    file_entry = mf["groups"]["main"]["files"][file_key] if "groups" in mf else mf["files"][file_key]
     kind = file_entry["kind"]
     # Zenodo records publish either a sha256 (superviz26) or an md5 (superviz25).
     digest = file_entry.get("sha256") or file_entry.get("md5", "")
@@ -257,7 +259,9 @@ def _run_one(
             )
             # This sets the "Dataset" column for each child run.
             log_dataset_input(
-                url=mf["url_pattern"].format(filename=file_key),
+                # superviz26 ships as one archive (no per-file URL), so record the
+                # Zenodo landing page; superviz25 still has a per-file url_pattern.
+                url=mf["record_url"] if "groups" in mf else mf["url_pattern"].format(filename=file_key),
                 name=f"{family.name}-{dataset.value}",
                 digest=digest,
                 context="train+test",

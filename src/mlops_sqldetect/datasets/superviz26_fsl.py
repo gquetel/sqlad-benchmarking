@@ -1,7 +1,6 @@
 """Few-shot domain-adaptation registry and loader for Superviz26.
 
-The few-shot adaptation protocol does not introduce new data: it re-uses the
-standard Superviz26 splits to ask how many unlabelled *target-domain* benign
+The few-shot adaptation protocol asks how many unlabelled *target-domain* benign
 queries suffice to recover in-domain detection performance. For one target domain
 ``X``:
 
@@ -12,12 +11,10 @@ queries suffice to recover in-domain detection performance. For one target domai
   * it is evaluated on ``X``'s *test* split (the same held-out domain test set the
     LODO model is scored on).
 
-So each target domain maps to two existing Superviz26 files: the in-domain
-``x-x`` CSV (source of the ``k`` adaptation samples and of the evaluation test
-set) and the LODO ``(others)-x`` CSV (whose pretrained checkpoint is the starting
-point). See :mod:`mlops_sqldetect.evaluate_fsl`. ``manifest``/``default_root``/
-``resolve_path`` are reused verbatim from :mod:`superviz26`, since the files are
-the Superviz26 ones.
+The in-domain ``x-x`` CSVs ship as their own ``fsl`` group (``~/datasets/superviz26-fsl/``)
+and are auto-fetched on demand; the LODO ``(others)-x`` pretrained checkpoint comes from
+training the base superviz26 family. See :mod:`mlops_sqldetect.evaluate_fsl`. ``manifest``
+is reused verbatim from :mod:`superviz26`.
 """
 
 from __future__ import annotations
@@ -28,7 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from mlops_sqldetect.datasets import superviz26
-from mlops_sqldetect.datasets.superviz26 import Split, Superviz26, default_root, manifest
+from mlops_sqldetect.datasets.superviz26 import Split, Superviz26, manifest
 
 __all__ = [
     "DOMAINS",
@@ -81,9 +78,32 @@ def lodo_source(target: Superviz26FSL) -> Superviz26:
     return _LODO[target]
 
 
+def default_root() -> Path:
+    """Location of the per-target-domain few-shot in-domain CSVs (outside the repo)."""
+    return Path("~/datasets/superviz26-fsl").expanduser()
+
+
 def resolve_path(name: Superviz26FSL, root: Path | None = None) -> Path:
     """Absolute path to the in-domain (``x-x``) CSV backing target domain ``name``."""
-    return superviz26.resolve_path(_IN_DOMAIN[name], root)
+    return superviz26.resolve_path(_IN_DOMAIN[name], root or default_root())
+
+
+def _ensure_csv(name: Superviz26FSL, root: Path | None) -> Path:
+    """Resolve the in-domain CSV, auto-downloading it from Zenodo if absent from the default root.
+
+    Auto-fetch only applies when ``root`` is the default location (a custom ``root`` is
+    caller-managed). Raises ``FileNotFoundError`` (hinting at the fetcher) if missing.
+    """
+    path = resolve_path(name, root)
+    if not path.exists() and root is None:
+        from tools.fetch_superviz26 import ensure_group
+
+        ensure_group("fsl")
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found. Download it: python -m tools.fetch_superviz26 --groups fsl"
+        )
+    return path
 
 
 def load_split(
@@ -100,7 +120,10 @@ def load_split(
     Provided for ``DatasetFamily`` contract uniformity; the few-shot evaluator uses
     :func:`load_fsl` instead, which returns the train and test partitions together.
     """
-    return superviz26.load_split(_IN_DOMAIN[name], split, root=root, columns=columns, limit=limit, seed=seed)
+    _ensure_csv(name, root)
+    return superviz26.load_split(
+        _IN_DOMAIN[name], split, root=root or default_root(), columns=columns, limit=limit, seed=seed
+    )
 
 
 def load_fsl(
@@ -120,12 +143,14 @@ def load_fsl(
     Raises:
         FileNotFoundError: If the in-domain CSV is not on disk (hints at the fetcher).
     """
+    _ensure_csv(target, root)
     in_domain = _IN_DOMAIN[target]
-    train = superviz26.load_split(in_domain, "train", root=root)
+    resolved = root or default_root()
+    train = superviz26.load_split(in_domain, "train", root=resolved)
     test = superviz26.load_split(
         in_domain,
         "test",
-        root=root,
+        root=resolved,
         columns=("full_query", "label", "attack_technique"),
         limit=test_limit,
         seed=seed,

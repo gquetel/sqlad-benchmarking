@@ -81,12 +81,12 @@ def _ensure_csv(name: Superviz26Drift, root: Path | None) -> Path:
     """
     path = resolve_path(name, root)
     if not path.exists() and root is None:
-        from tools.fetch_supplementary import ensure_group
+        from tools.fetch_superviz26 import ensure_group
 
         ensure_group("drift")
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. Download it: python -m tools.fetch_supplementary --groups drift "
+            f"{path} not found. Download it: python -m tools.fetch_superviz26 --groups drift "
             f"(or rebuild: python -m experiments.build_concept_drift --domain {name.value})"
         )
     return path

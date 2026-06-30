@@ -85,10 +85,14 @@ The directory structure of the project looks like this:
 │   ├── test_features.py
 │   ├── test_metrics.py
 │   └── test_model.py
-├── tools/                    # Dataset download scripts
+├── tools/                    # Dataset fetch, SLURM dispatch, figure/table generation
 │   ├── fetch_superviz25.py
-│   ├── fetch_superviz26.py
-│   └── fetch_supplementary.py  # Heavy Big/concept-drift CSVs (opt-in)
+│   ├── fetch_superviz26.py     # Superviz26 archive: main + drift + fsl groups (opt-in)
+│   ├── generate_baselines_tex.py
+│   ├── generate_drift_figure.py
+│   ├── generate_fsl_tex.py
+│   ├── slurm_run_cell.py
+│   └── slurm_submit.py
 ├── .env.example              # Example MLflow tracking configuration
 ├── .gitignore
 ├── .pre-commit-config.yaml

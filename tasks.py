@@ -24,16 +24,20 @@ def lock(ctx: Context) -> None:
 
 
 # Project commands
-@task(help={"datasets": "Comma-separated Superviz26 short names (e.g. 'a-a,bcd-a'); empty for all"})
-def fetch_superviz26(ctx: Context, datasets: str = "", force: bool = False, check: bool = False) -> None:
-    """Download Superviz26-SQL CSVs from Zenodo with checksum verification."""
+@task(help={"groups": "Comma-separated groups: 'main', 'drift', 'fsl'; empty for all"})
+def fetch_superviz26(
+    ctx: Context, groups: str = "main", force: bool = False, check: bool = False, keep_archive: bool = False
+) -> None:
+    """Download Superviz26-SQL CSVs from the Zenodo archive with checksum verification."""
     cmd = "python -m tools.fetch_superviz26"
-    if datasets:
-        cmd += f" --datasets {datasets}"
+    if groups:
+        cmd += f" --groups {groups}"
     if force:
         cmd += " --force"
     if check:
         cmd += " --check"
+    if keep_archive:
+        cmd += " --keep-archive"
     ctx.run(cmd, echo=True, pty=not NO_PTY)
 
 
@@ -50,26 +54,17 @@ def fetch_superviz25(ctx: Context, force: bool = False, check: bool = False) -> 
 
 @task
 def fetch_data(ctx: Context, force: bool = False, check: bool = False) -> None:
-    """Download every dataset (Superviz25 + Superviz26) from Zenodo."""
-    fetch_superviz26(ctx, force=force, check=check)
+    """Download the standard datasets (Superviz25 + Superviz26 main) from Zenodo."""
+    fetch_superviz26(ctx, groups="main", force=force, check=check)
     fetch_superviz25(ctx, force=force, check=check)
 
 
-@task(help={"groups": "Comma-separated groups: 'drift'; empty for all."})
+@task(help={"groups": "Comma-separated groups: 'drift', 'fsl'; empty for both."})
 def fetch_supplementary(
-    ctx: Context, groups: str = "", force: bool = False, check: bool = False, keep_archive: bool = False
+    ctx: Context, groups: str = "drift,fsl", force: bool = False, check: bool = False, keep_archive: bool = False
 ) -> None:
-    """Download the heavy concept-drift CSVs from Zenodo (NOT part of fetch_data; several GB)."""
-    cmd = "python -m tools.fetch_supplementary"
-    if groups:
-        cmd += f" --groups {groups}"
-    if force:
-        cmd += " --force"
-    if check:
-        cmd += " --check"
-    if keep_archive:
-        cmd += " --keep-archive"
-    ctx.run(cmd, echo=True, pty=not NO_PTY)
+    """Download the heavy concept-drift/few-shot CSVs from Zenodo (NOT part of fetch_data; several GB)."""
+    fetch_superviz26(ctx, groups=groups, force=force, check=check, keep_archive=keep_archive)
 
 
 @task(

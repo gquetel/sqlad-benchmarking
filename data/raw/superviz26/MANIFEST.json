@@ -1,8 +1,7 @@
 {
   "name": "Superviz26-SQL",
-  "doi": "10.5281/zenodo.19627322",
-  "record_url": "https://zenodo.org/records/19627322",
-  "url_pattern": "https://zenodo.org/api/records/19627322/files/{filename}/content",
+  "doi": "10.5281/zenodo.21068333",
+  "record_url": "https://zenodo.org/records/21068333",
   "columns": [
     "full_query",
     "label",
@@ -22,14 +21,49 @@
     "c": "AdventureWorks",
     "d": "OracleHR"
   },
-  "files": {
-    "a-a.csv":   {"kind": "in_domain", "test_domain": "a", "train_domains": ["a"],           "bytes": 314230801, "sha256": "04022ec1e1486753748441bc0c8813b090a50ad43db3a064bcfefeb1ac4d86f5"},
-    "b-b.csv":   {"kind": "in_domain", "test_domain": "b", "train_domains": ["b"],           "bytes": 271108203, "sha256": "d5d1bde81d08da7489558a3727b98fc9c1feec069b7e102f64071946cee5e38b"},
-    "c-c.csv":   {"kind": "in_domain", "test_domain": "c", "train_domains": ["c"],           "bytes": 338373492, "sha256": "57d1de28857b31d3610a19ec9c96cf92c6061ebc3bb4d7e61a2dd02a001ee8cc"},
-    "d-d.csv":   {"kind": "in_domain", "test_domain": "d", "train_domains": ["d"],           "bytes": 227017688, "sha256": "2d41e5088aaa25b4b1d5f61c6791c9a9b2c86ff579aa154b756faefde404abd6"},
-    "bcd-a.csv": {"kind": "lodo",      "test_domain": "a", "train_domains": ["b", "c", "d"], "bytes": 310825615, "sha256": "541b98c35725758389ef5615c167d0069a79c729c5374f0a535fc62f9ef4e700"},
-    "acd-b.csv": {"kind": "lodo",      "test_domain": "b", "train_domains": ["a", "c", "d"], "bytes": 274817552, "sha256": "adccf4850176bb2a2c2204ba5c0808df3ff6e82d4667b1852ef8f90e941cadcc"},
-    "abd-c.csv": {"kind": "lodo",      "test_domain": "c", "train_domains": ["a", "b", "d"], "bytes": 331802795, "sha256": "9c1c71092c4c0af2b3def91e9791aaac0009fec73fbf7a7ec7d29c3287afbd17"},
-    "abc-d.csv": {"kind": "lodo",      "test_domain": "d", "train_domains": ["a", "b", "c"], "bytes": 233392756, "sha256": "a728f7761df2b99468401f2864b5f2116681fcbb0c592c235b7f4ce77a852242"}
+  "archive": {
+    "name": "superviz26.zip",
+    "url": "https://zenodo.org/api/records/21068333/files/superviz26.zip/content",
+    "bytes": 2378510564,
+    "md5": "9fd0668bd5c229b1e63771d9d50972bd"
+  },
+  "groups": {
+    "main": {
+      "description": "The 8 LODO/in-domain scenario CSVs backing the default superviz26 family.",
+      "dataset": "superviz26",
+      "member_prefix": "superviz26-lodo/",
+      "files": {
+        "a-a.csv":   {"kind": "in_domain", "test_domain": "a", "train_domains": ["a"],           "bytes": 1058634599, "sha256": "5cba28a184c399a940b67a2fee4c90da57e2cffba8961be8bdae3fbc5f9a7a3b"},
+        "b-b.csv":   {"kind": "in_domain", "test_domain": "b", "train_domains": ["b"],           "bytes": 915568366,  "sha256": "3ae8dc1ec565ff1b580ebd795b870fa2211f50559b48b759b7c623302d2813b2"},
+        "c-c.csv":   {"kind": "in_domain", "test_domain": "c", "train_domains": ["c"],           "bytes": 1141191390, "sha256": "1853cf8186026190f31c49688e5514d30a7e6bbaf8f43fa02c3de5448beeadfb"},
+        "d-d.csv":   {"kind": "in_domain", "test_domain": "d", "train_domains": ["d"],           "bytes": 767667755,  "sha256": "7485f119d490fdd078877970e26004ab50eb0fee4af9e962be3b6ebac820aade"},
+        "bcd-a.csv": {"kind": "lodo",      "test_domain": "a", "train_domains": ["b", "c", "d"], "bytes": 1047171211, "sha256": "e9c5db4643dbaea575f2a1263d11ee1dafdc2fdc526581322e47c746c65d0f68"},
+        "acd-b.csv": {"kind": "lodo",      "test_domain": "b", "train_domains": ["a", "c", "d"], "bytes": 927844277,  "sha256": "c4a46e08acbd5ed196c07c5c1151e35a729237d614e37d374b92de679a734439"},
+        "abd-c.csv": {"kind": "lodo",      "test_domain": "c", "train_domains": ["a", "b", "d"], "bytes": 1118954781, "sha256": "b61870ecdd2428d063303942772defbf9892940e4b4bfcf66cd5fb8ca77bf884"},
+        "abc-d.csv": {"kind": "lodo",      "test_domain": "d", "train_domains": ["a", "b", "c"], "bytes": 788927295,  "sha256": "f6ec7efde3b933f701b6ebaf53313634925bf2b2630fc328a30ef6b844ab0c92"}
+      }
+    },
+    "drift": {
+      "description": "Per-domain concept-drift CSVs (origin/shifted partitions) backing superviz26-drift.",
+      "dataset": "superviz26-drift",
+      "member_prefix": "superviz26-cd/",
+      "files": {
+        "a.csv": {"kind": "drift", "test_domain": "a", "bytes": 1033953511, "sha256": "d7f40a39b036d0ff8646fc3573f001757f9b4e8c08377eae55dcf0a7633488dc"},
+        "b.csv": {"kind": "drift", "test_domain": "b", "bytes": 911224378,  "sha256": "1f2c2125433f50f98760125fe43db5b3cbcec668b9341477e107508575d134f3"},
+        "c.csv": {"kind": "drift", "test_domain": "c", "bytes": 1126174516, "sha256": "d5b8a33d1eb9074598d5823dd8ab37813fcb62fad268f8b7bc413fa34234a86c"},
+        "d.csv": {"kind": "drift", "test_domain": "d", "bytes": 771144093,  "sha256": "bef6eec1af90403137f76c570ce1085c55a67c6589dbbe33243bb7597a0b25aa"}
+      }
+    },
+    "fsl": {
+      "description": "Per-target-domain in-domain CSVs backing the few-shot superviz26-fsl family.",
+      "dataset": "superviz26-fsl",
+      "member_prefix": "superviz26-fsl/",
+      "files": {
+        "a-a.csv": {"kind": "in_domain", "test_domain": "a", "bytes": 1003560215, "sha256": "7b71443ac071cbfe618ddafa0efb54d71f0dc626a47095414b33215cb66ae0c8"},
+        "b-b.csv": {"kind": "in_domain", "test_domain": "b", "bytes": 872925231,  "sha256": "b6020a05959923119e68684dfb8c005c4650307a33ab088b634eebf558085064"},
+        "c-c.csv": {"kind": "in_domain", "test_domain": "c", "bytes": 1080460636, "sha256": "8e10d017634f84bb67e5fa2d0489578f8e435b396255b48552a1e699df18e6ef"},
+        "d-d.csv": {"kind": "in_domain", "test_domain": "d", "bytes": 729804942,  "sha256": "4b12dd7df1b30bb344b85116ecdb3de6d45ff1bc20dd80adf3eb373ac6fefd30"}
+      }
+    }
   }
 }

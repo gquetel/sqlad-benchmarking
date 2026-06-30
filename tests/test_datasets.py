@@ -72,7 +72,7 @@ def test_load_drift_missing_file_hints_at_builder(tmp_path):
 
 
 def test_load_drift_auto_fetches_missing_default_root_file(tmp_path, monkeypatch):
-    import tools.fetch_supplementary as fetch_mod
+    import tools.fetch_superviz26 as fetch_mod
     from mlops_sqldetect.datasets import superviz26_drift
 
     monkeypatch.setattr(superviz26_drift, "default_root", lambda: tmp_path)
@@ -113,7 +113,7 @@ def test_load_fsl_returns_target_train_and_test_from_the_in_domain_file(tmp_path
 
 
 def test_load_fsl_missing_file_hints_at_fetcher(tmp_path):
-    with pytest.raises(FileNotFoundError, match="generate_splits"):
+    with pytest.raises(FileNotFoundError, match="fetch_superviz26"):
         load_fsl(Superviz26FSL.A, root=tmp_path)
 
 

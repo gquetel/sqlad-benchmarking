@@ -27,16 +27,19 @@ versions or regenerate the lock without explicit instruction.
     * To format code: `treefmt`.
     * To check formatting without writing: `treefmt --fail-on-change`.
 * The project uses `invoke` for setup/orchestration tasks (e.g. `sync`, `lock`, `test`, docs,
-  docker, dataset fetch). Refer to `tasks.py` for available tasks. `fetch-data` pulls the
-  standard Superviz25 CSVs. The default `superviz26` family now trains on the full-split CSVs
-  read from `~/datasets/superviz26-lodo/`, generated locally by the dataset generator's
-  `generate_splits.py --full` (no auto-download); `superviz26-big` is reserved for a future
-  even-larger training set (`~/datasets/superviz26-xl/`, not yet generated). The heavy
-  concept-drift CSVs that back the
-  drift experiment live in a separate Zenodo zip and are fetched opt-in via
-  `invoke fetch-supplementary` / `python -m tools.fetch_supplementary` (deliberately excluded
-  from `fetch-data` because they are several GB); the `superviz26-drift` loader also
-  auto-downloads its group on first use when a file is missing from the default root.
+  docker, dataset fetch). Refer to `tasks.py` for available tasks. Every Superviz26 build
+  ships in one `superviz26.zip` on Zenodo record 21068333; `python -m tools.fetch_superviz26`
+  downloads it once and extracts a named group (`main`/`drift`/`fsl`) to that group's loader
+  root, verifying checksums against `data/raw/superviz26/MANIFEST.json`. `fetch-data` pulls
+  the standard Superviz25 CSVs plus the `superviz26` `main` group
+  (`~/datasets/superviz26-lodo/`); the `main` CSVs can alternatively be generated locally by
+  the dataset generator's `generate_splits.py --full`. `superviz26-big` trains on an
+  even-larger training set read from `~/datasets/superviz26-big/` (generated locally, not on
+  Zenodo). The heavy concept-drift and few-shot CSVs are fetched opt-in via
+  `invoke fetch-supplementary` / `python -m tools.fetch_superviz26 --groups drift,fsl`
+  (excluded from `fetch-data` because they are several GB); the `superviz26-drift` and
+  `superviz26-fsl` loaders also auto-download their group on first use when a file is missing
+  from the default root.
   The train/eval/SLURM entry
   points are Typer CLIs run directly via `python -m mlops_sqldetect.<module>` (e.g. `train`,
   `evaluate`, `evaluate_suite`, `evaluate_drift`) or `python -m tools.<module>` (e.g.

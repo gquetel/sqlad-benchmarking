@@ -1,10 +1,9 @@
-"""Reserved Superviz26 variant with an even larger training set (future work).
+"""Superviz26 variant with an even larger training set.
 
-A placeholder family for a future training set larger than the standard full-split
-Superviz26 (which now backs the default ``superviz26`` family). Identical 8 scenarios,
-columns, and ``manifest`` reused verbatim from :mod:`superviz26` so both plug into the
-same ``DatasetFamily``; its CSVs are not yet generated and are expected outside the repo
-under ``~/datasets/superviz26-xl/``.
+A family backed by a training set larger than the standard full-split Superviz26
+(which backs the default ``superviz26`` family). Identical 8 scenarios, columns, and
+``manifest`` reused verbatim from :mod:`superviz26` so both plug into the same
+``DatasetFamily``; its CSVs live outside the repo under ``~/datasets/superviz26-big/``.
 """
 
 from __future__ import annotations
@@ -26,12 +25,12 @@ __all__ = ["IN_DOMAIN", "LODO", "Split", "Superviz26", "default_root", "load_spl
 
 
 def default_root() -> Path:
-    """Location of the reserved XL CSVs (outside the repo; not yet generated)."""
-    return Path("~/datasets/superviz26-xl").expanduser()
+    """Location of the Big CSVs (outside the repo)."""
+    return Path("~/datasets/superviz26-big").expanduser()
 
 
 def resolve_path(name: Superviz26, root: Path | None = None) -> Path:
-    """Absolute path to the XL CSV for ``name`` under ``root`` (default: ~/datasets/superviz26-xl)."""
+    """Absolute path to the Big CSV for ``name`` under ``root`` (default: ~/datasets/superviz26-big)."""
     return (root or default_root()) / f"{name.value}.csv"
 
 
@@ -44,16 +43,16 @@ def load_split(
     limit: int | None = None,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Load rows of the reserved XL Superviz26 CSV that belong to ``split``.
+    """Load rows of the Big Superviz26 CSV that belong to ``split``.
 
-    The XL CSVs hold a training set larger than the standard full-split Superviz26 and
-    are generated locally (not on Zenodo); they are not yet produced, so a missing file
-    raises ``FileNotFoundError`` rather than triggering a download.
+    The Big CSVs hold a training set larger than the standard full-split Superviz26 and
+    are generated locally (not on Zenodo), so a missing file raises ``FileNotFoundError``
+    rather than triggering a download.
     """
     path = resolve_path(name, root)
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. The XL training set is reserved for future work and is not yet "
-            f"generated; it is expected at ~/datasets/superviz26-xl/."
+            f"{path} not found. The Big training set is generated locally; it is expected at "
+            f"~/datasets/superviz26-big/."
         )
     return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)
