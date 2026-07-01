@@ -137,7 +137,19 @@ def load_results() -> Results:
             "f1": _num(r.get("metrics.f1")),
         }
     logger.info(f"Loaded {len(data)} cells from {EXPERIMENT}.")
+    _warn_missing(data)
     return data
+
+
+def _warn_missing(data: Results) -> None:
+    """Warn for every expected grid cell that is absent from MLflow or lacks AUROC/AUPRC."""
+    for extractor, engine, label, _ in PIPELINES:
+        for sc, _ in INDOMAIN + LODO:
+            cell = data.get((extractor, engine, sc))
+            if cell is None:
+                logger.warning(f"Missing run: {label} / {sc}")
+            elif cell["auroc"] is None or cell["auprc"] is None:
+                logger.warning(f"Incomplete metrics (AUROC/AUPRC NaN): {label} / {sc}")
 
 
 # --- detailed appendix tables ------------------------------------------------
@@ -488,7 +500,12 @@ def render_figure(data: Results) -> str:
     def complete(extractor: str) -> bool:
         return all(avgs[SHORT_BY_CELL[(extractor, e)]][k] is not None for e in ENGINE_BTT for k in keys)
 
-    extractors = [e for e in _extractor_order() if complete(e)]
+    extractors = []
+    for e in _extractor_order():
+        if complete(e):
+            extractors.append(e)
+        else:
+            logger.warning(f"Dropping {EXTRACTOR_SHORT[e]} from dumbbell figure: incomplete ID/LODO averages.")
     if not extractors:
         raise RuntimeError(
             "No feature extractor has all three engines' in-domain and LODO averages required for the figure."
