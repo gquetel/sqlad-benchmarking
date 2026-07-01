@@ -174,6 +174,7 @@ def _run_one(
     extractor: str,
     data_root: Path,
     model_dir: Path,
+    log_dir: Path,
     limit: int | None = None,
     suite: str = "",
     target_fpr: float = 0.001,
@@ -185,6 +186,64 @@ def _run_one(
     cache_dir: Path | None = None,
 ) -> ResultRow:
     """Train + evaluate one (dataset, pipeline, extractor) cell, optionally logging to MLflow."""
+    # Tee this cell's log output to its own file under reports/ and (when tracking)
+    # attach it to the child run as an artifact, so a cell's diagnostics live next to
+    # its metrics and curves in MLflow. SLURM's per-array .log interleaves nothing here
+    # (one cell per array task) but isn't reachable from a run; this file is.
+    stem = f"{pipeline}_{extractor}_{family.name}_{dataset.value}"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{stem}.log"
+    log_handler = logging.FileHandler(log_path, mode="w")
+    log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(log_handler)
+    try:
+        return _run_one_tracked(
+            family=family,
+            dataset=dataset,
+            pipeline=pipeline,
+            extractor=extractor,
+            data_root=data_root,
+            model_dir=model_dir,
+            stem=stem,
+            log_path=log_path,
+            log_handler=log_handler,
+            limit=limit,
+            suite=suite,
+            target_fpr=target_fpr,
+            capture_insider=capture_insider,
+            seed=seed,
+            track=track,
+            register=register,
+            cache=cache,
+            cache_dir=cache_dir,
+        )
+    finally:
+        logging.getLogger().removeHandler(log_handler)
+        log_handler.close()
+
+
+def _run_one_tracked(
+    *,
+    family: DatasetFamily,
+    dataset: StrEnum,
+    pipeline: PipelineName,
+    extractor: str,
+    data_root: Path,
+    model_dir: Path,
+    stem: str,
+    log_path: Path,
+    log_handler: logging.Handler,
+    limit: int | None,
+    suite: str,
+    target_fpr: float,
+    capture_insider: bool,
+    seed: int,
+    track: bool,
+    register: bool,
+    cache: bool,
+    cache_dir: Path | None,
+) -> ResultRow:
+    """Body of :func:`_run_one`, run with a file handler already capturing this cell's log."""
     logger.info(
         f"=== {PIPELINE_LABELS.get(pipeline, pipeline)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
         f"on {family.name.capitalize()}/{dataset.value} ==="
@@ -307,7 +366,7 @@ def _run_one(
 
         # One ROC and one AUPRC curve per cell, written under models/curves/.
         labels = df_test["label"].to_numpy()
-        curve_stem = f"{pipeline}_{extractor}_{family.name}_{dataset.value}"
+        curve_stem = stem
         roc_path = plot_roc_curve(labels, scores, dataset.value, model_dir / "curves" / f"{curve_stem}_roc.png")
         pr_path = plot_pr_curve(labels, scores, dataset.value, model_dir / "curves" / f"{curve_stem}_auprc.png")
         # Persist the raw curve points so curves can be re-plotted offline without refitting.
@@ -372,6 +431,9 @@ def _run_one(
             if register:
                 registered_name = f"sqldetect-{pipeline}-{extractor}-{family.name}-{dataset.value}"
                 log_and_register_detector(model_path, registered_name, df_test[["full_query"]].head(3))
+            # Attach the captured per-cell log last so it also covers the steps above.
+            log_handler.flush()
+            mlflow.log_artifact(str(log_path), artifact_path="logs")
 
         return row
 
@@ -437,6 +499,9 @@ def evaluate_suite(
             if scenario is not None
             else Path(f"reports/{dataset}_results.csv")
         )
+    # Per-cell logs live under reports/{dataset}/logs/ (next to the per-cell CSVs) and
+    # are also uploaded to each child run as an MLflow artifact.
+    log_dir = Path(f"reports/{dataset}/logs")
     model_dir.mkdir(parents=True, exist_ok=True)
     report.parent.mkdir(parents=True, exist_ok=True)
     if scenario is not None:
@@ -465,6 +530,7 @@ def evaluate_suite(
                         extractor,
                         data_root,
                         model_dir,
+                        log_dir,
                         limit=limit,
                         suite=suite,
                         target_fpr=target_fpr,
