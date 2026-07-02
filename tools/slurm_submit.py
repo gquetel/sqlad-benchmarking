@@ -231,7 +231,7 @@ def submit(
     no_track: Annotated[bool, typer.Option(help="Disable MLflow tracking for the submitted jobs.")] = False,
     limit: Annotated[int | None, typer.Option(help="Label-stratified subset size per cell for smoke runs.")] = None,
     run_id: Annotated[
-        str | None, typer.Option(help="Submission id; names the dir under submit_dir (default: timestamp).")
+        str | None, typer.Option(help="Submission id; names the dir under submit_dir (default: date-<first job id>).")
     ] = None,
     dry_run: Annotated[bool, typer.Option(help="Print the manifests and sbatch commands without submitting.")] = False,
 ) -> None:
@@ -247,6 +247,10 @@ def submit(
         _check_venv()
 
     cells = enumerate_cells(dataset, suite, pipelines, extractors)
+    # An explicit run_id is honoured as-is; an auto-generated one starts as a timestamp so we
+    # have a directory to stage manifests/scripts in, then gets renamed to date-<jobid> once
+    # sbatch hands back the first array's id (the id doesn't exist until after submission).
+    explicit_run_id = run_id is not None
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S")
     submit_dir = REPO_ROOT / SUBMIT_DIR / run_id
     (submit_dir / "logs").mkdir(parents=True, exist_ok=True)
@@ -291,6 +295,14 @@ def submit(
         logger.info("Dry run: nothing submitted.")
     elif job_ids:
         logger.info(f"Submitted job arrays: {', '.join(job_ids)}")
+        if not explicit_run_id:
+            # Rename the staging dir to date-<first job id>. The in-flight arrays carry the
+            # original absolute --output/--error paths, so leave a symlink at the old path for
+            # tasks that open their logs after the rename.
+            final_dir = REPO_ROOT / SUBMIT_DIR / f"{run_id.split('-')[0]}-{job_ids[0]}"
+            submit_dir.rename(final_dir)
+            submit_dir.symlink_to(final_dir)
+            logger.info(f"Submission dir: {final_dir}")
 
 
 if __name__ == "__main__":
