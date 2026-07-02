@@ -76,7 +76,7 @@ def _num(x: object) -> float | None:
     """Coerce an MLflow metric cell to a float, mapping missing/NaN to None."""
     try:
         v = float(x)  # type: ignore[arg-type]
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return None if math.isnan(v) else v
 
@@ -105,7 +105,20 @@ def load_results() -> Results:
             "auprc_s2": _num(r.get("metrics.auprc_s2")),
         }
     logger.info(f"Loaded {len(data)} cells from {EXPERIMENT}.")
+    _warn_missing(data)
     return data
+
+
+def _warn_missing(data: Results) -> None:
+    """Warn for every expected grid cell that is absent from MLflow or lacks its S1/S2 metrics."""
+    metric_keys = ("auroc_s1", "auroc_s2", "auprc_s1", "auprc_s2")
+    for extractor, engine, label, _ in PIPELINES:
+        for domain in DOMAINS:
+            cell = data.get((extractor, engine, domain))
+            if cell is None:
+                logger.warning(f"Missing run: {label} / {domain}")
+            elif any(cell[k] is None for k in metric_keys):
+                logger.warning(f"Incomplete metrics (S1/S2 NaN): {label} / {domain}")
 
 
 # --- dumbbell figure ---------------------------------------------------------
@@ -137,6 +150,8 @@ ENGINE_BTT = sorted(ENGINE_ORDER, key=lambda e: ENGINE_ORDER[e], reverse=True)  
 EXTRACTOR_SHORT = {"cv": "CountVectorizer", "li": "Li", "loginov": "Loginov", "sbert": "SecureBERT", "codet5": "CodeT5+"}
 ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
 SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in PIPELINES}
+# A "method" is one (feature extractor, decision engine) cell -- one dumbbell row in the figure.
+LABEL_BY_CELL = {(extractor, engine): label for extractor, engine, label, _ in PIPELINES}
 
 # x ticks shared by both panels; a panel renders only those within its x-range.
 _XTICK_GRID = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
@@ -184,8 +199,13 @@ def _averages(data: Results) -> dict[str, Metrics]:
     return out
 
 
-def _pgfplotsset(auroc_xmin: float, ycoords: str, bottom_title: str) -> str:
-    """The shared ``dumbstack``/``dumbstackp`` mini-plot styles (one x scale per panel)."""
+def _pgfplotsset(auroc_xmin: float, bottom_title: str) -> str:
+    """The shared ``dumbstack``/``dumbstackp`` mini-plot styles (one x scale per panel).
+
+    ``symbolic y coords``/``yticklabels`` are set per mini-plot instead of here, because a
+    feature extractor renders only the decision methods whose averages are complete, so the
+    engine rows differ from plot to plot.
+    """
     return (
         "  % shared style for the per-feature-extractor AUROC mini-plots: identical x scale,\n"
         f"  % x ticks/label hidden by default and re-enabled only on the bottom ({bottom_title}) plot.\n"
@@ -194,9 +214,7 @@ def _pgfplotsset(auroc_xmin: float, ycoords: str, bottom_title: str) -> str:
         "      width=\\linewidth, height=2.4cm,\n"
         f"      xmin={auroc_xmin:.2f}, xmax=1.00,\n"
         f"      xtick={{{_xticks(auroc_xmin)}}},\n"
-        f"      symbolic y coords={{{ycoords}}},\n"
         "      ytick=data,\n"
-        f"      yticklabels={{{ycoords}}},\n"
         "      tick label style={font=\\scriptsize},\n"
         "      yticklabel style={font=\\tiny},\n"
         "      enlarge y limits=0.12,\n"
@@ -205,14 +223,15 @@ def _pgfplotsset(auroc_xmin: float, ycoords: str, bottom_title: str) -> str:
         "      xticklabels={},\n"
         "      title style={font=\\scriptsize, at={(0.01,1)}, anchor=south west, yshift=-5pt},\n"
         "    },\n"
-        "    % AUPRC variant: wider x range, no y labels (shared from the AUROC panel).\n"
-        f"    dumbstackp/.style={{dumbstack, xmin=0.00, xtick={{{_xticks(0.0)}}}, yticklabels={{}}}},\n"
+        "    % AUPRC variant: wider x range (y labels are set per mini-plot and hidden there).\n"
+        f"    dumbstackp/.style={{dumbstack, xmin=0.00, xtick={{{_xticks(0.0)}}}}},\n"
         "  }"
     )
 
 
 def _fe_plot(
     extractor: str,
+    engines: list[str],
     avgs: dict[str, Metrics],
     s1_key: str,
     s2_key: str,
@@ -221,29 +240,32 @@ def _fe_plot(
     is_bottom: bool,
     xticklabels: str,
     bottom_shows_label: bool,
+    show_ylabels: bool,
 ) -> str:
-    """Render one feature-extractor mini-plot (three decision-engine dumbbell rows)."""
+    """Render one feature-extractor mini-plot (one dumbbell row per available decision method)."""
     title = EXTRACTOR_SHORT[extractor]
     if is_bottom:
         extra = " + label" if bottom_shows_label else ""
         comment = f"    % --- {title} (bottom plot: x-axis ticks{extra} shown here only) ---"
     else:
         comment = f"    % --- {title} ---"
-    axis_opts = f"{style}, title={title}"
+    ycoords = ",".join(ENGINE_SHORT[e] for e in engines)
+    axis_opts = f"{style}, title={title}, symbolic y coords={{{ycoords}}}"
+    axis_opts += f", yticklabels={{{ycoords if show_ylabels else ''}}}"
     if is_bottom:
         axis_opts += f", xticklabels={{{xticklabels}}}"
 
-    cells = {e: avgs[SHORT_BY_CELL[(extractor, e)]] for e in ENGINE_BTT}
+    cells = {e: avgs[SHORT_BY_CELL[(extractor, e)]] for e in engines}
     connectors = "\n".join(
         f"        \\addplot[gray, line width=0.8pt, forget plot] coordinates "
         f"{{({cells[e][s2_key]:.4f},{ENGINE_SHORT[e]}) ({cells[e][s1_key]:.4f},{ENGINE_SHORT[e]})}};"
-        for e in ENGINE_BTT
+        for e in engines
     )
-    s2_marks = " ".join(f"({cells[e][s2_key]:.4f},{ENGINE_SHORT[e]})" for e in ENGINE_BTT)
-    s1_marks = " ".join(f"({cells[e][s1_key]:.4f},{ENGINE_SHORT[e]})" for e in ENGINE_BTT)
+    s2_marks = " ".join(f"({cells[e][s2_key]:.4f},{ENGINE_SHORT[e]})" for e in engines)
+    s1_marks = " ".join(f"({cells[e][s1_key]:.4f},{ENGINE_SHORT[e]})" for e in engines)
     # Drop label per engine: green when the drop is small (< 0.05), red otherwise.
     deltas = []
-    for e in ENGINE_BTT:
+    for e in engines:
         s1v, s2v = cells[e][s1_key], cells[e][s2_key]
         delta = s1v - s2v
         color = "66BB6A" if delta < 0.05 else "E57373"
@@ -267,7 +289,7 @@ def _fe_plot(
 
 
 def _panel(
-    extractors: list[str],
+    plots: list[tuple[str, list[str]]],
     avgs: dict[str, Metrics],
     s1_key: str,
     s2_key: str,
@@ -278,6 +300,7 @@ def _panel(
     *,
     caption: str,
     bottom_shows_label: bool,
+    show_ylabels: bool,
 ) -> str:
     """Render one dumbbell subfigure: a stack of per-feature-extractor mini-plots."""
     span = xmax - xmin
@@ -287,17 +310,19 @@ def _panel(
         f"    \\def\\dumbthresh{{{xmin + 0.20 * span:.2f}}}",
         f"    \\def\\dumbthreshR{{{xmax - 0.13 * span:.2f}}}",
     ]
-    for i, extractor in enumerate(extractors):
+    for i, (extractor, engines) in enumerate(plots):
         lines.append(
             _fe_plot(
                 extractor,
+                engines,
                 avgs,
                 s1_key,
                 s2_key,
                 style,
-                is_bottom=i == len(extractors) - 1,
+                is_bottom=i == len(plots) - 1,
                 xticklabels=xticklabels,
                 bottom_shows_label=bottom_shows_label,
+                show_ylabels=show_ylabels,
             )
         )
     lines.append(f"    \\caption{{{caption}}}")
@@ -306,31 +331,43 @@ def _panel(
 
 
 def render_figure(data: Results) -> str:
-    """Render the two-panel (AUROC, AUPRC) dumbbell figure for the fully-available extractors."""
+    """Render the two-panel (AUROC, AUPRC) dumbbell figure for the fully-available methods.
+
+    A feature extractor keeps its mini-plot as long as at least one of its decision methods
+    has complete S1/S2 averages; methods missing any domain are dropped from the plot (not
+    the whole extractor), so the complete ones still render.
+    """
     avgs = _averages(data)
     keys = ("s1_auroc", "s2_auroc", "s1_auprc", "s2_auprc")
 
-    def complete(extractor: str) -> bool:
-        return all(avgs[SHORT_BY_CELL[(extractor, e)]][k] is not None for e in ENGINE_BTT for k in keys)
+    def available_engines(extractor: str) -> list[str]:
+        return [e for e in ENGINE_BTT if all(avgs[SHORT_BY_CELL[(extractor, e)]][k] is not None for k in keys)]
 
-    extractors = [e for e in _extractor_order() if complete(e)]
-    if not extractors:
-        raise RuntimeError("No feature extractor has all three engines' S1 and S2 averages required for the figure.")
+    plots: list[tuple[str, list[str]]] = []
+    for extractor in _extractor_order():
+        engines = available_engines(extractor)
+        for e in ENGINE_BTT:
+            if e not in engines:
+                label = LABEL_BY_CELL[(extractor, e)]
+                logger.warning(f"Dropping {label} from dumbbell figure: incomplete S1/S2 averages.")
+        if engines:
+            plots.append((extractor, engines))
+    if not plots:
+        raise RuntimeError("No decision method has the S1 and S2 averages required for the figure.")
 
     auroc_min = min(
         min(avgs[SHORT_BY_CELL[(extractor, e)]]["s1_auroc"], avgs[SHORT_BY_CELL[(extractor, e)]]["s2_auroc"])
-        for extractor in extractors
-        for e in ENGINE_BTT
+        for extractor, engines in plots
+        for e in engines
     )
     auroc_xmin = max(0.0, math.floor(auroc_min * 20 - 1) / 20)
 
-    ycoords = ",".join(ENGINE_SHORT[e] for e in ENGINE_BTT)
-    pgfset = _pgfplotsset(auroc_xmin, ycoords, EXTRACTOR_SHORT[extractors[-1]])
+    pgfset = _pgfplotsset(auroc_xmin, EXTRACTOR_SHORT[plots[-1][0]])
 
     panels = "\n  \\hfill\n".join(
         [
             _panel(
-                extractors,
+                plots,
                 avgs,
                 "s1_auroc",
                 "s2_auroc",
@@ -340,9 +377,10 @@ def render_figure(data: Results) -> str:
                 1.0,
                 caption="AUROC",
                 bottom_shows_label=True,
+                show_ylabels=True,
             ),
             _panel(
-                extractors,
+                plots,
                 avgs,
                 "s1_auprc",
                 "s2_auprc",
@@ -352,6 +390,7 @@ def render_figure(data: Results) -> str:
                 1.0,
                 caption="AUPRC",
                 bottom_shows_label=False,
+                show_ylabels=False,
             ),
         ]
     )

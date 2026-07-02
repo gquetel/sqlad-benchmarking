@@ -35,3 +35,8 @@ gpu-long:
 min_vram_gb:
   default: 0
   codet5: 24
+
+# Cells that need the longer wall-time reservation (the `gpu-long` block instead of `gpu`),
+# keyed by extractor or pipeline:extractor. The heavier full-split data pushes these past 12h.
+long_running:
+  - ocsvm:sbert

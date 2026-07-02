@@ -5,8 +5,9 @@ Each cell ``(scenario, pipeline, extractor)`` becomes one array task that runs t
 (no shared writer, no merge step). Cells needing a GPU (``pipeline == "ae"`` or an
 embedding extractor — ``sbert``/``codet5``) go to a GPU array whose partition list is the
 GPU partitions with enough VRAM for that cell (per-cell minimum from ``min_vram_gb``, so a
-hungry model like CodeT5+ skips the 16 GB V100); the rest go to a CPU array. Resources and
-the environment setup come from ``configs/slurm.yaml``.
+hungry model like CodeT5+ skips the 16 GB V100); the rest go to a CPU array. Cells listed in
+``long_running`` (config, keyed like ``min_vram_gb``) run on the 24h ``gpu-long`` block instead
+of the default 12h ``gpu`` block. Resources and the environment setup come from ``configs/slurm.yaml``.
 
 Usage:
     python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors li
@@ -67,12 +68,51 @@ def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
     return eligible
 
 
-def _bucket(cell: Cell, cfg: dict) -> str:
-    """Bucket label for a cell's array: cpu, gpu (any GPU), or gpu-{req}gb for VRAM-pinned cells."""
+def _is_long_running(cell: Cell, cfg: dict) -> bool:
+    """Whether a cell needs the extended wall time, per the config ``long_running`` list (keyed by extractor or pipeline:extractor)."""
+    keys = set(cfg.get("long_running", []))
+    return f"{cell.pipeline}:{cell.extractor}" in keys or cell.extractor in keys
+
+
+def _gpu_section(cell: Cell, cfg: dict, default: str) -> str:
+    """GPU resource block for a cell: ``gpu-long`` when flagged long-running, else the submission default."""
+    return "gpu-long" if _is_long_running(cell, cfg) else default
+
+
+def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
+    """Bucket label for a cell's array: cpu, the GPU section (gpu/gpu-long), or ``{section}-{req}gb`` for VRAM-pinned cells.
+
+    The section is baked into the label so long-running cells land in their own array (each
+    array carries one #SBATCH header) instead of sharing the default GPU block's wall time.
+    """
     if not _needs_gpu(cell):
         return "cpu"
+    section = _gpu_section(cell, cfg, gpu_section)
     req = _min_vram(cell, cfg)
-    return "gpu" if req <= 0 else f"gpu-{req}gb"
+    return section if req <= 0 else f"{section}-{req}gb"
+
+
+def _experiment_tag(dataset: str, suite: str) -> str:
+    """Short experiment-type tag for the job name: fsl/cd/big by family, else id/lodo by suite."""
+    family = FAMILIES.get(dataset)
+    if family is not None and family.protocol == "fsl":
+        return "fsl"
+    if family is not None and family.protocol == "drift":
+        return "cd"
+    if dataset == "superviz26-big":
+        return "big"
+    return {"in_domain": "id"}.get(suite, suite)
+
+
+def _job_name(dataset: str, suite: str, cells: list[Cell]) -> str:
+    """Informative SLURM job name: {tag}-{extractors}-{pipelines}-{dataset}.
+
+    Buckets split by resource class, so one array can mix extractors/pipelines; each is
+    listed once (in first-seen order) joined by '+' (e.g. id-li+cv-ocsvm+ae-superviz26).
+    """
+    extractors = "+".join(dict.fromkeys(c.extractor for c in cells))
+    pipelines = "+".join(dict.fromkeys(c.pipeline for c in cells))
+    return f"{_experiment_tag(dataset, suite)}-{extractors}-{pipelines}-{dataset}"
 
 
 def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu") -> dict:
@@ -102,7 +142,7 @@ def _write_manifest(path: Path, cells: list[Cell]) -> None:
 def _write_job_script(
     path: Path,
     *,
-    bucket: str,
+    job_name: str,
     res: dict,
     cfg: dict,
     dataset: str,
@@ -116,7 +156,7 @@ def _write_job_script(
 ) -> None:
     """Generate a self-contained array script: full #SBATCH header, then dispatch one cell per index."""
     directives = [
-        f"#SBATCH --job-name=sqldetect-{bucket}",
+        f"#SBATCH --job-name={job_name}",
         f"#SBATCH --output={log_pattern}",
         f"#SBATCH --error={log_pattern}",
         f"#SBATCH --partition={res['partition']}",
@@ -221,16 +261,16 @@ def submit(
 
     buckets: dict[str, list[Cell]] = {}
     for cell in cells:
-        buckets.setdefault(_bucket(cell, cfg), []).append(cell)
+        buckets.setdefault(_bucket(cell, cfg, gpu_section), []).append(cell)
     job_ids: list[str] = []
     for bucket, group_cells in sorted(buckets.items()):
-        res = _resolve_resources(cfg, group_cells[0], gpu_section)
+        res = _resolve_resources(cfg, group_cells[0], _gpu_section(group_cells[0], cfg, gpu_section))
         manifest = submit_dir / f"cells_{bucket}.jsonl"
         script = submit_dir / f"eval_cell_{bucket}.sbatch"
         _write_manifest(manifest, group_cells)
         _write_job_script(
             script,
-            bucket=bucket,
+            job_name=_job_name(dataset, suite, group_cells),
             res=res,
             cfg=cfg,
             dataset=dataset,
