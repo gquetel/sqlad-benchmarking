@@ -53,14 +53,11 @@ LODO = ["bcd-a", "acd-b", "abd-c", "abc-d"]
 REGIMES: list[tuple[str, list[str]]] = [("In-domain", INDOMAIN), ("LODO", LODO)]
 
 def _caption() -> str:
-    """Caption listing the pipelines in display order (e.g. 'A, B and C')."""
-    labels = [label.replace(" ", "~") for _, label in PIPELINES]
-    listed = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+    """Caption for the size-sufficiency table."""
     return (
-        rf"Effect of doubling the training set beyond the full per-domain pools on the AUROC of the "
-        rf"{listed} pipelines. For each pipeline and regime, the AUROC is averaged over the four "
-        r"scenarios on the full and Big (2x) training sets; the $\Delta$ column reports the "
-        r"big-minus-full difference."
+        r"Effect of doubling the training set on AUROC for the three pipelines. AUROC is "
+        r"averaged over the four scenarios on the full and Big (2x) sets. $\Delta$ is the "
+        r"Big-minus-full difference."
     )
 
 
