@@ -61,6 +61,31 @@ class OCSVMConfig:
     kernel: str = "rbf"
     gamma: str = "scale"
     max_iter: int = 1000
+    # libsvm's decision_function is single-threaded; scoring is parallelised by splitting
+    # the test rows across this many processes (-1 = all cores). See score_samples.
+    n_jobs: int = -1
+
+
+# Below this many rows, pickling the fitted SVM to each worker outweighs the parallel
+# speedup, so score in the calling process instead.
+_MIN_ROWS_FOR_PARALLEL_SCORE = 10_000
+
+
+def _parallel_decision_function(estimator, X, n_jobs: int) -> np.ndarray:
+    """``estimator.decision_function(X)`` split row-wise across processes.
+
+    libsvm's ``decision_function`` is single-threaded and holds the GIL, so the only way
+    to use more than one core is to score disjoint contiguous row blocks in separate
+    processes and concatenate; the result is identical to the serial call. Works for
+    dense and sparse ``X`` (both support contiguous row slicing).
+    """
+    workers = joblib.effective_n_jobs(n_jobs)
+    if workers == 1 or X.shape[0] < _MIN_ROWS_FOR_PARALLEL_SCORE:
+        return estimator.decision_function(X)
+    edges = np.linspace(0, X.shape[0], workers + 1, dtype=int)
+    blocks = [slice(int(a), int(b)) for a, b in zip(edges[:-1], edges[1:], strict=True) if b > a]
+    parts = joblib.Parallel(n_jobs=workers)(joblib.delayed(estimator.decision_function)(X[b]) for b in blocks)
+    return np.concatenate(parts)
 
 
 class OCSVMDetector:
@@ -100,8 +125,13 @@ class OCSVMDetector:
         return self
 
     def score_samples(self, df: pd.DataFrame) -> np.ndarray:
-        """Return anomaly scores (higher = more anomalous)."""
-        return -self.pipeline.decision_function(df)
+        """Return anomaly scores (higher = more anomalous).
+
+        Feature extraction (SecureBERT/CodeT5+ on GPU, disk-cached) and scaling run once,
+        then the single-threaded OneClassSVM decision is parallelised over the test rows.
+        """
+        features = self.pipeline[:-1].transform(df)
+        return -_parallel_decision_function(self.pipeline[-1], features, self.config.n_jobs)
 
     def save(self, path: Path) -> None:
         path = Path(path)

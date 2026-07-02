@@ -8,10 +8,12 @@ import pytest
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import FunctionTransformer, MaxAbsScaler, StandardScaler
 
+import mlops_sqldetect.model as model_mod
 from mlops_sqldetect.features import build_extractor
 from mlops_sqldetect.model import (
     AEConfig,
     AEDetector,
+    _parallel_decision_function,
     _scaler_for,
     build_pipeline,
     load_pipeline,
@@ -136,3 +138,40 @@ def test_build_pipeline_unknown_raises():
     """An unknown head name must fail fast with a clear error."""
     with pytest.raises(ValueError, match="Unknown pipeline"):
         build_pipeline("nope", "li")  # type: ignore[arg-type]
+
+
+def test_parallel_decision_function_matches_serial(monkeypatch):
+    """Row-chunked parallel scoring must reproduce the serial decision function exactly."""
+    from sklearn.svm import OneClassSVM
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((240, 8))
+    svm = OneClassSVM(gamma="scale").fit(x)
+    # Drop the guard so the small array still takes the multi-process path.
+    monkeypatch.setattr(model_mod, "_MIN_ROWS_FOR_PARALLEL_SCORE", 16)
+    np.testing.assert_allclose(
+        _parallel_decision_function(svm, x, n_jobs=3), svm.decision_function(x), rtol=1e-9, atol=1e-9
+    )
+
+
+def test_parallel_decision_function_short_circuits_serially():
+    """One worker or a below-threshold row count must score in-process, bit-for-bit."""
+    from sklearn.svm import OneClassSVM
+
+    rng = np.random.default_rng(1)
+    x = rng.standard_normal((50, 4))
+    svm = OneClassSVM(gamma="scale").fit(x)
+    # n_jobs=1 (one worker) and the default 10k threshold (x is far below) both go serial.
+    np.testing.assert_array_equal(_parallel_decision_function(svm, x, n_jobs=1), svm.decision_function(x))
+    np.testing.assert_array_equal(_parallel_decision_function(svm, x, n_jobs=-1), svm.decision_function(x))
+
+
+def test_ocsvm_score_samples_parallel_matches_serial(monkeypatch):
+    """OCSVMDetector.score_samples must be invariant to the n_jobs it parallelises over."""
+    df_train, df_test = _train_test()
+    model = build_pipeline("ocsvm", "li").fit(df_train)
+    model.config.n_jobs = 1
+    serial = model.score_samples(df_test)
+    monkeypatch.setattr(model_mod, "_MIN_ROWS_FOR_PARALLEL_SCORE", 4)
+    model.config.n_jobs = 2
+    np.testing.assert_allclose(model.score_samples(df_test), serial, rtol=1e-6, atol=1e-6)
