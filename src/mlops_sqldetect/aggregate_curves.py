@@ -31,7 +31,7 @@ def _find_cell_run_id(pipeline: str, extractor: str, scenario: str) -> str | Non
     """Latest full-run child run for a (pipeline, extractor, scenario), or None."""
     filter_string = (
         f"tags.pipeline = '{pipeline}' and tags.feature_extractor = '{extractor}' "
-        f"and tags.dataset = '{scenario}' and tags.run_type = 'full-run'"
+        f"and tags.scenario = '{scenario}' and tags.run_type = 'full-run'"
     )
     runs = mlflow.search_runs(
         filter_string=filter_string, order_by=["start_time DESC"], max_results=1, output_format="list"

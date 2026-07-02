@@ -126,7 +126,7 @@ def load_results() -> Results:
     runs = runs.sort_values("start_time")
     data: Results = {}
     for _, r in runs.iterrows():
-        extractor, engine, scenario = r.get("tags.feature_extractor"), r.get("tags.pipeline"), r.get("tags.dataset")
+        extractor, engine, scenario = r.get("tags.feature_extractor"), r.get("tags.pipeline"), r.get("tags.scenario")
         if not (isinstance(extractor, str) and isinstance(engine, str) and isinstance(scenario, str)):
             continue
         data[(extractor, engine, scenario)] = {

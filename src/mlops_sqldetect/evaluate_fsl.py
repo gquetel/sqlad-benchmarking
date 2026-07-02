@@ -50,7 +50,7 @@ from mlops_sqldetect.evaluate_suite import _model_filename, _validate_grid, pare
 from mlops_sqldetect.features import EXTRACTOR_LABELS
 from mlops_sqldetect.metrics import threshold_for_fpr, wilson_ci
 from mlops_sqldetect.model import AEDetector
-from mlops_sqldetect.tracking import ensure_parent_run, setup_mlflow
+from mlops_sqldetect.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +305,17 @@ def _run_target(
                     lr_scale=lr_scale,
                     target_fpr=target_fpr,
                     test_limit=test_limit,
+                )
+                # Sets the "Dataset" column to the specific in-domain CSV few-shot
+                # adapts on: the reused Superviz26 manifest carries its sha256 under
+                # the "fsl" group.
+                mf = family.manifest()
+                file_entry = mf["groups"]["fsl"]["files"][family.resolve_path(target).name]
+                log_dataset_input(
+                    url=mf["record_url"],
+                    name=f"{family.name}-{target.value}",
+                    digest=file_entry.get("sha256", ""),
+                    context="finetune+test",
                 )
 
     return rows

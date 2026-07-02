@@ -47,6 +47,8 @@ class DatasetFamily:
     default_root: Callable[[], Path]
     resolve_path: Callable[..., Path]
     protocol: str = "suite"
+    # Whether the CSVs have a published Zenodo source to record in mlflow
+    on_zenodo: bool = True
 
 
 FAMILIES: dict[str, DatasetFamily] = {
@@ -81,6 +83,7 @@ FAMILIES: dict[str, DatasetFamily] = {
         manifest=superviz26_big.manifest,
         default_root=superviz26_big.default_root,
         resolve_path=superviz26_big.resolve_path,
+        on_zenodo=False,
     ),
     "superviz26-drift": DatasetFamily(
         name="superviz26-drift",

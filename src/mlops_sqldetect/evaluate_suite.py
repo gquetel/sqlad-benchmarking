@@ -24,7 +24,7 @@ from typing import Annotated, NamedTuple
 import mlflow
 import pandas as pd
 import typer
-from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.metrics import average_precision_score
 from sklearn.model_selection import train_test_split
 
 from mlops_sqldetect.data import load_whole_sampled, split_normals
@@ -102,10 +102,11 @@ def parent_run_spec(family: DatasetFamily, pipeline: str, extractor: str) -> tup
         f"{PIPELINE_LABELS.get(pipeline, pipeline)} and "
         f"{EXTRACTOR_LABELS.get(extractor, extractor)}"
     )
+    # The family is not tagged: each family has its own MLflow experiment, so the
+    # parent is uniquely identified within that experiment by (pipeline, extractor).
     tags = {
         "pipeline": pipeline,
         "feature_extractor": extractor,
-        "dataset_family": family.name,
         "run_role": "parent",
     }
     return name, tags
@@ -131,6 +132,7 @@ class ResultRow:
     """One row of the suite results table."""
 
     dataset: str
+    scenario: str
     kind: str
     pipeline: str
     extractor: str
@@ -148,18 +150,16 @@ class ResultRow:
     auroc_ci: float
     auprc_ci: float
     threshold: float
-    # JSON-encoded {technique: recall} keeps the CSV schema fixed despite the
-    # technique set varying per dataset (rows are appended one at a time).
     recall_per_attack: str
     fit_seconds: float
     score_seconds: float
     model_path: str
 
 
-def _model_filename(family: str, pipeline: PipelineName, extractor: str, dataset: StrEnum) -> str:
-    # AE persists a torch checkpoint; OCSVM/LOF persist a joblib sklearn pipeline.
+def _model_filename(family: str, pipeline: PipelineName, extractor: str, scenario: StrEnum) -> str:
+    # AE saves a torch checkpoint. OCSVM/LOF saves a joblib sklearn pipeline.
     suffix = "pt" if pipeline == "ae" else "joblib"
-    return f"{pipeline}_{extractor}_{family}_{dataset.value}.{suffix}"
+    return f"{pipeline}_{extractor}_{family}_{scenario.value}.{suffix}"
 
 
 def _mlflow_key(name: str) -> str:
@@ -169,7 +169,7 @@ def _mlflow_key(name: str) -> str:
 
 def _run_one(
     family: DatasetFamily,
-    dataset: StrEnum,
+    scenario: StrEnum,
     pipeline: PipelineName,
     extractor: str,
     data_root: Path,
@@ -185,12 +185,12 @@ def _run_one(
     cache: bool = True,
     cache_dir: Path | None = None,
 ) -> ResultRow:
-    """Train + evaluate one (dataset, pipeline, extractor) cell, optionally logging to MLflow."""
+    """Train + evaluate one (scenario, pipeline, extractor) cell, optionally logging to MLflow."""
     # Tee this cell's log output to its own file under reports/ and (when tracking)
     # attach it to the child run as an artifact, so a cell's diagnostics live next to
     # its metrics and curves in MLflow. SLURM's per-array .log interleaves nothing here
     # (one cell per array task) but isn't reachable from a run; this file is.
-    stem = f"{pipeline}_{extractor}_{family.name}_{dataset.value}"
+    stem = f"{pipeline}_{extractor}_{family.name}_{scenario.value}"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{stem}.log"
     log_handler = logging.FileHandler(log_path, mode="w")
@@ -199,7 +199,7 @@ def _run_one(
     try:
         return _run_one_tracked(
             family=family,
-            dataset=dataset,
+            scenario=scenario,
             pipeline=pipeline,
             extractor=extractor,
             data_root=data_root,
@@ -225,7 +225,7 @@ def _run_one(
 def _run_one_tracked(
     *,
     family: DatasetFamily,
-    dataset: StrEnum,
+    scenario: StrEnum,
     pipeline: PipelineName,
     extractor: str,
     data_root: Path,
@@ -246,7 +246,7 @@ def _run_one_tracked(
     """Body of :func:`_run_one`, run with a file handler already capturing this cell's log."""
     logger.info(
         f"=== {PIPELINE_LABELS.get(pipeline, pipeline)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
-        f"on {family.name.capitalize()}/{dataset.value} ==="
+        f"on {family.name.capitalize()}/{scenario.value} ==="
     )
     # attack_technique is needed for per-technique recall; it is NaN on normal rows.
     if limit is not None:
@@ -262,9 +262,9 @@ def _run_one_tracked(
         df_train = df_all[df_all["split"] == "train"].reset_index(drop=True)
         df_test = df_all[df_all["split"] == "test"].reset_index(drop=True)
     else:
-        df_train = family.load_split(dataset, "train", root=data_root, limit=limit)
+        df_train = family.load_split(scenario, "train", root=data_root, limit=limit)
         df_test = family.load_split(
-            dataset, "test", root=data_root, columns=("full_query", "label", "attack_technique"), limit=limit
+            scenario, "test", root=data_root, columns=("full_query", "label", "attack_technique"), limit=limit
         )
     df_train_normal = split_normals(df_train)
     # Hold out a validation slice of the train normals to calibrate the threshold
@@ -276,7 +276,7 @@ def _run_one_tracked(
         f"test: {len(df_test)} rows ({int(df_test['label'].sum())} attacks)"
     )
     mf = family.manifest()
-    file_key = f"{dataset.value}.csv"
+    file_key = f"{scenario.value}.csv"
     # superviz26 bundles its scenarios under the "main" group; superviz25 keeps a
     # flat top-level ``files`` map.
     file_entry = mf["groups"]["main"]["files"][file_key] if "groups" in mf else mf["files"][file_key]
@@ -289,9 +289,9 @@ def _run_one_tracked(
     run_type = "smoke-run" if limit is not None else "full-run"
 
     model = build_pipeline(pipeline, extractor, cache=cache, cache_dir=cache_dir)
-    # Child name is self-describing and time-ordered: ``{dataset}@{run_type}#{ts}``.
+    # Child name is self-describing and time-ordered: ``{scenario}@{run_type}#{ts}``.
     # The pipeline/extractor context is carried by the parent it nests under.
-    run_name = f"{dataset.value}@{run_type}#{time.strftime('%Y%m%d-%H%M%S')}"
+    run_name = f"{scenario.value}@{run_type}#{time.strftime('%Y%m%d-%H%M%S')}"
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
         if track:
@@ -301,7 +301,7 @@ def _run_one_tracked(
                 {
                     **asdict(model.config),
                     "limit": limit,
-                    "scenario": dataset.value,
+                    "scenario": scenario.value,
                     "target_fpr": target_fpr,
                     "capture_insider": capture_insider,
                 }
@@ -310,21 +310,25 @@ def _run_one_tracked(
                 {
                     "pipeline": pipeline,
                     "feature_extractor": extractor,
-                    "dataset": dataset.value,
+                    "scenario": scenario.value,
                     "kind": kind,
                     "suite": suite,
                     "run_type": run_type,
                 }
             )
-            # This sets the "Dataset" column for each child run.
-            log_dataset_input(
-                # superviz26 ships as one archive (no per-file URL), so record the
-                # Zenodo landing page; superviz25 still has a per-file url_pattern.
-                url=mf["record_url"] if "groups" in mf else mf["url_pattern"].format(filename=file_key),
-                name=f"{family.name}-{dataset.value}",
-                digest=digest,
-                context="train+test",
-            )
+            # Sets the "Dataset" column for each child run. Skipped for locally-generated
+            # families (e.g. superviz26-big) that have no published Zenodo source to point to.
+            if family.on_zenodo:
+                log_dataset_input(
+                    # superviz26 ships as one archive (no per-file URL), so record the
+                    # Zenodo landing page; superviz25 still has a per-file url_pattern.
+                    url=mf["record_url"] if "groups" in mf else mf["url_pattern"].format(filename=file_key),
+                    # Name after the on-disk directory the CSVs come from, not the family:
+                    # the in-domain/LODO superviz26 files live under superviz26-lodo/.
+                    name=f"{data_root.name}-{scenario.value}",
+                    digest=digest,
+                    context="train+test",
+                )
 
         # The AE exposes a per-epoch loss hook; OCSVM has no iterative training loss.
         epoch_callback = (
@@ -356,31 +360,32 @@ def _run_one_tracked(
         # target FPR (out-of-sample), then binarise the test scores for the metrics.
         threshold = threshold_for_fpr(model.score_samples(df_val), target_fpr)
         m = compute_metrics(
-            df_test["label"], scores, threshold, f"{pipeline}_{extractor}_{family.name}_{dataset.value}"
+            df_test["label"], scores, threshold, f"{pipeline}_{extractor}_{family.name}_{scenario.value}"
         )
         preds = (scores > threshold).astype(int)
         rpa = recall_per_attack(df_test["label"], preds, df_test["attack_technique"])
 
-        model_path = model_dir / _model_filename(family.name, pipeline, extractor, dataset)
+        model_path = model_dir / _model_filename(family.name, pipeline, extractor, scenario)
         model.save(model_path)
 
         # One ROC and one AUPRC curve per cell, written under models/curves/.
         labels = df_test["label"].to_numpy()
         curve_stem = stem
-        roc_path = plot_roc_curve(labels, scores, dataset.value, model_dir / "curves" / f"{curve_stem}_roc.png")
-        pr_path = plot_pr_curve(labels, scores, dataset.value, model_dir / "curves" / f"{curve_stem}_auprc.png")
+        roc_path = plot_roc_curve(labels, scores, scenario.value, model_dir / "curves" / f"{curve_stem}_roc.png")
+        pr_path = plot_pr_curve(labels, scores, scenario.value, model_dir / "curves" / f"{curve_stem}_auprc.png")
         # Persist the raw curve points so curves can be re-plotted offline without refitting.
         roc_csv, pr_csv = dump_curve_points(labels, scores, model_dir / "curves", curve_stem)
 
         row = ResultRow(
-            dataset=dataset.value,
+            dataset=family.name,
+            scenario=scenario.value,
             kind=kind,
             pipeline=pipeline,
             extractor=extractor,
             n_train=int(len(df_fit)),
             n_test=int(len(df_test)),
             n_attacks=int(df_test["label"].sum()),
-            roc_auc=float(roc_auc_score(df_test["label"], scores)),
+            roc_auc=m["rocauc"],
             average_precision=float(average_precision_score(df_test["label"], scores)),
             f1=m["f1"],
             accuracy=m["accuracy"],
@@ -429,7 +434,7 @@ def _run_one_tracked(
             mlflow.log_artifact(str(roc_csv), artifact_path="curve_data")
             mlflow.log_artifact(str(pr_csv), artifact_path="curve_data")
             if register:
-                registered_name = f"sqldetect-{pipeline}-{extractor}-{family.name}-{dataset.value}"
+                registered_name = f"sqldetect-{pipeline}-{extractor}-{family.name}-{scenario.value}"
                 log_and_register_detector(model_path, registered_name, df_test[["full_query"]].head(3))
             # Attach the captured per-cell log last so it also covers the steps above.
             log_handler.flush()

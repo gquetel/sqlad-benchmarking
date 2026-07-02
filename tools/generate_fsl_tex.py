@@ -66,7 +66,7 @@ EXTRACTOR_ORDER = ["cv", "li", "loginov", "sbert", "codet5"]
 # Target domains the LODO models adapt to (tags.target values).
 TARGETS = ["a", "b", "c", "d"]
 
-# In-domain scenarios (tags.dataset values) whose AE AUROC defines the recovery threshold.
+# In-domain scenarios (tags.scenario values) whose AE AUROC defines the recovery threshold.
 INDOMAIN = ["a-a", "b-b", "c-c", "d-d"]
 
 # k = 0 is the unadapted LODO model; the log x-axis cannot show 0, so it is placed at x = 1.
@@ -172,7 +172,7 @@ def load_indomain(extractors: list[str]) -> dict[str, float]:
     runs = runs.sort_values("start_time")
     cells: dict[tuple[str, str], float] = {}
     for _, r in runs.iterrows():
-        extractor, scenario, auroc = r.get("tags.feature_extractor"), r.get("tags.dataset"), _num(r.get("metrics.roc_auc"))
+        extractor, scenario, auroc = r.get("tags.feature_extractor"), r.get("tags.scenario"), _num(r.get("metrics.roc_auc"))
         if isinstance(extractor, str) and isinstance(scenario, str) and auroc is not None:
             cells[(extractor, scenario)] = auroc
 

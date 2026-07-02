@@ -74,7 +74,7 @@ def load_aurocs(experiment: str) -> dict[tuple[str, str], float]:
     runs = runs.sort_values("start_time")
     out: dict[tuple[str, str], float] = {}
     for _, r in runs.iterrows():
-        extractor, scenario, auroc = r.get("tags.feature_extractor"), r.get("tags.dataset"), r.get("metrics.roc_auc")
+        extractor, scenario, auroc = r.get("tags.feature_extractor"), r.get("tags.scenario"), r.get("metrics.roc_auc")
         if not (isinstance(extractor, str) and isinstance(scenario, str)):
             continue
         try:

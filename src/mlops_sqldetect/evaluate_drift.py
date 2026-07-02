@@ -43,7 +43,7 @@ from mlops_sqldetect.evaluate_suite import (
 from mlops_sqldetect.features import EXTRACTOR_LABELS
 from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
 from mlops_sqldetect.model import PIPELINE_LABELS, AEDetector, PipelineName, build_pipeline
-from mlops_sqldetect.tracking import ensure_parent_run, setup_mlflow
+from mlops_sqldetect.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
 from mlops_sqldetect.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
 
 logger = logging.getLogger(__name__)
@@ -173,6 +173,16 @@ def _run_one(
                     "suite": suite,
                     "run_type": run_type,
                 }
+            )
+            # Sets the "Dataset" column to the specific per-domain drift CSV: the
+            # reused Superviz26 manifest carries its sha256 under the "drift" group.
+            mf = family.manifest()
+            file_entry = mf["groups"]["drift"]["files"][family.resolve_path(domain).name]
+            log_dataset_input(
+                url=mf["record_url"],
+                name=f"{family.name}-{domain.value}",
+                digest=file_entry.get("sha256", ""),
+                context="train+test",
             )
 
         epoch_callback = (
