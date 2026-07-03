@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from contextlib import nullcontext
@@ -105,7 +106,7 @@ def parent_run_spec(family: DatasetFamily, pipeline: str, extractor: str) -> tup
     # The family is not tagged: each family has its own MLflow experiment, so the
     # parent is uniquely identified within that experiment by (pipeline, extractor).
     tags = {
-        "pipeline": pipeline,
+        "decision_engine": pipeline,
         "feature_extractor": extractor,
         "run_role": "parent",
     }
@@ -176,7 +177,6 @@ def _run_one(
     model_dir: Path,
     log_dir: Path,
     limit: int | None = None,
-    suite: str = "",
     target_fpr: float = 0.001,
     capture_insider: bool = False,
     seed: int = 7,
@@ -208,7 +208,6 @@ def _run_one(
             log_path=log_path,
             log_handler=log_handler,
             limit=limit,
-            suite=suite,
             target_fpr=target_fpr,
             capture_insider=capture_insider,
             seed=seed,
@@ -234,7 +233,6 @@ def _run_one_tracked(
     log_path: Path,
     log_handler: logging.Handler,
     limit: int | None,
-    suite: str,
     target_fpr: float,
     capture_insider: bool,
     seed: int,
@@ -289,9 +287,10 @@ def _run_one_tracked(
     run_type = "smoke-run" if limit is not None else "full-run"
 
     model = build_pipeline(pipeline, extractor, cache=cache, cache_dir=cache_dir)
-    # Child name is self-describing and time-ordered: ``{scenario}@{run_type}#{ts}``.
-    # The pipeline/extractor context is carried by the parent it nests under.
-    run_name = f"{scenario.value}@{run_type}#{time.strftime('%Y%m%d-%H%M%S')}"
+    # Child name is self-describing and time-ordered: ``{scenario}#{ts}``. The run_type
+    # (full-run/smoke-run) lives in its own tag; the pipeline/extractor context is
+    # carried by the parent it nests under.
+    run_name = f"{scenario.value}#{time.strftime('%Y%m%d-%H%M%S')}"
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
         if track:
@@ -308,12 +307,15 @@ def _run_one_tracked(
             )
             mlflow.set_tags(
                 {
-                    "pipeline": pipeline,
+                    "decision_engine": pipeline,
+                    # dataset is the on-disk family (superviz26-lodo, superviz25, ...);
+                    # scenario is the split within it (a-a, bcd-a, ...).
+                    "dataset": data_root.name,
                     "feature_extractor": extractor,
                     "scenario": scenario.value,
-                    "kind": kind,
-                    "suite": suite,
+                    "setting": kind,
                     "run_type": run_type,
+                    "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
                 }
             )
             # Sets the "Dataset" column for each child run. Skipped for locally-generated
@@ -537,7 +539,6 @@ def evaluate_suite(
                         model_dir,
                         log_dir,
                         limit=limit,
-                        suite=suite,
                         target_fpr=target_fpr,
                         capture_insider=capture_insider,
                         seed=seed,

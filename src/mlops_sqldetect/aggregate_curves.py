@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 def _find_cell_run_id(pipeline: str, extractor: str, scenario: str) -> str | None:
     """Latest full-run child run for a (pipeline, extractor, scenario), or None."""
     filter_string = (
-        f"tags.pipeline = '{pipeline}' and tags.feature_extractor = '{extractor}' "
+        # `decision_engine` is the current tag; `pipeline` is kept for legacy runs.
+        f"(tags.decision_engine = '{pipeline}' or tags.pipeline = '{pipeline}') "
+        f"and tags.feature_extractor = '{extractor}' "
         f"and tags.scenario = '{scenario}' and tags.run_type = 'full-run'"
     )
     runs = mlflow.search_runs(

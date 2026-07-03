@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
@@ -125,7 +126,6 @@ def _run_one(
     data_root: Path,
     model_dir: Path,
     limit: int | None = None,
-    suite: str = "",
     target_fpr: float = 0.001,
     capture_insider: bool = False,
     seed: int = 7,
@@ -151,7 +151,7 @@ def _run_one(
 
     run_type = "smoke-run" if limit is not None else "full-run"
     model = build_pipeline(pipeline, extractor, cache=cache, cache_dir=cache_dir)
-    run_name = f"{domain.value}@{run_type}#{time.strftime('%Y%m%d-%H%M%S')}"
+    run_name = f"{domain.value}#{time.strftime('%Y%m%d-%H%M%S')}"
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
         if track:
@@ -166,12 +166,13 @@ def _run_one(
             )
             mlflow.set_tags(
                 {
-                    "pipeline": pipeline,
+                    "decision_engine": pipeline,
+                    "dataset": data_root.name,
                     "feature_extractor": extractor,
                     "domain": domain.value,
-                    "kind": "concept_drift",
-                    "suite": suite,
+                    "setting": "concept_drift",
                     "run_type": run_type,
+                    "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
                 }
             )
             # Sets the "Dataset" column to the specific per-domain drift CSV: the
@@ -364,7 +365,6 @@ def evaluate_drift(
                         data_root,
                         model_dir,
                         limit=limit,
-                        suite=suite,
                         target_fpr=target_fpr,
                         capture_insider=capture_insider,
                         seed=seed,

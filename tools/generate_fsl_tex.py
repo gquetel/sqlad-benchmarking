@@ -115,7 +115,11 @@ def load_curves() -> dict[str, dict[int, float]]:
     """
     runs = mlflow.search_runs(
         experiment_names=[EXPERIMENT_FSL],
-        filter_string="attributes.status = 'FINISHED' and tags.kind = 'few_shot' and tags.pipeline = 'ae'",
+        filter_string=(
+            "attributes.status = 'FINISHED' "
+            "and (tags.setting = 'few_shot' or tags.kind = 'few_shot') "
+            "and (tags.decision_engine = 'ae' or tags.pipeline = 'ae')"
+        ),
         output_format="pandas",
     )
     if runs.empty:
@@ -163,7 +167,10 @@ def load_indomain(extractors: list[str]) -> dict[str, float]:
     """
     runs = mlflow.search_runs(
         experiment_names=[EXPERIMENT_BASE],
-        filter_string="attributes.status = 'FINISHED' and tags.run_type = 'full-run' and tags.pipeline = 'ae'",
+        filter_string=(
+            "attributes.status = 'FINISHED' and tags.run_type = 'full-run' "
+            "and (tags.decision_engine = 'ae' or tags.pipeline = 'ae')"
+        ),
         output_format="pandas",
     )
     if runs.empty:

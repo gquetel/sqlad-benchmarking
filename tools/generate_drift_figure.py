@@ -95,7 +95,11 @@ def load_results() -> Results:
     runs = runs.sort_values("start_time")
     data: Results = {}
     for _, r in runs.iterrows():
-        extractor, engine, domain = r.get("tags.feature_extractor"), r.get("tags.pipeline"), r.get("tags.domain")
+        extractor, domain = r.get("tags.feature_extractor"), r.get("tags.domain")
+        # Decision engine: current runs tag it as `decision_engine`; legacy runs used `pipeline`.
+        engine = r.get("tags.decision_engine")
+        if not isinstance(engine, str):
+            engine = r.get("tags.pipeline")
         if not (isinstance(extractor, str) and isinstance(engine, str) and isinstance(domain, str)):
             continue
         data[(extractor, engine, domain)] = {

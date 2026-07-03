@@ -126,7 +126,16 @@ def load_results() -> Results:
     runs = runs.sort_values("start_time")
     data: Results = {}
     for _, r in runs.iterrows():
-        extractor, engine, scenario = r.get("tags.feature_extractor"), r.get("tags.pipeline"), r.get("tags.scenario")
+        extractor = r.get("tags.feature_extractor")
+        # Decision engine: current runs tag it as `decision_engine`; legacy runs used `pipeline`.
+        engine = r.get("tags.decision_engine")
+        if not isinstance(engine, str):
+            engine = r.get("tags.pipeline")
+        # Scenario key (a-a, bcd-a, ...): current runs tag it as `scenario`; legacy runs
+        # (before the dataset/scenario tag split) carried it under `dataset` instead.
+        scenario = r.get("tags.scenario")
+        if not isinstance(scenario, str):
+            scenario = r.get("tags.dataset")
         if not (isinstance(extractor, str) and isinstance(engine, str) and isinstance(scenario, str)):
             continue
         data[(extractor, engine, scenario)] = {

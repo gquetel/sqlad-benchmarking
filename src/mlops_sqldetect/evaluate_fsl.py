@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
@@ -187,7 +188,9 @@ def _run_repetition(
     )
 
 
-def _log_merged_k(rows: list[FSLResultRow], *, target: str, lodo: str, extractor: str, suite: str, **params) -> None:
+def _log_merged_k(
+    rows: list[FSLResultRow], *, dataset: str, target: str, lodo: str, extractor: str, **params
+) -> None:
     """Log one nested run for an adaptation budget, averaging the per-seed rows over seeds."""
     k = rows[0].k
     mlflow.log_params(
@@ -203,11 +206,12 @@ def _log_merged_k(rows: list[FSLResultRow], *, target: str, lodo: str, extractor
     )
     mlflow.set_tags(
         {
-            "pipeline": "ae",
+            "decision_engine": "ae",
+            "dataset": dataset,
             "feature_extractor": extractor,
             "target": target,
-            "kind": "few_shot",
-            "suite": suite,
+            "setting": "few_shot",
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
         }
     )
     metrics = {
@@ -240,7 +244,6 @@ def _run_target(
     lr_scale: float,
     target_fpr: float,
     capture_insider: bool,
-    suite: str,
     track: bool,
 ) -> list[FSLResultRow]:
     """Sweep the adaptation budget for one (target, extractor) cell and return its rows."""
@@ -298,10 +301,10 @@ def _run_target(
             with mlflow.start_run(run_name=f"{target.value}@k{k}#{time.strftime('%Y%m%d-%H%M%S')}", nested=True):
                 _log_merged_k(
                     k_rows,
+                    dataset=data_root.name,
                     target=target.value,
                     lodo=lodo.value,
                     extractor=extractor,
-                    suite=suite,
                     lr_scale=lr_scale,
                     target_fpr=target_fpr,
                     test_limit=test_limit,
@@ -404,7 +407,6 @@ def evaluate_fsl(
                     lr_scale=lr_scale,
                     target_fpr=target_fpr,
                     capture_insider=capture_insider,
-                    suite=suite,
                     track=track_enabled,
                 )
                 rows.extend(cell_rows)

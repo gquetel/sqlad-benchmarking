@@ -65,7 +65,10 @@ def load_aurocs(experiment: str) -> dict[tuple[str, str], float]:
     """Latest finished full-run AUROC per (extractor, scenario) for the AE pipeline."""
     runs = mlflow.search_runs(
         experiment_names=[experiment],
-        filter_string="attributes.status = 'FINISHED' and tags.run_type = 'full-run' and tags.pipeline = 'ae'",
+        filter_string=(
+            "attributes.status = 'FINISHED' and tags.run_type = 'full-run' "
+            "and (tags.decision_engine = 'ae' or tags.pipeline = 'ae')"
+        ),
         output_format="pandas",
     )
     if runs.empty:
