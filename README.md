@@ -1,16 +1,6 @@
-# mlops_sqldetect
+# Baselines sqldetect
 
-An MLOps pipeline for one-class SQL injection detection: anomaly-detection heads (One-Class SVM, LOF, AutoEncoder) over pluggable SQL feature extractors (Li hand-crafted features, Loginov hand-crafted features, CountVectorizer, SecureBERT, CodeT5+), evaluated on the Superviz SQL datasets with MLflow experiment tracking.
-
-## Opinionated 
-
-- Using `nix` and its ecosystem to manage development environments and foster reproducibility.
-  - `nix/python-env.nix` is the single source of truth for the Python version: shared by Docker builds and CI, so the interpreter is fully pinned and reproducible across environments.
-  - `shell.nix` wraps `nix/python-env.nix` with `buildFHSEnv` for local development, which provides a CUDA-compatible FHS environment on both NixOS and non-NixOS machines.
-  - Runtime and dev dependencies are managed by [uv](https://docs.astral.sh/uv/) on top of the nix-provided interpreter (uv never downloads its own Python — `UV_PYTHON_DOWNLOADS=never`). uv is preferred over nix packages because it can pull pre-built wheels (including GPU-specific CUDA wheels) from PyPI caches. Using nix for those would require local rebuilds due to the absence of binary caches for GPU packages.
-  - Dependencies are declared in `pyproject.toml` and locked in `uv.lock` (universal, hashed). A pip-compatible `requirements.txt` is exported from the lock (`uv export`) so contributors who don't use uv can still `pip install -r requirements.txt`.
-- MLflow for experiment tracking: `evaluate_suite` logs params, metrics, the per-epoch AE training loss, and the fitted model artifact when `MLFLOW_TRACKING_URI` is set (opt out with `--no-track`). Tracking is configured via `.env` (see `.env.example`).
-- Delete dependabot updates PR for two reasons: (1) notification fatigue, (2) bumping package version can lead to different experiments results or breaking changes that needs to be tested. It is time consuming to be done properly, hence packages updates are done at my discretion. The exception to this is dependabot security updates which can be activated through GitHub's interface that warns me about potential vulnerabilities in my dependencies. 
+Codebase for SQL attack detection: anomaly-detection heads (One-Class SVM, LOF, AutoEncoder) over pluggable SQL feature extractors (Li hand-crafted features, Loginov hand-crafted features, CountVectorizer, SecureBERT, CodeT5+...), evaluated on the Superviz SQL datasets.
 
 ## Development environment
 
