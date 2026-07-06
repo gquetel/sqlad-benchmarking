@@ -293,156 +293,164 @@ def _run_one_tracked(
     run_name = f"{scenario.value}#{time.strftime('%Y%m%d-%H%M%S')}"
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
-        if track:
-            # ``scenario`` is logged as a param so it can serve as the X-axis when
-            # comparing metrics in mlflow UI.
-            mlflow.log_params(
-                {
-                    **asdict(model.config),
-                    "limit": limit,
-                    "scenario": scenario.value,
-                    "target_fpr": target_fpr,
-                    "capture_insider": capture_insider,
-                }
-            )
-            mlflow.set_tags(
-                {
-                    "decision_engine": pipeline,
-                    # dataset is the on-disk family (superviz26-lodo, superviz25, ...);
-                    # scenario is the split within it (a-a, bcd-a, ...).
-                    "dataset": data_root.name,
-                    "feature_extractor": extractor,
-                    "scenario": scenario.value,
-                    "setting": kind,
-                    "run_type": run_type,
-                    "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
-                }
-            )
-            # Sets the "Dataset" column for each child run. Skipped for locally-generated
-            # families (e.g. superviz26-big) that have no published Zenodo source to point to.
-            if family.on_zenodo:
-                log_dataset_input(
-                    # superviz26 ships as one archive (no per-file URL), so record the
-                    # Zenodo landing page; superviz25 still has a per-file url_pattern.
-                    url=mf["record_url"] if "groups" in mf else mf["url_pattern"].format(filename=file_key),
-                    # Name after the on-disk directory the CSVs come from, not the family:
-                    # the in-domain/LODO superviz26 files live under superviz26-lodo/.
-                    name=f"{data_root.name}-{scenario.value}",
-                    digest=digest,
-                    context="train+test",
+        try:
+            if track:
+                # ``scenario`` is logged as a param so it can serve as the X-axis when
+                # comparing metrics in mlflow UI.
+                mlflow.log_params(
+                    {
+                        **asdict(model.config),
+                        "limit": limit,
+                        "scenario": scenario.value,
+                        "target_fpr": target_fpr,
+                        "capture_insider": capture_insider,
+                    }
                 )
+                mlflow.set_tags(
+                    {
+                        "decision_engine": pipeline,
+                        # dataset is the on-disk family (superviz26-lodo, superviz25, ...);
+                        # scenario is the split within it (a-a, bcd-a, ...).
+                        "dataset": data_root.name,
+                        "feature_extractor": extractor,
+                        "scenario": scenario.value,
+                        "setting": kind,
+                        "run_type": run_type,
+                        "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
+                    }
+                )
+                # Sets the "Dataset" column for each child run. Skipped for locally-generated
+                # families (e.g. superviz26-big) that have no published Zenodo source to point to.
+                if family.on_zenodo:
+                    log_dataset_input(
+                        # superviz26 ships as one archive (no per-file URL), so record the
+                        # Zenodo landing page; superviz25 still has a per-file url_pattern.
+                        url=mf["record_url"] if "groups" in mf else mf["url_pattern"].format(filename=file_key),
+                        # Name after the on-disk directory the CSVs come from, not the family:
+                        # the in-domain/LODO superviz26 files live under superviz26-lodo/.
+                        name=f"{data_root.name}-{scenario.value}",
+                        digest=digest,
+                        context="train+test",
+                    )
 
-        # The AE exposes a per-epoch loss hook; OCSVM has no iterative training loss.
-        epoch_callback = (
-            (lambda epoch, loss: mlflow.log_metric("train_loss", loss, step=epoch))
-            if track and isinstance(model, AEDetector)
-            else None
-        )
-
-        t0 = time.perf_counter()
-        if isinstance(model, AEDetector):
-            model.fit(df_fit, epoch_callback=epoch_callback)
-        else:
-            model.fit(df_fit)
-        fit_s = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        scores = model.score_samples(df_test)
-        score_s = time.perf_counter() - t0
-
-        # "insider" attacks are unobservable in some data-collection setups; unless
-        # capture_insider is set, force them to false negatives to model that blind spot.
-        if not capture_insider and "attack_technique" in df_test.columns:
-            insider_mask = (df_test["attack_technique"] == "insider").to_numpy()
-            if insider_mask.any():
-                scores[insider_mask] = scores.min()
-                logger.info(f"  forced {int(insider_mask.sum())} insider samples to false negatives")
-
-        # Calibrate the decision threshold on the held-out validation normals at the
-        # target FPR (out-of-sample), then binarise the test scores for the metrics.
-        threshold = threshold_for_fpr(model.score_samples(df_val), target_fpr)
-        m = compute_metrics(
-            df_test["label"], scores, threshold, f"{pipeline}_{extractor}_{family.name}_{scenario.value}"
-        )
-        preds = (scores > threshold).astype(int)
-        rpa = recall_per_attack(df_test["label"], preds, df_test["attack_technique"])
-
-        model_path = model_dir / _model_filename(family.name, pipeline, extractor, scenario)
-        model.save(model_path)
-
-        # One ROC and one AUPRC curve per cell, written under models/curves/.
-        labels = df_test["label"].to_numpy()
-        curve_stem = stem
-        roc_path = plot_roc_curve(labels, scores, scenario.value, model_dir / "curves" / f"{curve_stem}_roc.png")
-        pr_path = plot_pr_curve(labels, scores, scenario.value, model_dir / "curves" / f"{curve_stem}_auprc.png")
-        # Persist the raw curve points so curves can be re-plotted offline without refitting.
-        roc_csv, pr_csv = dump_curve_points(labels, scores, model_dir / "curves", curve_stem)
-
-        row = ResultRow(
-            dataset=family.name,
-            scenario=scenario.value,
-            kind=kind,
-            pipeline=pipeline,
-            extractor=extractor,
-            n_train=int(len(df_fit)),
-            n_test=int(len(df_test)),
-            n_attacks=int(df_test["label"].sum()),
-            roc_auc=m["rocauc"],
-            average_precision=float(average_precision_score(df_test["label"], scores)),
-            f1=m["f1"],
-            accuracy=m["accuracy"],
-            precision=m["precision"],
-            recall=m["recall"],
-            fpr=m["fpr"],
-            auprc=m["auprc"],
-            auroc_ci=m["auroc_ci"],
-            auprc_ci=m["auprc_ci"],
-            threshold=float(threshold),
-            recall_per_attack=json.dumps(rpa),
-            fit_seconds=round(fit_s, 3),
-            score_seconds=round(score_s, 3),
-            model_path=str(model_path),
-        )
-
-        if track:
-            mlflow.log_params(
-                {
-                    "n_train": row.n_train,
-                    "n_test": row.n_test,
-                    "n_attacks": row.n_attacks,
-                }
+            # The AE exposes a per-epoch loss hook; OCSVM has no iterative training loss.
+            epoch_callback = (
+                (lambda epoch, loss: mlflow.log_metric("train_loss", loss, step=epoch))
+                if track and isinstance(model, AEDetector)
+                else None
             )
-            mlflow.log_metrics(
-                {
-                    "roc_auc": row.roc_auc,
-                    "average_precision": row.average_precision,
-                    "f1": row.f1,
-                    "accuracy": row.accuracy,
-                    "precision": row.precision,
-                    "recall": row.recall,
-                    "fpr": row.fpr,
-                    "auprc": row.auprc,
-                    "auroc_ci": row.auroc_ci,
-                    "auprc_ci": row.auprc_ci,
-                    "threshold": row.threshold,
-                    "fit_seconds": row.fit_seconds,
-                    "score_seconds": row.score_seconds,
-                }
-            )
-            if rpa:
-                mlflow.log_metrics({_mlflow_key(t): v for t, v in rpa.items()})
-            mlflow.log_artifact(str(roc_path), artifact_path="roc_curves")
-            mlflow.log_artifact(str(pr_path), artifact_path="pr_curves")
-            mlflow.log_artifact(str(roc_csv), artifact_path="curve_data")
-            mlflow.log_artifact(str(pr_csv), artifact_path="curve_data")
-            if register:
-                registered_name = f"sqldetect-{pipeline}-{extractor}-{family.name}-{scenario.value}"
-                log_and_register_detector(model_path, registered_name, df_test[["full_query"]].head(3))
-            # Attach the captured per-cell log last so it also covers the steps above.
-            log_handler.flush()
-            mlflow.log_artifact(str(log_path), artifact_path="logs")
 
-        return row
+            t0 = time.perf_counter()
+            if isinstance(model, AEDetector):
+                model.fit(df_fit, epoch_callback=epoch_callback)
+            else:
+                model.fit(df_fit)
+            fit_s = time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            scores = model.score_samples(df_test)
+            score_s = time.perf_counter() - t0
+
+            # "insider" attacks are unobservable in some data-collection setups; unless
+            # capture_insider is set, force them to false negatives to model that blind spot.
+            if not capture_insider and "attack_technique" in df_test.columns:
+                insider_mask = (df_test["attack_technique"] == "insider").to_numpy()
+                if insider_mask.any():
+                    scores[insider_mask] = scores.min()
+                    logger.info(f"  forced {int(insider_mask.sum())} insider samples to false negatives")
+
+            # Calibrate the decision threshold on the held-out validation normals at the
+            # target FPR (out-of-sample), then binarise the test scores for the metrics.
+            threshold = threshold_for_fpr(model.score_samples(df_val), target_fpr)
+            m = compute_metrics(
+                df_test["label"], scores, threshold, f"{pipeline}_{extractor}_{family.name}_{scenario.value}"
+            )
+            preds = (scores > threshold).astype(int)
+            rpa = recall_per_attack(df_test["label"], preds, df_test["attack_technique"])
+
+            model_path = model_dir / _model_filename(family.name, pipeline, extractor, scenario)
+            model.save(model_path)
+
+            # One ROC and one AUPRC curve per cell, written under models/curves/.
+            labels = df_test["label"].to_numpy()
+            curve_stem = stem
+            roc_path = plot_roc_curve(labels, scores, scenario.value, model_dir / "curves" / f"{curve_stem}_roc.png")
+            pr_path = plot_pr_curve(labels, scores, scenario.value, model_dir / "curves" / f"{curve_stem}_auprc.png")
+            # Persist the raw curve points so curves can be re-plotted offline without refitting.
+            roc_csv, pr_csv = dump_curve_points(labels, scores, model_dir / "curves", curve_stem)
+
+            row = ResultRow(
+                dataset=family.name,
+                scenario=scenario.value,
+                kind=kind,
+                pipeline=pipeline,
+                extractor=extractor,
+                n_train=int(len(df_fit)),
+                n_test=int(len(df_test)),
+                n_attacks=int(df_test["label"].sum()),
+                roc_auc=m["rocauc"],
+                average_precision=float(average_precision_score(df_test["label"], scores)),
+                f1=m["f1"],
+                accuracy=m["accuracy"],
+                precision=m["precision"],
+                recall=m["recall"],
+                fpr=m["fpr"],
+                auprc=m["auprc"],
+                auroc_ci=m["auroc_ci"],
+                auprc_ci=m["auprc_ci"],
+                threshold=float(threshold),
+                recall_per_attack=json.dumps(rpa),
+                fit_seconds=round(fit_s, 3),
+                score_seconds=round(score_s, 3),
+                model_path=str(model_path),
+            )
+
+            if track:
+                mlflow.log_params(
+                    {
+                        "n_train": row.n_train,
+                        "n_test": row.n_test,
+                        "n_attacks": row.n_attacks,
+                    }
+                )
+                mlflow.log_metrics(
+                    {
+                        "roc_auc": row.roc_auc,
+                        "average_precision": row.average_precision,
+                        "f1": row.f1,
+                        "accuracy": row.accuracy,
+                        "precision": row.precision,
+                        "recall": row.recall,
+                        "fpr": row.fpr,
+                        "auprc": row.auprc,
+                        "auroc_ci": row.auroc_ci,
+                        "auprc_ci": row.auprc_ci,
+                        "threshold": row.threshold,
+                        "fit_seconds": row.fit_seconds,
+                        "score_seconds": row.score_seconds,
+                    }
+                )
+                if rpa:
+                    mlflow.log_metrics({_mlflow_key(t): v for t, v in rpa.items()})
+                mlflow.log_artifact(str(roc_path), artifact_path="roc_curves")
+                mlflow.log_artifact(str(pr_path), artifact_path="pr_curves")
+                mlflow.log_artifact(str(roc_csv), artifact_path="curve_data")
+                mlflow.log_artifact(str(pr_csv), artifact_path="curve_data")
+                if register:
+                    registered_name = f"sqldetect-{pipeline}-{extractor}-{family.name}-{scenario.value}"
+                    log_and_register_detector(model_path, registered_name, df_test[["full_query"]].head(3))
+
+            return row
+        finally:
+            # Attach the captured per-cell log even if the cell raised: a failed run
+            # should still carry its diagnostics in MLflow. Best-effort — never let a
+            # logging error mask the original exception.
+            if track:
+                try:
+                    log_handler.flush()
+                    mlflow.log_artifact(str(log_path), artifact_path="logs")
+                except Exception as exc:
+                    logger.warning(f"Could not upload log artifact for {stem}: {exc}")
 
 
 def evaluate_suite(
