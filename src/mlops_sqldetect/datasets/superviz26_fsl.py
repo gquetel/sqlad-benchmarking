@@ -100,9 +100,7 @@ def _ensure_csv(name: Superviz26FSL, root: Path | None) -> Path:
 
         ensure_group("fsl")
     if not path.exists():
-        raise FileNotFoundError(
-            f"{path} not found. Download it: python -m tools.fetch_superviz26 --groups fsl"
-        )
+        raise FileNotFoundError(f"{path} not found. Download it: python -m tools.fetch_superviz26 --groups fsl")
     return path
 
 

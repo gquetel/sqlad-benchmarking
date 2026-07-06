@@ -85,7 +85,7 @@ def _num(x: object) -> float | None:
     """Coerce an MLflow metric/param cell to a float, mapping missing/NaN to None."""
     try:
         v = float(x)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return None if math.isnan(v) else v
 
@@ -179,7 +179,11 @@ def load_indomain(extractors: list[str]) -> dict[str, float]:
     runs = runs.sort_values("start_time")
     cells: dict[tuple[str, str], float] = {}
     for _, r in runs.iterrows():
-        extractor, scenario, auroc = r.get("tags.feature_extractor"), r.get("tags.scenario"), _num(r.get("metrics.roc_auc"))
+        extractor, scenario, auroc = (
+            r.get("tags.feature_extractor"),
+            r.get("tags.scenario"),
+            _num(r.get("metrics.roc_auc")),
+        )
         if isinstance(extractor, str) and isinstance(scenario, str) and auroc is not None:
             cells[(extractor, scenario)] = auroc
 

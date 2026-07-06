@@ -52,6 +52,7 @@ INDOMAIN = ["a-a", "b-b", "c-c", "d-d"]
 LODO = ["bcd-a", "acd-b", "abd-c", "abc-d"]
 REGIMES: list[tuple[str, list[str]]] = [("In-domain", INDOMAIN), ("LODO", LODO)]
 
+
 def _caption() -> str:
     """Caption for the size-sufficiency table."""
     return (
@@ -82,7 +83,7 @@ def load_aurocs(experiment: str) -> dict[tuple[str, str], float]:
             continue
         try:
             value = float(auroc)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if not math.isnan(value):
             out[(extractor, scenario)] = value

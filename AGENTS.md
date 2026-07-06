@@ -75,6 +75,12 @@ versions or regenerate the lock without explicit instruction.
 # Documentation
 
 * Use inline comments to document the **why** and not the **what**. Keep them short.
+* Comments and docstrings must describe the **current** state of the code only. Never
+  reference our conversation/review, the code change itself ("now", "no longer", "instead
+  of X, which we removed"), or code that no longer exists. A reader with no history should
+  not be able to tell the code was ever written differently.
+  Exception: describing external realities that live code still handles — e.g. legacy data
+  formats or older MLflow runs read by a fallback path — is present-tense behaviour and is fine.
 * If the project has a `docs/` folder, update documentation there as needed.
 * The project uses `mkdocs` for documentation. To build the docs locally: `mkdocs serve --config-file docs/mkdocs.yaml`.
 * Use existing docstring style.

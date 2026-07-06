@@ -72,7 +72,8 @@ class OCSVMConfig:
 _MIN_ROWS_FOR_PARALLEL_SCORE = 10_000
 
 
-def _parallel_decision_function(estimator, X, n_jobs: int) -> np.ndarray:
+# ``X``: sklearn feature-matrix convention (kept uppercase).
+def _parallel_decision_function(estimator, X, n_jobs: int) -> np.ndarray:  # noqa: N803
     """``estimator.decision_function(X)`` split row-wise across processes.
 
     libsvm's ``decision_function`` is single-threaded and holds the GIL, so the only way

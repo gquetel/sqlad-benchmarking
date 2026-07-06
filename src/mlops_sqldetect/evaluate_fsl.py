@@ -188,9 +188,7 @@ def _run_repetition(
     )
 
 
-def _log_merged_k(
-    rows: list[FSLResultRow], *, dataset: str, target: str, lodo: str, extractor: str, **params
-) -> None:
+def _log_merged_k(rows: list[FSLResultRow], *, dataset: str, target: str, lodo: str, extractor: str, **params) -> None:
     """Log one nested run for an adaptation budget, averaging the per-seed rows over seeds."""
     k = rows[0].k
     mlflow.log_params(

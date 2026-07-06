@@ -107,7 +107,7 @@ def _num(x: object) -> float | None:
     """Coerce an MLflow metric cell to a float, mapping missing/NaN to None."""
     try:
         v = float(x)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return None if math.isnan(v) else v
 
@@ -330,7 +330,13 @@ ENGINE_BTT = sorted(ENGINE_ORDER, key=lambda e: ENGINE_ORDER[e], reverse=True)  
 
 # Paper-facing short labels: feature extractor names title each mini-plot, decision engines
 # label the (shared) y ticks.
-EXTRACTOR_SHORT = {"cv": "CountVectorizer", "li": "Li", "loginov": "Loginov", "sbert": "SecureBERT", "codet5": "CodeT5+"}
+EXTRACTOR_SHORT = {
+    "cv": "CountVectorizer",
+    "li": "Li",
+    "loginov": "Loginov",
+    "sbert": "SecureBERT",
+    "codet5": "CodeT5+",
+}
 ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
 SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in PIPELINES}
 # A "method" is one (feature extractor, decision engine) cell -- one dumbbell row in the figure.
@@ -536,9 +542,7 @@ def render_figure(data: Results) -> str:
         if engines:
             plots.append((extractor, engines))
     if not plots:
-        raise RuntimeError(
-            "No decision method has the in-domain and LODO averages required for the figure."
-        )
+        raise RuntimeError("No decision method has the in-domain and LODO averages required for the figure.")
 
     auroc_min = min(
         min(avgs[SHORT_BY_CELL[(extractor, e)]]["id_auroc"], avgs[SHORT_BY_CELL[(extractor, e)]]["lodo_auroc"])
@@ -616,7 +620,7 @@ def main(
         Path | None, typer.Option(help="If set, also write the detailed per-scenario tables (.tex) here.")
     ] = None,
 ) -> None:
-    """Load the SuperViz26 results from MLflow and write the summary table, the figure, and (optionally) the detailed tables."""
+    """Load SuperViz26 results from MLflow; write the summary table, the figure, and (optionally) detailed tables."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if not setup_mlflow("superviz26"):
         raise typer.Exit(code=1)

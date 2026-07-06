@@ -69,7 +69,7 @@ def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
 
 
 def _is_long_running(cell: Cell, cfg: dict) -> bool:
-    """Whether a cell needs the extended wall time, per the config ``long_running`` list (keyed by extractor or pipeline:extractor)."""
+    """Whether a cell needs extended wall time, per config ``long_running`` (keyed by extractor or pipeline)."""
     keys = set(cfg.get("long_running", []))
     return f"{cell.pipeline}:{cell.extractor}" in keys or cell.extractor in keys
 
@@ -80,7 +80,7 @@ def _gpu_section(cell: Cell, cfg: dict, default: str) -> str:
 
 
 def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
-    """Bucket label for a cell's array: cpu, the GPU section (gpu/gpu-long), or ``{section}-{req}gb`` for VRAM-pinned cells.
+    """Bucket label for a cell's array: cpu, the GPU section (gpu/gpu-long), or ``{section}-{req}gb`` for VRAM-pinned.
 
     The section is baked into the label so long-running cells land in their own array (each
     array carries one #SBATCH header) instead of sharing the default GPU block's wall time.
@@ -223,7 +223,8 @@ def submit(
     ] = "li",
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     gpu_section: Annotated[
-        str, typer.Option(help="GPU resource block in the config to use (e.g. 'gpu', 'gpu-long' for a 24h reservation).")
+        str,
+        typer.Option(help="GPU resource block in the config to use (e.g. 'gpu', 'gpu-long' for a 24h reservation)."),
     ] = "gpu",
     target_fpr: Annotated[float, typer.Option(help="Target false-positive rate for the calibrated threshold.")] = 0.001,
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,

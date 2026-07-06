@@ -76,7 +76,7 @@ def _num(x: object) -> float | None:
     """Coerce an MLflow metric cell to a float, mapping missing/NaN to None."""
     try:
         v = float(x)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return None if math.isnan(v) else v
 
@@ -151,7 +151,13 @@ ENGINE_BTT = sorted(ENGINE_ORDER, key=lambda e: ENGINE_ORDER[e], reverse=True)  
 
 # Paper-facing short labels: feature extractor names title each mini-plot, decision engines
 # label the (shared) y ticks.
-EXTRACTOR_SHORT = {"cv": "CountVectorizer", "li": "Li", "loginov": "Loginov", "sbert": "SecureBERT", "codet5": "CodeT5+"}
+EXTRACTOR_SHORT = {
+    "cv": "CountVectorizer",
+    "li": "Li",
+    "loginov": "Loginov",
+    "sbert": "SecureBERT",
+    "codet5": "CodeT5+",
+}
 ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
 SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in PIPELINES}
 # A "method" is one (feature extractor, decision engine) cell -- one dumbbell row in the figure.

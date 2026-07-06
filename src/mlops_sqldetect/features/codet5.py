@@ -35,10 +35,10 @@ class CodeT5Extractor(BaseEstimator, TransformerMixin):
     """Sklearn transformer producing CodeT5+ 256-d embeddings.
 
     ``transform`` returns a ``(n_samples, 256)`` float32 ndarray. Inference runs on
-    GPU when available, in ``torch.no_grad`` eval mode. Determinism across runs
-    comes from :func:`~mlops_sqldetect.determinism.enable_determinism` (pinning CUDA
-    kernels), not the seed alone. The model returns L2-normalized embeddings
-    directly, so no scaler is applied downstream (see ``_scaler_for``).
+    GPU when available, in ``torch.no_grad`` eval mode.
+    :func:`~mlops_sqldetect.determinism.enable_determinism` pins the CUDA kernels so
+    runs are reproducible. The model returns L2-normalized embeddings directly, so
+    no scaler is applied downstream (see ``_scaler_for``).
     """
 
     def __init__(
@@ -86,8 +86,8 @@ class CodeT5Extractor(BaseEstimator, TransformerMixin):
             batch = queries[start : start + self.batch_size]
             inputs = self.tokenizer_(batch, return_tensors="pt", truncation=True, padding=True, max_length=MAX_LENGTH)
             input_ids = inputs["input_ids"].to(model_device)
-            # Pass the attention mask so padding tokens are ignored; without it a
-            # query's embedding would depend on the longest query in its batch.
+            # Pass the attention mask so padding tokens are excluded from attention,
+            # keeping each query's embedding independent of its batch's padding.
             attention_mask = inputs["attention_mask"].to(model_device)
             # Model returns (batch_size, 256) L2-normalized embeddings directly.
             embeddings = self.model_(input_ids, attention_mask=attention_mask)

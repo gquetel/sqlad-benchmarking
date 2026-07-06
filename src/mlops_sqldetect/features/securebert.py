@@ -33,9 +33,9 @@ class SecureBertExtractor(BaseEstimator, TransformerMixin):
     """Sklearn transformer producing SecureBERT ``pooler_output`` embeddings.
 
     ``transform`` returns a ``(n_samples, 768)`` float32 ndarray. Inference runs on
-    GPU when available, in ``torch.no_grad`` eval mode. Determinism across runs
-    comes from :func:`~mlops_sqldetect.determinism.enable_determinism` (pinning CUDA
-    kernels), not the seed alone.
+    GPU when available, in ``torch.no_grad`` eval mode.
+    :func:`~mlops_sqldetect.determinism.enable_determinism` pins the CUDA kernels so
+    runs are reproducible.
     """
 
     def __init__(
