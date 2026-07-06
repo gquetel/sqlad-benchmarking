@@ -19,7 +19,7 @@ readme = "README.md"
 requires-python = "==3.14.3"
 dependencies = [
   "joblib",
-  "mlflow-skinny==3.12",  # Server is 3.12 so far.
+  "mlflow-skinny==3.14",  # Server is 3.14 so far.
   "python-dotenv",
   "numpy",
   "pandas",
