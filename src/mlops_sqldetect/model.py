@@ -27,6 +27,7 @@ from sklearn.preprocessing import FunctionTransformer, MaxAbsScaler, StandardSca
 from sklearn.svm import OneClassSVM
 from torch import nn
 
+from mlops_sqldetect.determinism import enable_determinism
 from mlops_sqldetect.features import DEFAULT_EXTRACTOR, build_extractor
 from mlops_sqldetect.features.cache import maybe_wrap, resolve_cache_dir
 
@@ -369,6 +370,7 @@ class AEDetector:
             epoch_callback: Optional ``(epoch, mean_loss)`` hook called once per
                 epoch, e.g. to log a training-loss curve to MLflow.
         """
+        enable_determinism()
         torch.manual_seed(self.config.seed)
         x = self._featurize(df, fit=True)
         input_dim = x.shape[1]
@@ -408,6 +410,7 @@ class AEDetector:
         """
         if self.net is None:
             raise RuntimeError("fine_tune requires a fitted or loaded model")
+        enable_determinism()
         torch.manual_seed(self.config.seed if seed is None else seed)
         x = self._featurize(df, fit=False)
         optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)

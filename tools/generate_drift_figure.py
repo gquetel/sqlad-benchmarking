@@ -2,18 +2,18 @@
 
 Loads every finished full-run cell of the ``Drift-Superviz26-SQL`` experiment and
 emits the reference vs. post-drift dumbbell figure (one AUROC panel and one AUPRC
-panel) for the benchmark paper. Each pipeline is trained once on a benign origin
+panel) for the benchmark paper. Each method is trained once on a benign origin
 (S1) and scored on the origin test set (reference) and the held-out shifted test
-set (S2, post-drift); the figure visualises the per-pipeline performance drop
-$\\Delta = \\text{S1} - \\text{S2}$ averaged over the four Superviz26 domains.
+set (S2, post-drift); the figure visualises the per-method performance drop
+$\\Delta = \\text{S2} - \\text{S1}$ averaged over the four Superviz26 domains.
 
 This mirrors the figure side of :mod:`tools.generate_baselines_tex`, but compares
 the reference and post-drift settings instead of in-domain and LODO, and writes
 only the figure (no table).
 
 MLflow is the single source of truth: the latest finished full-run per
-``(feature_extractor, pipeline, domain)`` cell wins, so re-running this after new
-runs refreshes the figure. Pipelines missing any of the four domains are dropped.
+``(feature_extractor, engine, domain)`` cell wins, so re-running this after new
+runs refreshes the figure. Methods missing any of the four domains are dropped.
 
 Usage:
     python -m tools.generate_drift_figure \
@@ -39,7 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # The MLflow experiment holding the concept-drift grid (see tracking._EXPERIMENT_NAMES).
 EXPERIMENT = "Drift-Superviz26-SQL"
 
-# Pipelines in display order: (feature_extractor, engine, paper label, figure short label).
+# Methods in display order: (feature_extractor, engine, paper label, figure short label).
 # Mirrors tools.generate_baselines_tex so labels stay consistent across figures.
 PIPELINES: list[tuple[str, str, str, str]] = [
     ("cv", "ae", "CountVectorizer + AE", "CV+AE"),
@@ -66,9 +66,9 @@ Metrics = dict[str, float | None]
 Results = dict[tuple[str, str, str], Metrics]
 
 FIGURE_CAPTION = (
-    r"Reference (\textbullet) vs.\ post-drift ($\blacksquare$) detection performance per pipeline, "
-    r"averaged over the four Superviz26 domains; the connector length is the concept-drift drop "
-    r"$\Delta = \text{S1} - \text{S2}$, shown in green when small ($< 0.05$) and red otherwise."
+    r"Reference (\textbullet) vs.\ post-drift ($\blacksquare$) detection performance per method, "
+    r"averaged over the four \datasetdeux{} domains; the connector length is the concept-drift drop "
+    r"$\Delta = \text{S2} - \text{S1}$, shown in green when small ($> -0.05$) and red otherwise."
 )
 
 
@@ -181,7 +181,7 @@ def _extractor_order() -> list[str]:
 
 
 def _averages(data: Results) -> dict[str, Metrics]:
-    """Per pipeline, average each metric over the four domains."""
+    """Per method, average each metric over the four domains."""
 
     def avg_over(extractor: str, engine: str, key: str) -> float | None:
         xs = []
@@ -267,12 +267,12 @@ def _fe_plot(
     )
     s2_marks = " ".join(f"({cells[e][s2_key]:.4f},{ENGINE_SHORT[e]})" for e in engines)
     s1_marks = " ".join(f"({cells[e][s1_key]:.4f},{ENGINE_SHORT[e]})" for e in engines)
-    # Drop label per engine: green when the drop is small (< 0.05), red otherwise.
+    # Drop label per engine: green when the drop is small (> -0.05), red otherwise.
     deltas = []
     for e in engines:
         s1v, s2v = cells[e][s1_key], cells[e][s2_key]
-        delta = s1v - s2v
-        color = "66BB6A" if delta < 0.05 else "E57373"
+        delta = s2v - s1v
+        color = "66BB6A" if delta > -0.05 else "E57373"
         value = rf"\textcolor[HTML]{{{color}}}{{{delta:+.2f}}}"
         deltas.append(
             f"        \\dumbdelta{{{min(s1v, s2v):.4f}}}{{{max(s1v, s2v):.4f}}}{{{ENGINE_SHORT[e]}}}{{{value}}}"

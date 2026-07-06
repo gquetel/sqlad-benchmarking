@@ -15,6 +15,8 @@ import pandas as pd
 import torch
 from sklearn.base import BaseEstimator, TransformerMixin
 
+from mlops_sqldetect.determinism import enable_determinism
+
 DEFAULT_MODEL = "ehsanaghaei/SecureBERT"
 DEFAULT_BATCH_SIZE = 512
 MAX_LENGTH = 512
@@ -31,8 +33,9 @@ class SecureBertExtractor(BaseEstimator, TransformerMixin):
     """Sklearn transformer producing SecureBERT ``pooler_output`` embeddings.
 
     ``transform`` returns a ``(n_samples, 768)`` float32 ndarray. Inference runs on
-    GPU when available, in ``torch.no_grad`` eval mode, with a fixed seed so the
-    embeddings are deterministic across runs.
+    GPU when available, in ``torch.no_grad`` eval mode. Determinism across runs
+    comes from :func:`~mlops_sqldetect.determinism.enable_determinism` (pinning CUDA
+    kernels), not the seed alone.
     """
 
     def __init__(
@@ -53,6 +56,7 @@ class SecureBertExtractor(BaseEstimator, TransformerMixin):
         # is actually used.
         from transformers import RobertaModel, RobertaTokenizerFast
 
+        enable_determinism()
         torch.manual_seed(2)
         self.tokenizer_ = RobertaTokenizerFast.from_pretrained(self.model_name)
         self.model_ = RobertaModel.from_pretrained(self.model_name).to(self.device)

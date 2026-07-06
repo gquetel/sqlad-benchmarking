@@ -17,6 +17,8 @@ import pandas as pd
 import torch
 from sklearn.base import BaseEstimator, TransformerMixin
 
+from mlops_sqldetect.determinism import enable_determinism
+
 DEFAULT_MODEL = "Salesforce/codet5p-110m-embedding"
 DEFAULT_BATCH_SIZE = 512
 MAX_LENGTH = 512
@@ -33,9 +35,10 @@ class CodeT5Extractor(BaseEstimator, TransformerMixin):
     """Sklearn transformer producing CodeT5+ 256-d embeddings.
 
     ``transform`` returns a ``(n_samples, 256)`` float32 ndarray. Inference runs on
-    GPU when available, in ``torch.no_grad`` eval mode, with a fixed seed so the
-    embeddings are deterministic across runs. The model returns L2-normalized
-    embeddings directly, so no scaler is applied downstream (see ``_scaler_for``).
+    GPU when available, in ``torch.no_grad`` eval mode. Determinism across runs
+    comes from :func:`~mlops_sqldetect.determinism.enable_determinism` (pinning CUDA
+    kernels), not the seed alone. The model returns L2-normalized embeddings
+    directly, so no scaler is applied downstream (see ``_scaler_for``).
     """
 
     def __init__(
@@ -56,6 +59,7 @@ class CodeT5Extractor(BaseEstimator, TransformerMixin):
         # is actually used. trust_remote_code is required by the embedding model.
         from transformers import AutoConfig, AutoModel, AutoTokenizer
 
+        enable_determinism()
         torch.manual_seed(2)
         self.tokenizer_ = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         # The model's remote config predates current transformers and omits the
@@ -82,8 +86,11 @@ class CodeT5Extractor(BaseEstimator, TransformerMixin):
             batch = queries[start : start + self.batch_size]
             inputs = self.tokenizer_(batch, return_tensors="pt", truncation=True, padding=True, max_length=MAX_LENGTH)
             input_ids = inputs["input_ids"].to(model_device)
+            # Pass the attention mask so padding tokens are ignored; without it a
+            # query's embedding would depend on the longest query in its batch.
+            attention_mask = inputs["attention_mask"].to(model_device)
             # Model returns (batch_size, 256) L2-normalized embeddings directly.
-            embeddings = self.model_(input_ids)
+            embeddings = self.model_(input_ids, attention_mask=attention_mask)
             out.append(embeddings.cpu().numpy())
         if not out:
             return np.empty((0, EMBED_DIM), dtype=np.float32)
