@@ -194,6 +194,8 @@ def _run_one(
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{stem}.log"
     log_handler = logging.FileHandler(log_path, mode="w")
+    # DEBUG so the artifact uploaded to MLflow captures the fullest diagnostics.
+    log_handler.setLevel(logging.DEBUG)
     log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.getLogger().addHandler(log_handler)
     try:
@@ -494,7 +496,10 @@ def evaluate_suite(
 
     Returns the results table as a DataFrame for programmatic use.
     """
+    # Root/console stay INFO (quiet stdout, no third-party debug); only our package
+    # emits DEBUG, which the per-cell file handler captures for the MLflow artifact.
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger("mlops_sqldetect").setLevel(logging.DEBUG)
     if dataset in FAMILIES and FAMILIES[dataset].protocol != "suite":
         evaluator = {"drift": "evaluate_drift", "fsl": "evaluate_fsl"}.get(FAMILIES[dataset].protocol, "its evaluator")
         raise typer.BadParameter(
