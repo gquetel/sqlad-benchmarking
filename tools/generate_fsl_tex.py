@@ -113,23 +113,32 @@ def load_curves() -> dict[str, dict[int, float]]:
     Reads the latest finished ``kind=few_shot`` run per ``(extractor, target, k)`` cell; a budget
     is kept only when all four targets are present, so every plotted point averages the same domains.
     """
+    # MLflow filter strings are AND-only (no OR), so neither the few-shot setting nor the
+    # AE head can be matched server-side across their current/legacy tag spellings
+    # (`setting`/`kind`, `decision_engine`/`pipeline`); reconcile both client-side below.
     runs = mlflow.search_runs(
         experiment_names=[EXPERIMENT_FSL],
-        filter_string=(
-            "attributes.status = 'FINISHED' "
-            "and (tags.setting = 'few_shot' or tags.kind = 'few_shot') "
-            "and (tags.decision_engine = 'ae' or tags.pipeline = 'ae')"
-        ),
+        filter_string="attributes.status = 'FINISHED'",
         output_format="pandas",
     )
     if runs.empty:
-        raise RuntimeError(f"No finished few-shot run found in MLflow experiment {EXPERIMENT_FSL!r}.")
+        raise RuntimeError(f"No finished run found in MLflow experiment {EXPERIMENT_FSL!r}.")
 
     # Ascending start_time so the latest run of a repeated cell overwrites earlier ones.
     runs = runs.sort_values("start_time")
     # (extractor, target, k) -> AUROC.
     cells: dict[tuple[str, str, int], float] = {}
     for _, r in runs.iterrows():
+        # Few-shot setting: current runs tag it `setting`; legacy runs used `kind`.
+        setting = r.get("tags.setting")
+        if not isinstance(setting, str):
+            setting = r.get("tags.kind")
+        # Decision engine: current runs tag it `decision_engine`; legacy runs used `pipeline`.
+        engine = r.get("tags.decision_engine")
+        if not isinstance(engine, str):
+            engine = r.get("tags.pipeline")
+        if setting != "few_shot" or engine != "ae":
+            continue
         extractor = r.get("tags.feature_extractor")
         target = r.get("tags.target")
         k = _num(r.get("params.k"))
@@ -165,20 +174,25 @@ def load_indomain(extractors: list[str]) -> dict[str, float]:
     This is the recovery target; an extractor missing any in-domain cell is simply omitted
     (its curve is still drawn, only without a recovery tick).
     """
+    # MLflow filter strings are AND-only (no OR); reconcile the AE head across the current
+    # `decision_engine` and legacy `pipeline` tags client-side below.
     runs = mlflow.search_runs(
         experiment_names=[EXPERIMENT_BASE],
-        filter_string=(
-            "attributes.status = 'FINISHED' and tags.run_type = 'full-run' "
-            "and (tags.decision_engine = 'ae' or tags.pipeline = 'ae')"
-        ),
+        filter_string="attributes.status = 'FINISHED' and tags.run_type = 'full-run'",
         output_format="pandas",
     )
     if runs.empty:
-        logger.warning(f"No finished AE full-run in {EXPERIMENT_BASE!r}; recovery ticks will be omitted.")
+        logger.warning(f"No finished full-run in {EXPERIMENT_BASE!r}; recovery ticks will be omitted.")
         return {}
     runs = runs.sort_values("start_time")
     cells: dict[tuple[str, str], float] = {}
     for _, r in runs.iterrows():
+        # Decision engine: current runs tag it `decision_engine`; legacy runs used `pipeline`.
+        engine = r.get("tags.decision_engine")
+        if not isinstance(engine, str):
+            engine = r.get("tags.pipeline")
+        if engine != "ae":
+            continue
         extractor, scenario, auroc = (
             r.get("tags.feature_extractor"),
             r.get("tags.scenario"),

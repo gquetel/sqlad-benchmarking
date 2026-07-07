@@ -64,20 +64,26 @@ def _caption() -> str:
 
 def load_aurocs(experiment: str) -> dict[tuple[str, str], float]:
     """Latest finished full-run AUROC per (extractor, scenario) for the AE pipeline."""
+    # MLflow filter strings are AND-only (no OR), so the AE head can't be matched
+    # server-side across the current `decision_engine` and legacy `pipeline` tags;
+    # query the AND-only conditions and reconcile the engine tag client-side below.
     runs = mlflow.search_runs(
         experiment_names=[experiment],
-        filter_string=(
-            "attributes.status = 'FINISHED' and tags.run_type = 'full-run' "
-            "and (tags.decision_engine = 'ae' or tags.pipeline = 'ae')"
-        ),
+        filter_string="attributes.status = 'FINISHED' and tags.run_type = 'full-run'",
         output_format="pandas",
     )
     if runs.empty:
-        raise RuntimeError(f"No finished AE full-run found in MLflow experiment {experiment!r}.")
+        raise RuntimeError(f"No finished full-run found in MLflow experiment {experiment!r}.")
     # Ascending start_time so the latest run of a repeated cell overwrites earlier ones.
     runs = runs.sort_values("start_time")
     out: dict[tuple[str, str], float] = {}
     for _, r in runs.iterrows():
+        # Decision engine: current runs tag it `decision_engine`; legacy runs used `pipeline`.
+        engine = r.get("tags.decision_engine")
+        if not isinstance(engine, str):
+            engine = r.get("tags.pipeline")
+        if engine != "ae":
+            continue
         extractor, scenario, auroc = r.get("tags.feature_extractor"), r.get("tags.scenario"), r.get("metrics.roc_auc")
         if not (isinstance(extractor, str) and isinstance(scenario, str)):
             continue
