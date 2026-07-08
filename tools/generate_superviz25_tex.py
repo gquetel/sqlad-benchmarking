@@ -118,7 +118,7 @@ def _num(x: object) -> float | None:
     """Coerce an MLflow metric cell to a float, mapping missing/NaN to None."""
     try:
         v = float(x)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return None if math.isnan(v) else v
 
@@ -355,12 +355,8 @@ def main(
         Path | None,
         typer.Option(help="Where to cache curve CSVs (and rasters); default: a throwaway temp dir."),
     ] = None,
-    rasters: Annotated[
-        bool, typer.Option(help="Also render the PNG/PDF figures (into --cache-dir).")
-    ] = False,
-    max_workers: Annotated[
-        int, typer.Option(help="Parallel MLflow artifact downloads for the curve fetches.")
-    ] = 8,
+    rasters: Annotated[bool, typer.Option(help="Also render the PNG/PDF figures (into --cache-dir).")] = False,
+    max_workers: Annotated[int, typer.Option(help="Parallel MLflow artifact downloads for the curve fetches.")] = 8,
 ) -> None:
     """Load SuperViz25 results from MLflow and write the combined figures and both tables."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")

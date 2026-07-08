@@ -163,7 +163,7 @@ def _downsample(x: np.ndarray, y: np.ndarray, max_points: int = TIKZ_MAX_POINTS)
 
 def _pgf_coords(x: np.ndarray, y: np.ndarray) -> str:
     """Format ``(x,y)`` pairs for a pgfplots ``coordinates {...}`` list."""
-    return " ".join(f"({xi:.5f},{yi:.5f})" for xi, yi in zip(x, y))
+    return " ".join(f"({xi:.5f},{yi:.5f})" for xi, yi in zip(x, y, strict=True))
 
 
 def _tikz_figure(curves: list[Curve], out_path: Path, *, metric: str, xlabel: str, ylabel: str, baseline: str) -> Path:
@@ -194,7 +194,7 @@ def _tikz_figure(curves: list[Curve], out_path: Path, *, metric: str, xlabel: st
         plot_lines.append(f"      \\addplot[{style}] coordinates {{{_pgf_coords(xs, ys)}}};")
         legend_lines.append(f"      \\addlegendentry{{{c.label(metric, area)}}}")
 
-    body = "\n".join(f"{p}\n{l}" for p, l in zip(plot_lines, legend_lines))
+    body = "\n".join(f"{p}\n{legend}" for p, legend in zip(plot_lines, legend_lines, strict=True))
     axis_opts = (
         "width=\\linewidth, height=\\linewidth,\n"
         "        xmin=0, xmax=1, ymin=0, ymax=1,\n"
@@ -238,7 +238,8 @@ def plot_combined_pr_tikz(curves: list[Curve], out_path: Path, prevalence: float
         baseline = ""
     else:
         baseline = (
-            f"      \\addplot[gray, dashed, line width=0.8pt] coordinates {{(0,{prevalence:.5f}) (1,{prevalence:.5f})}};\n"
+            f"      \\addplot[gray, dashed, line width=0.8pt] "
+            f"coordinates {{(0,{prevalence:.5f}) (1,{prevalence:.5f})}};\n"
             f"      \\addlegendentry{{Random classifier = {prevalence:.4f}}}"
         )
     return _tikz_figure(curves, out_path, metric="AUPRC", xlabel="Recall", ylabel="Precision", baseline=baseline)
