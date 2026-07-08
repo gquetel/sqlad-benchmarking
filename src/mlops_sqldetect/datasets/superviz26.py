@@ -19,6 +19,7 @@ from typing import Literal
 import pandas as pd
 
 from mlops_sqldetect.data import load_split_csv
+from mlops_sqldetect.datasets.integrity import verify_file
 
 Split = Literal["train", "test"]
 
@@ -71,6 +72,11 @@ def resolve_path(name: Superviz26, root: Path | None = None) -> Path:
     return (root or default_root()) / f"{name.value}.csv"
 
 
+def manifest_entry(name: Superviz26) -> dict:
+    """Manifest metadata (checksums, kind) for the CSV backing ``name`` (the 'main' group)."""
+    return manifest()["groups"]["main"]["files"][f"{name.value}.csv"]
+
+
 def load_split(
     name: Superviz26,
     split: Split,
@@ -104,4 +110,8 @@ def load_split(
             f"dataset generator's full-split mode: `python experiments/generate_splits.py --full` "
             f"(in legacy-sqlia-dataset-generator). Both write to ~/datasets/superviz26-lodo/."
         )
+    # Verify the published CSV matches its Zenodo checksum. A custom root is caller-managed
+    # (e.g. locally regenerated), so only the default published location is checked.
+    if (root or default_root()) == default_root():
+        verify_file(path, manifest_entry(name))
     return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)

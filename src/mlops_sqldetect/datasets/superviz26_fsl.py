@@ -25,6 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from mlops_sqldetect.datasets import superviz26
+from mlops_sqldetect.datasets.integrity import verify_file
 from mlops_sqldetect.datasets.superviz26 import Split, Superviz26, manifest
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "load_fsl",
     "load_split",
     "manifest",
+    "manifest_entry",
     "resolve_path",
 ]
 
@@ -88,6 +90,11 @@ def resolve_path(name: Superviz26FSL, root: Path | None = None) -> Path:
     return superviz26.resolve_path(_IN_DOMAIN[name], root or default_root())
 
 
+def manifest_entry(name: Superviz26FSL) -> dict:
+    """Manifest metadata (checksum, kind) for the in-domain CSV backing ``name`` (the 'fsl' group)."""
+    return manifest()["groups"]["fsl"]["files"][resolve_path(name).name]
+
+
 def _ensure_csv(name: Superviz26FSL, root: Path | None) -> Path:
     """Resolve the in-domain CSV, auto-downloading it from Zenodo if absent from the default root.
 
@@ -101,6 +108,9 @@ def _ensure_csv(name: Superviz26FSL, root: Path | None) -> Path:
         ensure_group("fsl")
     if not path.exists():
         raise FileNotFoundError(f"{path} not found. Download it: python -m tools.fetch_superviz26 --groups fsl")
+    # Verify the published CSV matches its Zenodo checksum; a custom root is caller-managed.
+    if (root or default_root()) == default_root():
+        verify_file(path, manifest_entry(name))
     return path
 
 

@@ -16,6 +16,7 @@ from typing import Literal
 import pandas as pd
 
 from mlops_sqldetect.data import load_split_csv
+from mlops_sqldetect.datasets.integrity import verify_file
 
 Split = Literal["train", "test"]
 
@@ -46,6 +47,11 @@ def resolve_path(name: Superviz25, root: Path | None = None) -> Path:
     return (root or default_root()) / f"{name.value}.csv"
 
 
+def manifest_entry(name: Superviz25) -> dict:
+    """Manifest metadata (checksum, kind) for the CSV backing ``name``."""
+    return manifest()["files"][f"{name.value}.csv"]
+
+
 def load_split(
     name: Superviz25,
     split: Split,
@@ -70,4 +76,7 @@ def load_split(
     path = resolve_path(name, root)
     if not path.exists():
         raise FileNotFoundError(f"{path} not found. Run: python -m tools.fetch_superviz25")
+    # Verify the published CSV matches its Zenodo checksum; a custom root is caller-managed.
+    if (root or default_root()) == default_root():
+        verify_file(path, manifest_entry(name))
     return load_split_csv(path, split, columns=columns, limit=limit, seed=seed)

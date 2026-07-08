@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import pandas as pd
 import pytest
 
 from mlops_sqldetect.datasets import FAMILIES
+from mlops_sqldetect.datasets.integrity import file_digest, verify_file
 from mlops_sqldetect.datasets.superviz25 import Superviz25, load_split
 from mlops_sqldetect.datasets.superviz26 import Superviz26
 from mlops_sqldetect.datasets.superviz26_drift import DOMAINS as DRIFT_DOMAINS
@@ -76,6 +79,9 @@ def test_load_drift_auto_fetches_missing_default_root_file(tmp_path, monkeypatch
     from mlops_sqldetect.datasets import superviz26_drift
 
     monkeypatch.setattr(superviz26_drift, "default_root", lambda: tmp_path)
+    # tmp_path stands in as the default root, so the synthetic CSV would trip the
+    # manifest integrity check; stub it out to exercise the auto-fetch path alone.
+    monkeypatch.setattr(superviz26_drift, "verify_file", lambda *a, **k: None)
     calls = []
 
     def fake_ensure_group(group, **kwargs):
@@ -136,3 +142,37 @@ def test_superviz25_load_split_keeps_requested_columns(tmp_path):
 def test_superviz25_missing_file_hints_at_fetcher(tmp_path):
     with pytest.raises(FileNotFoundError, match="fetch_superviz25"):
         load_split(Superviz25.MAIN, "train", root=tmp_path)
+
+
+def _integrity_entry(path):
+    """A manifest-style entry (bytes + sha256) matching ``path``'s current content."""
+    return {"bytes": path.stat().st_size, "sha256": file_digest(path, "sha256")}
+
+
+def test_verify_file_passes_on_matching_content(tmp_path):
+    path = tmp_path / "d.csv"
+    path.write_bytes(b"col\n1\n")
+    verify_file(path, _integrity_entry(path))  # matching sha256 -> no raise
+
+
+def test_verify_file_raises_on_modified_content(tmp_path):
+    path = tmp_path / "d.csv"
+    path.write_bytes(b"col\n1\n")
+    entry = _integrity_entry(path)
+    path.write_bytes(b"col\n1\n2\n")  # same name, tampered content
+    with pytest.raises(ValueError, match="differs from the Zenodo"):
+        verify_file(path, entry)
+
+
+def test_verify_file_reports_size_mismatch_before_hashing(tmp_path):
+    path = tmp_path / "d.csv"
+    path.write_bytes(b"col\n1\n")
+    entry = {"bytes": 999, "sha256": hashlib.sha256(b"col\n1\n").hexdigest()}
+    with pytest.raises(ValueError, match="bytes"):
+        verify_file(path, entry)
+
+
+def test_verify_file_noop_without_checksum(tmp_path):
+    path = tmp_path / "d.csv"
+    path.write_bytes(b"col\n1\n")
+    verify_file(path, {"kind": "in_domain"})  # no sha256/md5 -> nothing to check

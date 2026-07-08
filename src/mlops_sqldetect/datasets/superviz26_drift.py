@@ -29,6 +29,7 @@ from typing import Literal
 import pandas as pd
 
 from mlops_sqldetect.data import load_dataset, load_split_csv, stratified_subsample
+from mlops_sqldetect.datasets.integrity import verify_file
 from mlops_sqldetect.datasets.superviz26 import Split, manifest
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "load_drift",
     "load_split",
     "manifest",
+    "manifest_entry",
     "resolve_path",
 ]
 
@@ -72,6 +74,11 @@ def resolve_path(name: Superviz26Drift, root: Path | None = None) -> Path:
     return (root or default_root()) / f"{name.value}.csv"
 
 
+def manifest_entry(name: Superviz26Drift) -> dict:
+    """Manifest metadata (checksum, kind) for the domain CSV backing ``name`` (the 'drift' group)."""
+    return manifest()["groups"]["drift"]["files"][f"{name.value}.csv"]
+
+
 def _ensure_csv(name: Superviz26Drift, root: Path | None) -> Path:
     """Resolve the domain CSV, auto-downloading it from Zenodo if absent from the default root.
 
@@ -89,6 +96,9 @@ def _ensure_csv(name: Superviz26Drift, root: Path | None) -> Path:
             f"{path} not found. Download it: python -m tools.fetch_superviz26 --groups drift "
             f"(or rebuild: python -m experiments.build_concept_drift --domain {name.value})"
         )
+    # Verify the published CSV matches its Zenodo checksum; a custom root is caller-managed.
+    if (root or default_root()) == default_root():
+        verify_file(path, manifest_entry(name))
     return path
 
 

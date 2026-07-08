@@ -160,7 +160,9 @@ def log_dataset_input(*, url: str, name: str, digest: str, context: str) -> None
     """Record the source dataset on the active run as metadata only.
 
     Uses :class:`MetaDataset` so MLflow stores the dataset's origin (its Zenodo
-    URL), name, and content ``digest`` without downloading or hashing the file.
+    URL), name, and content ``digest`` without re-hashing here. The loader has
+    already verified the on-disk CSV against this manifest ``digest``, so it
+    faithfully identifies the bytes trained on (see :mod:`datasets.integrity`).
     """
     # mlflow does not accept digest > 36 chars
     dataset = MetaDataset(source=HTTPDatasetSource(url=url), name=name, digest=digest[:36])

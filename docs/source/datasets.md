@@ -60,6 +60,12 @@ df_test  = load_split(Superviz26.A_A, "test")
 
 By default only `full_query`, `label`, and `split` are read from disk.
 
+When loading from the default (published) root, the loader verifies the CSV's size and
+SHA-256/MD5 against `MANIFEST.json` before reading, so training only ever runs on bytes
+matching the Zenodo archive; a mismatch (a modified or regenerated file) raises
+`ValueError`. The check is memoised per file per process and skipped for custom roots
+(caller-managed).
+
 ## Concept-drift protocol (`superviz26-drift`)
 
 The same-domain concept-drift protocol re-partitions a *single* domain through its
