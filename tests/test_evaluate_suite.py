@@ -63,13 +63,13 @@ def _write_cpu_script(tmp_path, *, limit):
     return script.read_text()
 
 
-def test_enumerate_cells_orders_pipeline_extractor_scenario():
+def test_enumerate_cells_orders_method_extractor_scenario():
     cells = enumerate_cells("superviz26", "all", "ocsvm,ae", "li")
-    # 2 pipelines x 1 extractor x 8 scenarios, pipeline outermost, scenario innermost.
+    # 2 methods x 1 extractor x 8 scenarios, method outermost, scenario innermost.
     assert len(cells) == 16
     assert cells[0] == Cell("a-a", "ocsvm", "li")
     assert cells[8] == Cell("a-a", "ae", "li")
-    assert [c.pipeline for c in cells] == ["ocsvm"] * 8 + ["ae"] * 8
+    assert [c.method for c in cells] == ["ocsvm"] * 8 + ["ae"] * 8
 
 
 def test_enumerate_cells_rejects_unknown_names():
@@ -100,7 +100,7 @@ def test_min_vram_resolves_extractor_combo_and_default():
     assert _min_vram(Cell("a-a", "ocsvm", "codet5"), _GPU_CFG) == 24  # extractor match
     assert _min_vram(Cell("a-a", "ae", "li"), _GPU_CFG) == 0  # falls back to default
     cfg = {"min_vram_gb": {"sbert": 16, "ae:sbert": 32}}
-    assert _min_vram(Cell("a-a", "ae", "sbert"), cfg) == 32  # pipeline:extractor overrides extractor
+    assert _min_vram(Cell("a-a", "ae", "sbert"), cfg) == 32  # engine:extractor overrides extractor
     assert _min_vram(Cell("a-a", "ocsvm", "sbert"), cfg) == 16
 
 
@@ -123,7 +123,7 @@ def test_bucket_assignment():
 
 def test_is_long_running_matches_combo_or_extractor():
     cfg = {"long_running": ["ocsvm:sbert", "codet5"]}
-    assert _is_long_running(Cell("a-a", "ocsvm", "sbert"), cfg)  # pipeline:extractor match
+    assert _is_long_running(Cell("a-a", "ocsvm", "sbert"), cfg)  # engine:extractor match
     assert _is_long_running(Cell("a-a", "ae", "codet5"), cfg)  # bare extractor match
     assert not _is_long_running(Cell("a-a", "ae", "sbert"), cfg)  # sbert only long-running under ocsvm
     assert not _is_long_running(Cell("a-a", "ocsvm", "li"), {})  # empty/absent list
@@ -149,15 +149,15 @@ def test_family_scenario_count_matches_suite_all():
 
 
 def test_enumerate_cells_works_for_drift_family():
-    # The drift family reuses the generic Cell enumeration: 4 domains x 1 pipeline x 1 extractor.
+    # The drift family reuses the generic Cell enumeration: 4 domains x 1 method x 1 extractor.
     cells = enumerate_cells("superviz26-drift", "all", "ocsvm", "li")
     assert len(cells) == 4
     assert [c.scenario for c in cells] == ["a", "b", "c", "d"]
-    assert all(c.pipeline == "ocsvm" and c.extractor == "li" for c in cells)
+    assert all(c.method == "ocsvm" and c.extractor == "li" for c in cells)
 
 
 def test_drift_cells_bucket_like_the_suite():
-    # GPU bucketing keys off pipeline/extractor, so drift cells route identically.
+    # GPU bucketing keys off method/extractor, so drift cells route identically.
     assert _bucket(Cell("a", "ocsvm", "li"), _GPU_CFG, "gpu") == "cpu"
     assert _bucket(Cell("a", "ae", "li"), _GPU_CFG, "gpu") == "gpu"
     assert _bucket(Cell("a", "ocsvm", "codet5"), _GPU_CFG, "gpu") == "gpu-24gb"
@@ -165,12 +165,12 @@ def test_drift_cells_bucket_like_the_suite():
 
 def test_evaluate_suite_rejects_drift_family():
     with pytest.raises(typer.BadParameter, match="evaluate_drift"):
-        evaluate_suite(dataset="superviz26-drift", suite="all", pipelines="ocsvm", extractors="li")
+        evaluate_suite(dataset="superviz26-drift", suite="all", methods="ocsvm", extractors="li")
 
 
 def test_evaluate_drift_rejects_non_drift_family():
     with pytest.raises(typer.BadParameter, match="drift family"):
-        evaluate_drift(dataset="superviz26", suite="all", pipelines="ocsvm", extractors="li")
+        evaluate_drift(dataset="superviz26", suite="all", methods="ocsvm", extractors="li")
 
 
 def test_job_script_includes_limit_when_set(tmp_path):

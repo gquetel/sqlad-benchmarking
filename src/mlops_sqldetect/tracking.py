@@ -134,7 +134,7 @@ def find_parent_run_id(tags: dict[str, str]) -> str | None:
     Searches the active experiment for a single run carrying every key/value in
     ``tags``. Parents are marked with ``run_role == "parent"`` (see the caller),
     which distinguishes them from their nested children, so reusing the returned
-    id keeps every child of a given (pipeline, extractor) accumulating under one
+    id keeps every child of a given (method, extractor) accumulating under one
     stable, comparable parent across repeated suite invocations.
     """
     filter_string = " and ".join(f"tags.`{key}` = '{value}'" for key, value in tags.items())

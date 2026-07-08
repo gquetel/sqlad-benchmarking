@@ -2,7 +2,7 @@
 
 This is the body each SLURM array task executes: it reads line ``--index`` of the
 JSONL manifest written by :mod:`tools.slurm_submit` and runs that one
-``(scenario, pipeline, extractor)`` cell through :func:`evaluate_suite`, which writes
+``(scenario, method, extractor)`` cell through :func:`evaluate_suite`, which writes
 its own per-cell CSV under ``reports/{dataset}/cells/``.
 
 Usage:
@@ -51,7 +51,7 @@ def run_cell(
         evaluate_drift(
             dataset=dataset,
             scenario=cell["scenario"],
-            pipelines=cell["pipeline"],
+            methods=cell["method"],
             extractors=cell["extractor"],
             target_fpr=target_fpr,
             seed=seed,
@@ -64,7 +64,7 @@ def run_cell(
         evaluate_fsl(
             dataset=dataset,
             scenario=cell["scenario"],
-            pipelines=cell["pipeline"],
+            methods=cell["method"],
             extractors=cell["extractor"],
             target_fpr=target_fpr,
             track=track,
@@ -73,7 +73,7 @@ def run_cell(
         evaluate_suite(
             dataset=dataset,
             scenario=cell["scenario"],
-            pipelines=cell["pipeline"],
+            methods=cell["method"],
             extractors=cell["extractor"],
             target_fpr=target_fpr,
             seed=seed,

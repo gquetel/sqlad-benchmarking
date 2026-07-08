@@ -15,8 +15,8 @@ from mlops_sqldetect.model import (
     AEDetector,
     _parallel_decision_function,
     _scaler_for,
-    build_pipeline,
-    load_pipeline,
+    build_method,
+    load_method,
 )
 
 # Query templates held in variables so the fixtures below build strings by
@@ -71,11 +71,11 @@ def test_scaler_for_routes_per_extractor():
 def test_sklearn_heads_rank_attacks_above_normals(head, extractor):
     """End-to-end smoke test of the OCSVM/LOF heads across every extractor.
 
-    This checks that the pipeline runs correctly, we expect a ROC superior to a
+    This checks that the method runs correctly, we expect a ROC superior to a
     threshold, when not the case, it might exhibit a ranking issue.
     """
     df_train, df_test = _train_test()
-    model = build_pipeline(head, extractor).fit(df_train)
+    model = build_method(head, extractor).fit(df_train)
     scores = model.score_samples(df_test)
     # Shape + finiteness first: a NaN/inf or mis-shaped score array would poison
     # every downstream metric, so fail loudly here rather than in the harness.
@@ -125,19 +125,19 @@ def test_ae_sparse_safe_path_runs(extractor):
 def test_save_load_roundtrip(head, extractor, tmp_path):
     """Checks that a persisted model scores identically after being reloaded."""
     df_train, df_test = _train_test()
-    model = _fast_ae(extractor) if head == "ae" else build_pipeline(head, extractor)
+    model = _fast_ae(extractor) if head == "ae" else build_method(head, extractor)
     model.fit(df_train)
     suffix = "pt" if head == "ae" else "joblib"
     path = tmp_path / f"model.{suffix}"
     model.save(path)
-    reloaded = load_pipeline(head, path)
+    reloaded = load_method(head, path)
     np.testing.assert_allclose(model.score_samples(df_test), reloaded.score_samples(df_test), rtol=1e-5)
 
 
-def test_build_pipeline_unknown_raises():
+def test_build_method_unknown_raises():
     """An unknown head name must fail fast with a clear error."""
-    with pytest.raises(ValueError, match="Unknown pipeline"):
-        build_pipeline("nope", "li")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="Unknown method"):
+        build_method("nope", "li")  # type: ignore[arg-type]
 
 
 def test_parallel_decision_function_matches_serial(monkeypatch):
@@ -169,7 +169,7 @@ def test_parallel_decision_function_short_circuits_serially():
 def test_ocsvm_score_samples_parallel_matches_serial(monkeypatch):
     """OCSVMDetector.score_samples must be invariant to the n_jobs it parallelises over."""
     df_train, df_test = _train_test()
-    model = build_pipeline("ocsvm", "li").fit(df_train)
+    model = build_method("ocsvm", "li").fit(df_train)
     model.config.n_jobs = 1
     serial = model.score_samples(df_test)
     monkeypatch.setattr(model_mod, "_MIN_ROWS_FOR_PARALLEL_SCORE", 4)

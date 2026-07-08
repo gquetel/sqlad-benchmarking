@@ -1,6 +1,6 @@
-"""SQL injection detection pipelines: OCSVM and AutoEncoder.
+"""SQL injection detection methods: OCSVM and AutoEncoder.
 
-Each pipeline pairs a *feature extractor* with a one-class decision head and produces
+Each method pairs a *feature extractor* with a one-class decision head and produces
 a scalar anomaly score per query (higher = more anomalous). The extractor is
 injected, not hardcoded, so any extractor can be combined with any head. Both
 expose a uniform ``fit``/``score_samples``/``save``/``load`` interface so callers
@@ -33,10 +33,10 @@ from mlops_sqldetect.features.cache import maybe_wrap, resolve_cache_dir
 
 logger = logging.getLogger(__name__)
 
-PipelineName = Literal["ocsvm", "lof", "ae"]
+MethodName = Literal["ocsvm", "lof", "ae"]
 
 # Human-readable labels for logs and MLflow run names; acronyms stay uppercase.
-PIPELINE_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoencoder"}
+METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoencoder"}
 
 
 def _scaler_for(extractor: str) -> TransformerMixin:
@@ -476,13 +476,13 @@ class AEDetector:
 Detector = OCSVMDetector | LOFDetector | AEDetector
 
 
-def build_pipeline(
-    name: PipelineName,
+def build_method(
+    name: MethodName,
     extractor: str = DEFAULT_EXTRACTOR,
     cache: bool = True,
     cache_dir: Path | None = None,
 ) -> Detector:
-    """Return a fresh, unfitted pipeline by decision-head and extractor short name.
+    """Return a fresh, unfitted method by decision-head and extractor short name.
 
     Args:
         name: Decision head, ``"ocsvm"``, ``"lof"`` or ``"ae"``.
@@ -532,11 +532,11 @@ def build_pipeline(
         # Li dense features are non-negative, so a sigmoid output needs inputs in
         # [0, 1]: MaxAbsScaler maps the feature matrix into that range.
         return AEDetector(extractor=maybe_wrap(extractor_instance, cdir), scaler=MaxAbsScaler())
-    raise ValueError(f"Unknown pipeline: {name!r} (expected 'ocsvm', 'lof' or 'ae')")
+    raise ValueError(f"Unknown method: {name!r} (expected 'ocsvm', 'lof' or 'ae')")
 
 
-def load_pipeline(name: PipelineName, path: Path) -> Detector:
-    """Load a previously-saved pipeline by decision-head short name.
+def load_method(name: MethodName, path: Path) -> Detector:
+    """Load a previously-saved method by decision-head short name.
 
     The feature extractor travels with the saved artifact, so it does not need to
     be named again here.
@@ -547,4 +547,4 @@ def load_pipeline(name: PipelineName, path: Path) -> Detector:
         return LOFDetector.load(path)
     if name == "ae":
         return AEDetector.load(path)
-    raise ValueError(f"Unknown pipeline: {name!r} (expected 'ocsvm', 'lof' or 'ae')")
+    raise ValueError(f"Unknown method: {name!r} (expected 'ocsvm', 'lof' or 'ae')")

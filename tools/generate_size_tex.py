@@ -2,14 +2,14 @@
 
 The size experiment (Section "Size evaluation" of the benchmark paper) asks whether
 the full per-domain training sets are large enough, by retraining the most performant
-AE pipelines on the Big pools (2x the size of full) and re-evaluating on the test splits.
+AE methods on the Big pools (2x the size of full) and re-evaluating on the test splits.
 
 The two training-set sizes live in two MLflow experiments that share the same tags:
 
   * Full       -> ``Superviz26-SQL``       (see tracking._EXPERIMENT_NAMES)
   * Big (2x)   -> ``Superviz26-SQL-Big``
 
-For each pipeline (AE on top of the Li, CodeT5+ and SecureBERT extractors) and each
+For each method (AE on top of the Li, CodeT5+ and SecureBERT extractors) and each
 regime (in-domain, LODO), this emits the AUROC averaged over the four scenarios on the
 full and Big sets, plus the big-minus-full difference Delta. MLflow is the
 single source of truth: the latest finished full-run per ``(extractor, scenario)`` cell
@@ -42,9 +42,9 @@ logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Pipelines in display order: (feature_extractor tag, paper label). All use the AE engine.
+# Methods in display order: (feature_extractor tag, paper label). All use the AE engine.
 # Shared across datasets: Superviz25 is Superviz26's domain A, so both need the same three.
-PIPELINES: list[tuple[str, str]] = [
+METHODS: list[tuple[str, str]] = [
     ("li", "Li + AE"),
     ("sbert", "SecureBERT + AE"),
     ("codet5", "CodeT5+ + AE"),
@@ -79,7 +79,7 @@ SPECS: dict[str, SizeSpec] = {
         experiment_big="Superviz26-SQL-Big",
         regimes=[("In-domain", INDOMAIN), ("LODO", LODO)],
         caption=(
-            r"Effect of doubling the training set on AUROC for the three pipelines. AUROC is "
+            r"Effect of doubling the training set on AUROC for the three methods. AUROC is "
             r"averaged over the four scenarios on the full and Big (2x) sets. $\Delta$ is the "
             r"Big-minus-full difference."
         ),
@@ -91,7 +91,7 @@ SPECS: dict[str, SizeSpec] = {
         experiment_big="Superviz26-SQL-Big",
         regimes=[(None, ["a-a"])],
         caption=(
-            r"Effect of doubling the training set on the AUROC of the three detection pipelines "
+            r"Effect of doubling the training set on the AUROC of the three detection methods "
             r"on \dataset{}, on the full training set and a Big (2x) variant. $\Delta$ is the "
             r"Big-minus-full difference."
         ),
@@ -102,7 +102,7 @@ SPECS: dict[str, SizeSpec] = {
 
 
 def load_aurocs(experiment: str) -> dict[tuple[str, str], float]:
-    """Latest finished full-run AUROC per (extractor, scenario) for the AE pipeline."""
+    """Latest finished full-run AUROC per (extractor, scenario) for the AE method."""
     # MLflow filter strings are AND-only (no OR), so the AE head can't be matched
     # server-side across the current `decision_engine` and legacy `pipeline` tags;
     # query the AND-only conditions and reconcile the engine tag client-side below.
@@ -149,9 +149,9 @@ def _avg(aurocs: dict[tuple[str, str], float], extractor: str, scenarios: list[s
 
 
 def render_table(spec: SizeSpec, full: dict[tuple[str, str], float], big: dict[tuple[str, str], float]) -> str:
-    """Render the size-sufficiency table (pipeline x regime: Full, Big, Delta).
+    """Render the size-sufficiency table (method x regime: Full, Big, Delta).
 
-    A single ``None``-labelled regime drops the Regime column, yielding one row per pipeline.
+    A single ``None``-labelled regime drops the Regime column, yielding one row per method.
     """
     has_regimes = any(rl is not None for rl, _ in spec.regimes)
     colspec = "ll|ccc" if has_regimes else "l|ccc"
@@ -166,10 +166,10 @@ def render_table(spec: SizeSpec, full: dict[tuple[str, str], float], big: dict[t
         r"    \hline",
         rf"{header_pad}\multicolumn{{3}}{{c}}{{\textbf{{AUROC}}}} \\",
         rf"    \cline{{{span_start}-{span_start + 2}}}",
-        rf"    \textbf{{Pipeline}} & {regime_col}\textbf{{Full}} & \textbf{{Big}} & \textbf{{$\Delta$}} \\",
+        rf"    \textbf{{Method}} & {regime_col}\textbf{{Full}} & \textbf{{Big}} & \textbf{{$\Delta$}} \\",
         r"    \hline",
     ]
-    for extractor, label in PIPELINES:
+    for extractor, label in METHODS:
         for i, (regime_label, scenarios) in enumerate(spec.regimes):
             first = rf"\multirow{{{len(spec.regimes)}}}{{*}}{{{label}}}" if i == 0 else ""
             head = label if not has_regimes else first

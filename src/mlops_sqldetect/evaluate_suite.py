@@ -1,6 +1,6 @@
 """Run an evaluation suite over a chosen dataset family (Superviz25 or Superviz26).
 
-For each (scenario, pipeline, extractor) cell: fit on a 90% slice of the
+For each (scenario, method, extractor) cell: fit on a 90% slice of the
 ``split == "train"`` normal samples, calibrate a decision threshold on the
 held-out 10% validation normals at ``--target-fpr``, score the test split,
 record the full metric suite (ROC-AUC, AUPRC, f1, accuracy, precision, recall,
@@ -32,7 +32,7 @@ from mlops_sqldetect.data import load_whole_sampled, split_normals
 from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
 from mlops_sqldetect.features import EXTRACTOR_LABELS, EXTRACTORS
 from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
-from mlops_sqldetect.model import PIPELINE_LABELS, AEDetector, PipelineName, build_pipeline
+from mlops_sqldetect.model import METHOD_LABELS, AEDetector, MethodName, build_method
 from mlops_sqldetect.tracking import (
     ensure_parent_run,
     log_and_register_detector,
@@ -43,7 +43,7 @@ from mlops_sqldetect.visualize import dump_curve_points, plot_pr_curve, plot_roc
 
 logger = logging.getLogger(__name__)
 
-ALL_PIPELINES: tuple[PipelineName, ...] = ("ocsvm", "lof", "ae")
+ALL_METHODS: tuple[MethodName, ...] = ("ocsvm", "lof", "ae")
 
 # MLflow metric keys allow alnum and ``_-./`` plus space; anything else is replaced.
 _MLFLOW_KEY_RE = re.compile(r"[^0-9A-Za-z_\-./ ]+")
@@ -53,10 +53,10 @@ VAL_FRACTION = 0.1
 
 
 class Cell(NamedTuple):
-    """One unit of the evaluation grid: a single (scenario, pipeline, extractor)."""
+    """One unit of the evaluation grid: a single (scenario, method, extractor)."""
 
     scenario: str
-    pipeline: str
+    method: str
     extractor: str
 
 
@@ -66,9 +66,9 @@ def _all_scenarios(family: DatasetFamily) -> dict[str, StrEnum]:
 
 
 def _validate_grid(
-    dataset: str, suite: str, pipelines: str, extractors: str, scenario: str | None = None
+    dataset: str, suite: str, methods: str, extractors: str, scenario: str | None = None
 ) -> tuple[DatasetFamily, tuple[StrEnum, ...], tuple[str, ...], tuple[str, ...]]:
-    """Validate the requested grid and resolve it to (family, scenarios, pipelines, extractors).
+    """Validate the requested grid and resolve it to (family, scenarios, methods, extractors).
 
     When ``scenario`` is given it overrides ``suite`` and selects that single scenario;
     otherwise the named suite is expanded. Raises ``typer.BadParameter`` on any unknown name.
@@ -85,44 +85,44 @@ def _validate_grid(
         if suite not in family.suites:
             raise typer.BadParameter(f"--suite for {dataset} must be one of {sorted(family.suites)}")
         datasets = family.suites[suite]
-    requested_pipelines = tuple(p.strip() for p in pipelines.split(",") if p.strip())
-    unknown = set(requested_pipelines) - set(ALL_PIPELINES)
+    requested_methods = tuple(p.strip() for p in methods.split(",") if p.strip())
+    unknown = set(requested_methods) - set(ALL_METHODS)
     if unknown:
-        raise typer.BadParameter(f"Unknown pipeline(s): {sorted(unknown)}")
+        raise typer.BadParameter(f"Unknown method(s): {sorted(unknown)}")
     requested_extractors = tuple(e.strip() for e in extractors.split(",") if e.strip())
     unknown_extractors = set(requested_extractors) - set(EXTRACTORS)
     if unknown_extractors:
         raise typer.BadParameter(f"Unknown extractor(s): {sorted(unknown_extractors)}")
-    return family, datasets, requested_pipelines, requested_extractors
+    return family, datasets, requested_methods, requested_extractors
 
 
-def parent_run_spec(family: DatasetFamily, pipeline: str, extractor: str) -> tuple[str, dict[str, str]]:
-    """Build the (name, tags) of the MLflow parent run that groups a (pipeline, extractor)."""
+def parent_run_spec(family: DatasetFamily, method: str, extractor: str) -> tuple[str, dict[str, str]]:
+    """Build the (name, tags) of the MLflow parent run that groups a (method, extractor)."""
     name = (
         f"{family.name.capitalize()}:"
-        f"{PIPELINE_LABELS.get(pipeline, pipeline)} and "
+        f"{METHOD_LABELS.get(method, method)} and "
         f"{EXTRACTOR_LABELS.get(extractor, extractor)}"
     )
     # The family is not tagged: each family has its own MLflow experiment, so the
-    # parent is uniquely identified within that experiment by (pipeline, extractor).
+    # parent is uniquely identified within that experiment by (method, extractor).
     tags = {
-        "decision_engine": pipeline,
+        "decision_engine": method,
         "feature_extractor": extractor,
         "run_role": "parent",
     }
     return name, tags
 
 
-def enumerate_cells(dataset: str, suite: str, pipelines: str, extractors: str) -> list[Cell]:
-    """Flatten the requested grid into ordered cells (pipeline -> extractor -> scenario).
+def enumerate_cells(dataset: str, suite: str, methods: str, extractors: str) -> list[Cell]:
+    """Flatten the requested grid into ordered cells (method -> extractor -> scenario).
 
     The ordering mirrors the nested loops in :func:`evaluate_suite`, so it is a stable
     single source of truth for callers that fan the grid out (e.g. the SLURM submitter).
     """
-    _, datasets, requested_pipelines, requested_extractors = _validate_grid(dataset, suite, pipelines, extractors)
+    _, datasets, requested_methods, requested_extractors = _validate_grid(dataset, suite, methods, extractors)
     return [
-        Cell(scenario.value, pipeline, extractor)
-        for pipeline in requested_pipelines
+        Cell(scenario.value, method, extractor)
+        for method in requested_methods
         for extractor in requested_extractors
         for scenario in datasets
     ]
@@ -135,7 +135,7 @@ class ResultRow:
     dataset: str
     scenario: str
     kind: str
-    pipeline: str
+    method: str
     extractor: str
     n_train: int
     n_test: int
@@ -157,10 +157,10 @@ class ResultRow:
     model_path: str
 
 
-def _model_filename(family: str, pipeline: PipelineName, extractor: str, scenario: StrEnum) -> str:
+def _model_filename(family: str, method: MethodName, extractor: str, scenario: StrEnum) -> str:
     # AE saves a torch checkpoint. OCSVM/LOF saves a joblib sklearn pipeline.
-    suffix = "pt" if pipeline == "ae" else "joblib"
-    return f"{pipeline}_{extractor}_{family}_{scenario.value}.{suffix}"
+    suffix = "pt" if method == "ae" else "joblib"
+    return f"{method}_{extractor}_{family}_{scenario.value}.{suffix}"
 
 
 def _mlflow_key(name: str) -> str:
@@ -171,7 +171,7 @@ def _mlflow_key(name: str) -> str:
 def _run_one(
     family: DatasetFamily,
     scenario: StrEnum,
-    pipeline: PipelineName,
+    method: MethodName,
     extractor: str,
     data_root: Path,
     model_dir: Path,
@@ -185,12 +185,12 @@ def _run_one(
     cache: bool = True,
     cache_dir: Path | None = None,
 ) -> ResultRow:
-    """Train + evaluate one (scenario, pipeline, extractor) cell, optionally logging to MLflow."""
+    """Train + evaluate one (scenario, method, extractor) cell, optionally logging to MLflow."""
     # Tee this cell's log output to its own file under reports/ and (when tracking)
     # attach it to the child run as an artifact, so a cell's diagnostics live next to
     # its metrics and curves in MLflow. SLURM's per-array .log interleaves nothing here
     # (one cell per array task) but isn't reachable from a run; this file is.
-    stem = f"{pipeline}_{extractor}_{family.name}_{scenario.value}"
+    stem = f"{method}_{extractor}_{family.name}_{scenario.value}"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{stem}.log"
     log_handler = logging.FileHandler(log_path, mode="w")
@@ -202,7 +202,7 @@ def _run_one(
         return _run_one_tracked(
             family=family,
             scenario=scenario,
-            pipeline=pipeline,
+            method=method,
             extractor=extractor,
             data_root=data_root,
             model_dir=model_dir,
@@ -227,7 +227,7 @@ def _run_one_tracked(
     *,
     family: DatasetFamily,
     scenario: StrEnum,
-    pipeline: PipelineName,
+    method: MethodName,
     extractor: str,
     data_root: Path,
     model_dir: Path,
@@ -245,7 +245,7 @@ def _run_one_tracked(
 ) -> ResultRow:
     """Body of :func:`_run_one`, run with a file handler already capturing this cell's log."""
     logger.info(
-        f"=== {PIPELINE_LABELS.get(pipeline, pipeline)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
+        f"=== {METHOD_LABELS.get(method, method)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
         f"on {family.name.capitalize()}/{scenario.value} ==="
     )
     # attack_technique is needed for per-technique recall; it is NaN on normal rows.
@@ -288,9 +288,9 @@ def _run_one_tracked(
     # uses the full dataset. The label distinguishes the two in the MLflow UI.
     run_type = "smoke-run" if limit is not None else "full-run"
 
-    model = build_pipeline(pipeline, extractor, cache=cache, cache_dir=cache_dir)
+    model = build_method(method, extractor, cache=cache, cache_dir=cache_dir)
     # Child name is self-describing and time-ordered: ``{scenario}#{ts}``. The run_type
-    # (full-run/smoke-run) lives in its own tag; the pipeline/extractor context is
+    # (full-run/smoke-run) lives in its own tag; the method/extractor context is
     # carried by the parent it nests under.
     run_name = f"{scenario.value}#{time.strftime('%Y%m%d-%H%M%S')}"
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
@@ -310,7 +310,7 @@ def _run_one_tracked(
                 )
                 mlflow.set_tags(
                     {
-                        "decision_engine": pipeline,
+                        "decision_engine": method,
                         # dataset is the on-disk family (superviz26-lodo, superviz25, ...);
                         # scenario is the split within it (a-a, bcd-a, ...).
                         "dataset": data_root.name,
@@ -365,12 +365,12 @@ def _run_one_tracked(
             # target FPR (out-of-sample), then binarise the test scores for the metrics.
             threshold = threshold_for_fpr(model.score_samples(df_val), target_fpr)
             m = compute_metrics(
-                df_test["label"], scores, threshold, f"{pipeline}_{extractor}_{family.name}_{scenario.value}"
+                df_test["label"], scores, threshold, f"{method}_{extractor}_{family.name}_{scenario.value}"
             )
             preds = (scores > threshold).astype(int)
             rpa = recall_per_attack(df_test["label"], preds, df_test["attack_technique"])
 
-            model_path = model_dir / _model_filename(family.name, pipeline, extractor, scenario)
+            model_path = model_dir / _model_filename(family.name, method, extractor, scenario)
             model.save(model_path)
 
             # One ROC and one AUPRC curve per cell, written under models/curves/.
@@ -385,7 +385,7 @@ def _run_one_tracked(
                 dataset=family.name,
                 scenario=scenario.value,
                 kind=kind,
-                pipeline=pipeline,
+                method=method,
                 extractor=extractor,
                 n_train=int(len(df_fit)),
                 n_test=int(len(df_test)),
@@ -439,7 +439,7 @@ def _run_one_tracked(
                 mlflow.log_artifact(str(roc_csv), artifact_path="curve_data")
                 mlflow.log_artifact(str(pr_csv), artifact_path="curve_data")
                 if register:
-                    registered_name = f"sqldetect-{pipeline}-{extractor}-{family.name}-{scenario.value}"
+                    registered_name = f"sqldetect-{method}-{extractor}-{family.name}-{scenario.value}"
                     log_and_register_detector(model_path, registered_name, df_test[["full_query"]].head(3))
 
             return row
@@ -462,7 +462,7 @@ def evaluate_suite(
         str | None,
         typer.Option(help="Run a single scenario (e.g. a-a, bcd-a); overrides --suite. Used by the SLURM runner."),
     ] = None,
-    pipelines: Annotated[str, typer.Option(help="Comma-separated decision-head names.")] = "ocsvm,ae",
+    methods: Annotated[str, typer.Option(help="Comma-separated decision-head names.")] = "ocsvm,ae",
     extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names.")] = "li",
     data_root: Annotated[
         Path | None, typer.Option(help="Directory holding the CSVs (default: the family's data dir).")
@@ -506,8 +506,8 @@ def evaluate_suite(
             f"{dataset!r} uses the {FAMILIES[dataset].protocol!r} protocol; "
             f"run it through `python -m mlops_sqldetect.{evaluator}`."
         )
-    family, datasets, requested_pipelines, requested_extractors = _validate_grid(
-        dataset, suite, pipelines, extractors, scenario
+    family, datasets, requested_methods, requested_extractors = _validate_grid(
+        dataset, suite, methods, extractors, scenario
     )
 
     data_root = data_root or family.default_root()
@@ -515,7 +515,7 @@ def evaluate_suite(
         # A single-scenario run writes its own per-cell file (race-free under SLURM and
         # idempotent on rerun); a full-grid run accumulates into one combined CSV.
         report = (
-            Path(f"reports/{dataset}/cells/{requested_pipelines[0]}_{requested_extractors[0]}_{scenario}.csv")
+            Path(f"reports/{dataset}/cells/{requested_methods[0]}_{requested_extractors[0]}_{scenario}.csv")
             if scenario is not None
             else Path(f"reports/{dataset}_results.csv")
         )
@@ -534,9 +534,9 @@ def evaluate_suite(
 
     # This code is highly shaped around logging to mlflow. It will work without
     # logging, but this explains most of its structure.
-    for pipeline in requested_pipelines:
+    for method in requested_methods:
         for extractor in requested_extractors:
-            parent_name, parent_tags = parent_run_spec(family, pipeline, extractor)
+            parent_name, parent_tags = parent_run_spec(family, method, extractor)
             if track_enabled:
                 parent_ctx = mlflow.start_run(run_id=ensure_parent_run(parent_tags, parent_name))
             else:
@@ -546,7 +546,7 @@ def evaluate_suite(
                     row = _run_one(
                         family,
                         scenario,
-                        pipeline,  # type: ignore[arg-type]
+                        method,  # type: ignore[arg-type]
                         extractor,
                         data_root,
                         model_dir,

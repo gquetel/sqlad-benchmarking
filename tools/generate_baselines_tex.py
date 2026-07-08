@@ -3,16 +3,16 @@
 Loads every finished full-run cell of the ``Superviz26-SQL`` experiment and emits
 two LaTeX files for the benchmark paper:
 
-  * the compact in-domain vs. LODO summary table (per pipeline: AUROC and AUPRC
+  * the compact in-domain vs. LODO summary table (per method: AUROC and AUPRC
     averaged over each setting, plus the cross-domain gap Delta = LODO - ID), and
   * the in-domain vs. LODO dumbbell figure (one AUROC panel and one AUPRC panel),
-    which visualises the same gap per pipeline.
+    which visualises the same gap per method.
 
 The detailed per-scenario tables (in-domain and LODO, with confidence intervals and
 F1) can still be written via ``--detailed-out``.
 
 MLflow is the single source of truth: the latest finished full-run per
-``(feature_extractor, pipeline, scenario)`` cell wins, so re-running this after
+``(feature_extractor, method, scenario)`` cell wins, so re-running this after
 new runs (e.g. when the Loginov / CodeT5+ cells finish) refreshes both files.
 Missing cells are rendered as placeholders (--) in the table and dropped from the
 figure.
@@ -42,10 +42,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # The MLflow experiment holding the standard SuperViz26 grid (see tracking._EXPERIMENT_NAMES).
 EXPERIMENT = "Superviz26-SQL"
 
-# Pipelines in display order: (feature_extractor, engine, paper label, figure short label).
+# Methods in display order: (feature_extractor, engine, paper label, figure short label).
 # Labels are paper-facing (AE, SecureBERT) and intentionally differ from the repo's
-# canonical PIPELINE_LABELS / EXTRACTOR_LABELS ("Autoencoder", "SecureBERT").
-PIPELINES: list[tuple[str, str, str, str]] = [
+# canonical METHOD_LABELS / EXTRACTOR_LABELS ("Autoencoder", "SecureBERT").
+METHODS: list[tuple[str, str, str, str]] = [
     ("cv", "ae", "CountVectorizer + AE", "CV+AE"),
     ("cv", "lof", "CountVectorizer + LOF", "CV+LOF"),
     ("cv", "ocsvm", "CountVectorizer + OCSVM", "CV+OCSVM"),
@@ -81,23 +81,23 @@ Metrics = dict[str, float | None]
 Results = dict[tuple[str, str, str], Metrics]
 
 IN_CAPTION = (
-    r"In-domain detection performance of the fifteen reference pipelines on \datasetlodo{}. "
-    r"For each pipeline, the four in-domain scenarios and their average are reported. "
+    r"In-domain detection performance of the fifteen reference methods on \datasetlodo{}. "
+    r"For each method, the four in-domain scenarios and their average are reported. "
     r"Missing entries (--) correspond to runs not yet available."
 )
 LODO_CAPTION = (
-    r"Leave-one-domain-out (\gls{lodo}) detection performance of the fifteen reference pipelines "
-    r"on \datasetlodo{}. For each pipeline, the four held-out scenarios and their average are "
+    r"Leave-one-domain-out (\gls{lodo}) detection performance of the fifteen reference methods "
+    r"on \datasetlodo{}. For each method, the four held-out scenarios and their average are "
     r"reported. Missing entries (--) correspond to runs not yet available."
 )
 FIGURE_CAPTION = (
-    r"In-domain (\textbullet) vs.\ LODO ($\blacksquare$) detection performance per pipeline, "
+    r"In-domain (\textbullet) vs.\ LODO ($\blacksquare$) detection performance per method, "
     r"averaged over the four scenarios of each setting; the connector length is the cross-domain "
     r"gap $\Delta = \text{LODO} - \text{ID}$, shown in green when small ($> -0.05$) and red otherwise."
 )
 SUMMARY_CAPTION = (
     r"In-domain (ID) vs.\ leave-one-domain-out (LODO) detection performance of the fifteen "
-    r"reference pipelines on \datasetlodo{}, averaged over the four scenarios of each setting. "
+    r"reference methods on \datasetlodo{}, averaged over the four scenarios of each setting. "
     r"$\Delta = \text{LODO} - \text{ID}$ is the cross-domain gap. Missing entries (--) correspond "
     r"to runs not yet available."
 )
@@ -152,7 +152,7 @@ def load_results() -> Results:
 
 def _warn_missing(data: Results) -> None:
     """Warn for every expected grid cell that is absent from MLflow or lacks AUROC/AUPRC."""
-    for extractor, engine, label, _ in PIPELINES:
+    for extractor, engine, label, _ in METHODS:
         for sc, _ in INDOMAIN + LODO:
             cell = data.get((extractor, engine, sc))
             if cell is None:
@@ -182,7 +182,7 @@ def _avg(values: list[Metrics], key: str) -> float | None:
 def _table_rows(data: Results, scenarios: list[tuple[str, str]]) -> list[tuple[str, str, str, str, str]]:
     """Build (label, scenario, auroc, auprc, f1) rows for one setting, including the average."""
     rows: list[tuple[str, str, str, str, str]] = []
-    for extractor, engine, label, _ in PIPELINES:
+    for extractor, engine, label, _ in METHODS:
         present = [data.get((extractor, engine, sc)) for sc, _ in scenarios]
         for (_, sclabel), cell in zip(scenarios, present, strict=True):
             if cell is None:
@@ -222,7 +222,7 @@ def _render_table(data: Results, scenarios: list[tuple[str, str]], caption: str,
         r"  \footnotesize",
         r"  \begin{tabular*}{\linewidth}{@{\extracolsep{\fill}} ll|ccc }",
         r"    \hline",
-        r"    \textbf{Pipeline} & \textbf{Scenario} & \textbf{AUROC} & \textbf{AUPRC} & \textbf{F1} \\",
+        r"    \textbf{Method} & \textbf{Scenario} & \textbf{AUROC} & \textbf{AUPRC} & \textbf{F1} \\",
         r"    \hline",
     ]
     for i, (lab, sclabel, auroc, auprc, f1) in enumerate(rows):
@@ -268,7 +268,7 @@ def _gap(lodo: float | None, indom: float | None) -> float | None:
 
 
 def render_summary_table(data: Results) -> str:
-    """Render the compact in-domain vs. LODO summary table (averages and the gap per pipeline)."""
+    """Render the compact in-domain vs. LODO summary table (averages and the gap per method)."""
     avgs = _averages(data)
     out = [
         r"\begin{table}[!htb]",
@@ -281,11 +281,11 @@ def render_summary_table(data: Results) -> str:
         r"    \toprule",
         r"    & \multicolumn{3}{c}{\textbf{AUROC}} & \multicolumn{3}{c}{\textbf{AUPRC}} \\",
         r"    \cmidrule(lr){2-4}\cmidrule(lr){5-7}",
-        r"    \textbf{Pipeline} & ID & LODO & $\Delta$ & ID & LODO & $\Delta$ \\",
+        r"    \textbf{Method} & ID & LODO & $\Delta$ & ID & LODO & $\Delta$ \\",
         r"    \midrule",
     ]
     prev_extractor = None
-    for extractor, _, label, short in PIPELINES:
+    for extractor, _, label, short in METHODS:
         if prev_extractor is not None and extractor != prev_extractor:
             out.append(r"    \midrule")
         m = avgs[short]
@@ -338,9 +338,9 @@ EXTRACTOR_SHORT = {
     "codet5": "CodeT5+",
 }
 ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
-SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in PIPELINES}
+SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in METHODS}
 # A "method" is one (feature extractor, decision engine) cell -- one dumbbell row in the figure.
-LABEL_BY_CELL = {(extractor, engine): label for extractor, engine, label, _ in PIPELINES}
+LABEL_BY_CELL = {(extractor, engine): label for extractor, engine, label, _ in METHODS}
 
 # x ticks shared by both panels; a panel renders only those within its x-range.
 _XTICK_GRID = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
@@ -357,16 +357,16 @@ def _xticks(xmin: float) -> str:
 
 
 def _extractor_order() -> list[str]:
-    """Feature extractors top-to-bottom in the figure, following their PIPELINES order."""
+    """Feature extractors top-to-bottom in the figure, following their METHODS order."""
     seen: list[str] = []
-    for extractor, *_ in PIPELINES:
+    for extractor, *_ in METHODS:
         if extractor not in seen:
             seen.append(extractor)
     return seen
 
 
 def _averages(data: Results) -> dict[str, Metrics]:
-    """Per pipeline, average each metric over the in-domain and LODO scenarios."""
+    """Per method, average each metric over the in-domain and LODO scenarios."""
 
     def avg_over(extractor: str, engine: str, scenarios: list[tuple[str, str]], key: str) -> float | None:
         xs = []
@@ -378,7 +378,7 @@ def _averages(data: Results) -> dict[str, Metrics]:
         return sum(xs) / len(xs)
 
     out: dict[str, Metrics] = {}
-    for extractor, engine, _, short in PIPELINES:
+    for extractor, engine, _, short in METHODS:
         out[short] = {
             "id_auroc": avg_over(extractor, engine, INDOMAIN, "auroc"),
             "lodo_auroc": avg_over(extractor, engine, LODO, "auroc"),

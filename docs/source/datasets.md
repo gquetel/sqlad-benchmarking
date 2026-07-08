@@ -96,16 +96,16 @@ from mlops_sqldetect.datasets.superviz26_drift import Superviz26Drift, load_drif
 origin_train, origin_test, shifted_test = load_drift(Superviz26Drift.A)
 ```
 
-Run the whole grid (15 pipelines × 4 domains) with the dedicated evaluator, which
+Run the whole grid (15 methods × 4 domains) with the dedicated evaluator, which
 trains once per cell and scores both test sets:
 
 ```bash
-python -m mlops_sqldetect.evaluate_drift --pipelines ocsvm,lof,ae --extractors li,loginov,cv,sbert,codet5
+python -m mlops_sqldetect.evaluate_drift --methods ocsvm,lof,ae --extractors li,loginov,cv,sbert,codet5
 ```
 
 Each cell appends one row — `auroc_s1`, `auroc_s2`, `delta_auroc`, … — to
 `reports/superviz26-drift_results.csv`; average the per-domain rows to obtain the
-per-pipeline drift table. The grid also fans out to SLURM (see *Running on SLURM*).
+per-method drift table. The grid also fans out to SLURM (see *Running on SLURM*).
 
 ## Heavy supplementary datasets (`drift`, `fsl`)
 

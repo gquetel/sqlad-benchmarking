@@ -8,7 +8,7 @@ experiment:
     from every cell's ``curve_data`` artifacts. This folds in (and replaces) the former
     ``aggregate_curves`` command;
   * ``superviz25-metrics.tex`` (\label{tab:sup25-metrics}): precision, recall, F1, FPR,
-    AUPRC and AUROC per pipeline; and
+    AUPRC and AUROC per method; and
   * ``superviz25-recall.tex`` (\label{tab:sup25-recall}): recall per attack technique.
 
 The downloaded curve CSVs (and, with ``--rasters``, the PNG/PDF figures) go to
@@ -39,7 +39,7 @@ import pandas as pd
 import typer
 
 from mlops_sqldetect.datasets import FAMILIES
-from mlops_sqldetect.evaluate_suite import ALL_PIPELINES, _all_scenarios
+from mlops_sqldetect.evaluate_suite import ALL_METHODS, _all_scenarios
 from mlops_sqldetect.features import EXTRACTORS
 from mlops_sqldetect.tracking import setup_mlflow
 from mlops_sqldetect.visualize import (
@@ -60,10 +60,10 @@ DATASET = "superviz25"
 EXPERIMENT = "Superviz25-SQL"
 SCENARIO = "dataset"
 
-# Pipelines in display order: (feature_extractor tag, decision_engine tag, paper label).
+# Methods in display order: (feature_extractor tag, decision_engine tag, paper label).
 # Labels are thesis-facing and intentionally differ from the repo's canonical extractor
 # names ("Secure-BERT" vs "SecureBERT", "AE" vs "Autoencoder").
-PIPELINES: list[tuple[str, str, str]] = [
+METHODS: list[tuple[str, str, str]] = [
     ("cv", "ae", "CountVectorizer + AE"),
     ("cv", "lof", "CountVectorizer + LOF"),
     ("cv", "ocsvm", "CountVectorizer + OCSVM"),
@@ -104,8 +104,8 @@ METRIC_COLUMNS: list[tuple[str, str]] = [
     ("auroc", "AUROC"),
 ]
 
-METRICS_CAPTION = "Performance metrics for studied novelty detection pipelines."
-RECALL_CAPTION = "Recall score per technique for studied detection pipelines."
+METRICS_CAPTION = "Performance metrics for studied novelty detection methods."
+RECALL_CAPTION = "Recall score per technique for studied detection methods."
 
 Metrics = dict[str, float | None]
 Results = dict[tuple[str, str], Metrics]
@@ -162,7 +162,7 @@ def load_results() -> Results:
 
 def _warn_missing(data: Results) -> None:
     """Warn for every expected grid cell that is absent from MLflow."""
-    for extractor, engine, label in PIPELINES:
+    for extractor, engine, label in METHODS:
         if (extractor, engine) not in data:
             logger.warning(f"Missing run: {label}")
 
@@ -178,9 +178,9 @@ def _fmt_score(v: float | None) -> str:
     return "--" if v is None else f"{v:.4f}"
 
 
-# Rows share the PIPELINES order, so a group ends wherever the next pipeline switches
+# Rows share the METHODS order, so a group ends wherever the next method switches
 # feature extractor; those rows get 20% extra vertical space to separate the groups.
-GROUP_END_ROWS = frozenset(i for i in range(len(PIPELINES) - 1) if PIPELINES[i][0] != PIPELINES[i + 1][0])
+GROUP_END_ROWS = frozenset(i for i in range(len(METHODS) - 1) if METHODS[i][0] != METHODS[i + 1][0])
 GROUP_VSPACE = r"0.2\normalbaselineskip"
 
 
@@ -218,10 +218,10 @@ def _render_table(header: list[str], rows: list[list[str]], caption: str, label:
 
 
 def render_metrics_table(data: Results) -> str:
-    """Precision/Recall/F1/FPR/AUPRC/AUROC per pipeline (tab:sup25-metrics)."""
+    """Precision/Recall/F1/FPR/AUPRC/AUROC per method (tab:sup25-metrics)."""
     header = ["Model", *(h for _, h in METRIC_COLUMNS)]
     rows: list[list[str]] = []
-    for extractor, engine, label in PIPELINES:
+    for extractor, engine, label in METHODS:
         cell = data.get((extractor, engine))
         row = [label]
         for key, _ in METRIC_COLUMNS:
@@ -232,10 +232,10 @@ def render_metrics_table(data: Results) -> str:
 
 
 def render_recall_table(data: Results) -> str:
-    """Per-technique recall per pipeline (tab:sup25-recall)."""
+    """Per-technique recall per method (tab:sup25-recall)."""
     header = ["Model", *(h for _, h in TECHNIQUES)]
     rows: list[list[str]] = []
-    for extractor, engine, label in PIPELINES:
+    for extractor, engine, label in METHODS:
         cell = data.get((extractor, engine))
         row = [label]
         for suffix, _ in TECHNIQUES:
@@ -247,8 +247,8 @@ def render_recall_table(data: Results) -> str:
 # --- combined curve figures (folded in from the former aggregate_curves) -----
 
 
-def _find_cell_run_id(pipeline: str, extractor: str) -> str | None:
-    """Latest full-run child run for a (pipeline, extractor) cell, or None.
+def _find_cell_run_id(method: str, extractor: str) -> str | None:
+    """Latest full-run child run for a (method, extractor) cell, or None.
 
     The decision head is `decision_engine` on current runs and `pipeline` on legacy ones.
     MLflow filter strings are AND-only, so we search once per tag and keep the newest run.
@@ -257,7 +257,7 @@ def _find_cell_run_id(pipeline: str, extractor: str) -> str | None:
     best = None
     for engine_tag in ("decision_engine", "pipeline"):
         runs = mlflow.search_runs(
-            filter_string=f"tags.{engine_tag} = '{pipeline}' and {common}",
+            filter_string=f"tags.{engine_tag} = '{method}' and {common}",
             order_by=["start_time DESC"],
             max_results=1,
             output_format="list",
@@ -267,7 +267,7 @@ def _find_cell_run_id(pipeline: str, extractor: str) -> str | None:
     return best.info.run_id if best else None
 
 
-def _fetch_curve(run_id: str, stem: str, pipeline: str, extractor: str, cache_dir: Path) -> Curve | None:
+def _fetch_curve(run_id: str, stem: str, method: str, extractor: str, cache_dir: Path) -> Curve | None:
     """Download a cell's ``_roc.csv``/``_auprc.csv`` from MLflow into ``cache_dir``."""
     paths: dict[str, Path] = {}
     for suffix in ("roc", "auprc"):
@@ -278,19 +278,19 @@ def _fetch_curve(run_id: str, stem: str, pipeline: str, extractor: str, cache_di
             logger.warning(f"  missing artifact {artifact} on run {run_id}: {exc}")
             return None
         paths[suffix] = Path(local)
-    return Curve(pipeline=pipeline, extractor=extractor, roc=pd.read_csv(paths["roc"]), pr=pd.read_csv(paths["auprc"]))
+    return Curve(method=method, extractor=extractor, roc=pd.read_csv(paths["roc"]), pr=pd.read_csv(paths["auprc"]))
 
 
-def _load_cell(pipeline: str, extractor: str, family_name: str, cache_dir: Path) -> Curve | None:
+def _load_cell(method: str, extractor: str, family_name: str, cache_dir: Path) -> Curve | None:
     """Resolve one grid cell's run and load its curve (None if the run or its artifacts are absent)."""
-    run_id = _find_cell_run_id(pipeline, extractor)
+    run_id = _find_cell_run_id(method, extractor)
     if run_id is None:
-        logger.warning(f"  no run for {pipeline}+{extractor} on {family_name}/{SCENARIO}; skipping")
+        logger.warning(f"  no run for {method}+{extractor} on {family_name}/{SCENARIO}; skipping")
         return None
-    stem = f"{pipeline}_{extractor}_{family_name}_{SCENARIO}"
-    curve = _fetch_curve(run_id, stem, pipeline, extractor, cache_dir)
+    stem = f"{method}_{extractor}_{family_name}_{SCENARIO}"
+    curve = _fetch_curve(run_id, stem, method, extractor, cache_dir)
     if curve is not None:
-        logger.info(f"  loaded {pipeline}+{extractor} from run {run_id}")
+        logger.info(f"  loaded {method}+{extractor} from run {run_id}")
     return curve
 
 
@@ -311,9 +311,9 @@ def generate_curves(out_dir: Path, cache_dir: Path, max_workers: int, rasters: b
 
     # Each cell is an independent, network-bound fetch, so run the grid through a thread pool.
     # ThreadPoolExecutor.map preserves input order, keeping the figure's colour/legend order
-    # deterministic. Extractor order matches PIPELINES; pipelines are the decision heads.
-    extractors = list(dict.fromkeys(e for e, _, _ in PIPELINES))
-    grid = [(p, e) for p in ALL_PIPELINES for e in extractors]
+    # deterministic. Extractor order matches METHODS; methods are the decision heads.
+    extractors = list(dict.fromkeys(e for e, _, _ in METHODS))
+    grid = [(p, e) for p in ALL_METHODS for e in extractors]
     if unknown := (set(extractors) - set(EXTRACTORS)):
         raise RuntimeError(f"Unknown extractor(s): {sorted(unknown)}")
     workers = max(1, min(max_workers, len(grid)))

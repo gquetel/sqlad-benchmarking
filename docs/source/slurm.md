@@ -1,7 +1,7 @@
 # Running the suite on SLURM
 
-`evaluate_suite` runs the grid (pipelines × extractors × scenarios) serially in one
-process. On a cluster you usually want each **cell** — one `(scenario, pipeline,
+`evaluate_suite` runs the grid (methods × extractors × scenarios) serially in one
+process. On a cluster you usually want each **cell** — one `(scenario, method,
 extractor)` — to run as its own job so they execute in parallel (e.g. the 8 Superviz26
 scenarios become 8 jobs).
 
@@ -11,15 +11,15 @@ scenarios become 8 jobs).
 class**. Cells are bucketed by their needs:
 
 - **CPU** — cells that need no GPU (e.g. `ocsvm/li`) → the `cpu` partition.
-- **GPU** — cells that train an autoencoder (`pipeline == "ae"`) or use an embedding
+- **GPU** — cells that train an autoencoder (`method == "ae"`) or use an embedding
   extractor (`extractor in {"sbert", "codet5"}`) → a GPU array whose partition list is the
   GPU partitions with **enough VRAM** for that cell. Each cell's minimum comes from
-  `min_vram_gb` (keyed by `extractor` or `pipeline:extractor`, else `default`); partitions
+  `min_vram_gb` (keyed by `extractor` or `engine:extractor`, else `default`); partitions
   are tried largest-VRAM first so cells prefer the fastest GPU. A hungry model like CodeT5+
   (`codet5: 24`) is thus never scheduled on the 16 GB V100.
 
 Each array task runs one cell through `evaluate_suite` and writes its **own** per-cell CSV
-to `reports/{dataset}/cells/{pipeline}_{extractor}_{scenario}.csv` — so the parallel jobs
+to `reports/{dataset}/cells/{method}_{extractor}_{scenario}.csv` — so the parallel jobs
 never share a writer and a rerun simply overwrites its own file.
 
 Site settings (partitions, resources, `min_vram_gb`) live in
@@ -40,13 +40,13 @@ race on the shared `.venv`).
 
 ```bash
 # Preview the plan (manifests + sbatch commands) without submitting:
-python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors li --dry-run
+python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors li --dry-run
 
 # Submit for real:
-python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ocsvm,ae --extractors li
+python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li
 
 # Smoke run: cap each cell to a label-stratified subset (passed through to evaluate_suite):
-python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors sbert --limit 50000
+python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors sbert --limit 50000
 ```
 
 Manifests, generated job scripts, and `.out` logs are written under
@@ -60,11 +60,11 @@ are the scenarios — but each cell trains once and evaluates two test sets (S1/
 family's `protocol == "drift"`), so the submit command is identical:
 
 ```bash
-python -m tools.slurm_submit --dataset superviz26-drift --suite all --pipelines ocsvm,lof,ae --extractors li
+python -m tools.slurm_submit --dataset superviz26-drift --suite all --methods ocsvm,lof,ae --extractors li
 ```
 
 Each cell writes one row (`auroc_s1`, `auroc_s2`, `delta_auroc`, …) to
-`reports/superviz26-drift/cells/{pipeline}_{extractor}_{domain}.csv`.
+`reports/superviz26-drift/cells/{method}_{extractor}_{domain}.csv`.
 
 ### Few-shot adaptation
 
@@ -80,10 +80,10 @@ dispatches such cells to `evaluate_fsl` (it keys off `protocol == "fsl"`):
 
 ```bash
 # 1. Pretrain the LODO autoencoders (produces models/ae_<extractor>_superviz26_<lodo>.pt):
-python -m tools.slurm_submit --dataset superviz26 --suite lodo --pipelines ae --extractors li
+python -m tools.slurm_submit --dataset superviz26 --suite lodo --methods ae --extractors li
 
 # 2. Run the few-shot sweep on top of them:
-python -m tools.slurm_submit --dataset superviz26-fsl --suite all --pipelines ae --extractors li
+python -m tools.slurm_submit --dataset superviz26-fsl --suite all --methods ae --extractors li
 ```
 
 Each cell writes one row per `(target, k, seed)` (`auroc`, `auprc`, `n_finetune`, …) to

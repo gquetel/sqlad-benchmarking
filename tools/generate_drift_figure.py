@@ -41,7 +41,7 @@ EXPERIMENT = "Drift-Superviz26-SQL"
 
 # Methods in display order: (feature_extractor, engine, paper label, figure short label).
 # Mirrors tools.generate_baselines_tex so labels stay consistent across figures.
-PIPELINES: list[tuple[str, str, str, str]] = [
+METHODS: list[tuple[str, str, str, str]] = [
     ("cv", "ae", "CountVectorizer + AE", "CV+AE"),
     ("cv", "lof", "CountVectorizer + LOF", "CV+LOF"),
     ("cv", "ocsvm", "CountVectorizer + OCSVM", "CV+OCSVM"),
@@ -116,7 +116,7 @@ def load_results() -> Results:
 def _warn_missing(data: Results) -> None:
     """Warn for every expected grid cell that is absent from MLflow or lacks its S1/S2 metrics."""
     metric_keys = ("auroc_s1", "auroc_s2", "auprc_s1", "auprc_s2")
-    for extractor, engine, label, _ in PIPELINES:
+    for extractor, engine, label, _ in METHODS:
         for domain in DOMAINS:
             cell = data.get((extractor, engine, domain))
             if cell is None:
@@ -159,9 +159,9 @@ EXTRACTOR_SHORT = {
     "codet5": "CodeT5+",
 }
 ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
-SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in PIPELINES}
+SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in METHODS}
 # A "method" is one (feature extractor, decision engine) cell -- one dumbbell row in the figure.
-LABEL_BY_CELL = {(extractor, engine): label for extractor, engine, label, _ in PIPELINES}
+LABEL_BY_CELL = {(extractor, engine): label for extractor, engine, label, _ in METHODS}
 
 # x ticks shared by both panels; a panel renders only those within its x-range.
 _XTICK_GRID = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
@@ -178,9 +178,9 @@ def _xticks(xmin: float) -> str:
 
 
 def _extractor_order() -> list[str]:
-    """Feature extractors top-to-bottom in the figure, following their PIPELINES order."""
+    """Feature extractors top-to-bottom in the figure, following their METHODS order."""
     seen: list[str] = []
-    for extractor, *_ in PIPELINES:
+    for extractor, *_ in METHODS:
         if extractor not in seen:
             seen.append(extractor)
     return seen
@@ -199,7 +199,7 @@ def _averages(data: Results) -> dict[str, Metrics]:
         return sum(xs) / len(xs)
 
     out: dict[str, Metrics] = {}
-    for extractor, engine, _, short in PIPELINES:
+    for extractor, engine, _, short in METHODS:
         out[short] = {
             "s1_auroc": avg_over(extractor, engine, "auroc_s1"),
             "s2_auroc": avg_over(extractor, engine, "auroc_s2"),

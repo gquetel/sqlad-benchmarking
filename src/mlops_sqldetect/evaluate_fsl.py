@@ -73,7 +73,7 @@ class FSLResultRow:
 
     dataset: str
     target: str
-    pipeline: str
+    method: str
     extractor: str
     lodo_source: str
     k: int
@@ -168,7 +168,7 @@ def _run_repetition(
     return FSLResultRow(
         dataset=family.name,
         target=target.value,
-        pipeline="ae",
+        method="ae",
         extractor=extractor,
         lodo_source=lodo.value,
         k=k,
@@ -254,7 +254,7 @@ def _run_target(
         raise FileNotFoundError(
             f"pretrained LODO model {base_model_path} not found. Train it first, e.g.:\n"
             f"  python -m mlops_sqldetect.evaluate_suite --dataset {BASE_FAMILY} "
-            f"--scenario {lodo.value} --pipelines ae --extractors {extractor}"
+            f"--scenario {lodo.value} --methods ae --extractors {extractor}"
         )
 
     # One fixed test set per cell (down-sampled once), shared by the whole sweep so
@@ -329,7 +329,7 @@ def evaluate_fsl(
         str | None,
         typer.Option(help="Run a single target domain (a, b, c, d); overrides --suite. Used by the SLURM runner."),
     ] = None,
-    pipelines: Annotated[str, typer.Option(help="Decision head; few-shot adaptation is autoencoder-only.")] = "ae",
+    methods: Annotated[str, typer.Option(help="Decision head; few-shot adaptation is autoencoder-only.")] = "ae",
     extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names.")] = "li",
     ks: Annotated[str, typer.Option(help="Comma-separated adaptation budgets to sweep.")] = DEFAULT_KS,
     seeds: Annotated[
@@ -360,11 +360,11 @@ def evaluate_fsl(
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if dataset not in FAMILIES or FAMILIES[dataset].protocol != "fsl":
         raise typer.BadParameter(f"--dataset must be a few-shot family (protocol='fsl'); got {dataset!r}")
-    family, targets, requested_pipelines, requested_extractors = _validate_grid(
-        dataset, suite, pipelines, extractors, scenario
+    family, targets, requested_methods, requested_extractors = _validate_grid(
+        dataset, suite, methods, extractors, scenario
     )
-    if set(requested_pipelines) != {"ae"}:
-        raise typer.BadParameter("few-shot adaptation is autoencoder-only; pass --pipelines ae")
+    if set(requested_methods) != {"ae"}:
+        raise typer.BadParameter("few-shot adaptation is autoencoder-only; pass --methods ae")
 
     ks_parsed = tuple(sorted({int(x) for x in ks.split(",") if x.strip()}))
     seeds_parsed = tuple(int(x) for x in seeds.split(",") if x.strip())

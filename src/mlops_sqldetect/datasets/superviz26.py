@@ -93,7 +93,7 @@ def load_split(
         split: ``train`` or ``test``.
         root: Directory holding the CSVs. Defaults to ``~/datasets/superviz26-lodo/``.
         columns: Columns to keep. The default trims the file to the three columns
-            actually needed by the Li pipelines, cutting memory by ~10x.
+            actually needed by the Li methods, cutting memory by ~10x.
 
     Returns:
         DataFrame containing only rows where the ``split`` column equals ``split``.

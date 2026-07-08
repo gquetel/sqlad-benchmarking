@@ -21,14 +21,14 @@ class DetectorModel(mlflow.pyfunc.PythonModel):
     """
 
     def load_context(self, context) -> None:
-        from mlops_sqldetect.model import load_pipeline
+        from mlops_sqldetect.model import load_method
 
         path = Path(context.artifacts["detector"])
         # Infer the decision engine from the file suffix. ``.pt`` is the
         # AutoEncoder; ``.joblib`` is a scikit-learn pipeline head (OCSVM or LOF),
         # both of which load and score identically, so "ocsvm" covers either.
         name = "ae" if path.suffix == ".pt" else "ocsvm"
-        self.detector = load_pipeline(name, path)
+        self.detector = load_method(name, path)
 
     def predict(self, context, model_input: pd.DataFrame):
         return self.detector.score_samples(model_input)

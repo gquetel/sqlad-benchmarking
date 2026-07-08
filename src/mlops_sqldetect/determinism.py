@@ -1,4 +1,4 @@
-"""Best-effort determinism controls for the torch-backed pipelines.
+"""Best-effort determinism controls for the torch-backed methods.
 
 Calling :func:`enable_determinism` before model load /
 training pins those so AE weights and CodeT5+/SecureBERT embeddings are
@@ -20,7 +20,7 @@ def enable_determinism() -> None:
     """Pin torch/CUDA to deterministic kernels (idempotent, safe to call often).
 
     Uses ``warn_only=True`` so an op without a deterministic implementation warns
-    instead of raising, keeping the pipelines runnable on any backend.
+    instead of raising, keeping the methods runnable on any backend.
     """
     global _configured
     if _configured:

@@ -46,19 +46,19 @@ versions or regenerate the lock without explicit instruction.
   `slurm_submit`); use `--help` on any of them to see options.
   * `evaluate_suite` runs the standard train-once/evaluate-once grid (in-domain + LODO).
     `evaluate_drift` runs the same-domain concept-drift protocol (`superviz26-drift` family):
-    it trains once per `(domain, pipeline, extractor)` cell and scores the origin (S1) and
+    it trains once per `(domain, method, extractor)` cell and scores the origin (S1) and
     shifted (S2) test sets, writing `auroc_s1`/`auroc_s2`/`delta_auroc` rows. The two
     protocols are selected by a `DatasetFamily.protocol` field; `slurm_run_cell` dispatches
     on it, so `slurm_submit --dataset superviz26-drift` fans the drift grid out the same way.
 * To parallelize the evaluation grid on a SLURM cluster, `tools.slurm_submit` fans each
-  `(scenario, pipeline, extractor)` cell out as a job array (one array per resource class:
+  `(scenario, method, extractor)` cell out as a job array (one array per resource class:
   `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough
   VRAM for it, from `min_vram_gb` in the config, so e.g. CodeT5+ skips the 16 GB V100). Site
   settings live in `configs/slurm.yaml`; jobs
   activate the uv `.venv` (built once on the login node). Each cell writes its row to `reports/{dataset}/cells/*.csv`;
   MLflow is the canonical store.
-    * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --dry-run`.
-    * Submit: `python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ocsvm,ae --extractors li`.
+    * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run`.
+    * Submit: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li`.
 
 # Code style
 * DO NOT ADD EXCEPTIONS TO RUFF BY YOURSELF. ASK ME FIRST. 

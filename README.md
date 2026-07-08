@@ -60,13 +60,13 @@ The directory structure of the project looks like this:
 │       ├── data.py            # CSV loading and split/subsample helpers
 │       ├── datasets/          # Dataset families (Superviz25, Superviz26) + registry
 │       ├── detector_model.py  # MLflow model-from-code wrapper
-│       ├── evaluate.py        # CLI: score a saved pipeline on a CSV
+│       ├── evaluate.py        # CLI: score a saved method on a CSV
 │       ├── evaluate_suite.py  # CLI: run an evaluation grid + MLflow logging
 │       ├── features/          # Feature extractors (li, loginov, countvect, securebert, codet5)
 │       ├── metrics.py         # Threshold calibration and metric computation
 │       ├── model.py           # Detector heads (OCSVM, LOF, AutoEncoder) + factory
 │       ├── tracking.py        # MLflow configuration and helpers
-│       ├── train.py           # CLI: fit and save a pipeline
+│       ├── train.py           # CLI: fit and save a method
 │       └── visualize.py       # ROC / AUPRC curve helpers
 ├── tests/                    # Tests
 │   ├── __init__.py

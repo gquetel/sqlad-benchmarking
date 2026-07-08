@@ -77,7 +77,7 @@ def fetch_supplementary(
 def smoke(ctx: Context, limit: int = 1000, no_track: bool = False, register: bool = False) -> None:
     """Fast end-to-end smoke run on a small subset (in-domain, OCSVM only)."""
     cmd = (
-        f"python -m {PROJECT_NAME}.evaluate_suite --suite in_domain --pipelines ocsvm "
+        f"python -m {PROJECT_NAME}.evaluate_suite --suite in_domain --methods ocsvm "
         f"--limit {limit} --report reports/smoke.csv"
     )
     if no_track:

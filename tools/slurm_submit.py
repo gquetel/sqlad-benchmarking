@@ -1,8 +1,8 @@
 """Fan an evaluation grid out to SLURM as one job array per resource class.
 
-Each cell ``(scenario, pipeline, extractor)`` becomes one array task that runs through
+Each cell ``(scenario, method, extractor)`` becomes one array task that runs through
 :func:`evaluate_suite` and writes its own per-cell CSV under ``reports/{dataset}/cells/``
-(no shared writer, no merge step). Cells needing a GPU (``pipeline == "ae"`` or an
+(no shared writer, no merge step). Cells needing a GPU (``method == "ae"`` or an
 embedding extractor — ``sbert``/``codet5``) go to a GPU array whose partition list is the
 GPU partitions with enough VRAM for that cell (per-cell minimum from ``min_vram_gb``, so a
 hungry model like CodeT5+ skips the 16 GB V100); the rest go to a CPU array. Cells listed in
@@ -10,10 +10,10 @@ hungry model like CodeT5+ skips the 16 GB V100); the rest go to a CPU array. Cel
 of the default 12h ``gpu`` block. Resources and the environment setup come from ``configs/slurm.yaml``.
 
 Usage:
-    python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --extractors li
-    python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ocsvm,ae --dry-run
+    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors li
+    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --dry-run
     # Full-split data is heavy; give the AE/CodeT5+ cells a 24h GPU reservation:
-    python -m tools.slurm_submit --dataset superviz26 --suite all --pipelines ae --gpu-section gpu-long
+    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --gpu-section gpu-long
 """
 
 from __future__ import annotations
@@ -50,13 +50,13 @@ VENV_ACTIVATE = REPO_ROOT / ".venv" / "bin" / "activate"
 
 def _needs_gpu(cell: Cell) -> bool:
     """A cell needs a GPU when it trains an autoencoder or uses an embedding extractor (SecureBERT, CodeT5+)."""
-    return cell.pipeline == "ae" or cell.extractor in ("sbert", "codet5")
+    return cell.method == "ae" or cell.extractor in ("sbert", "codet5")
 
 
 def _min_vram(cell: Cell, cfg: dict) -> int:
-    """Per-GPU VRAM (GB) a cell needs: pipeline:extractor overrides extractor, else the default."""
+    """Per-GPU VRAM (GB) a cell needs: engine:extractor overrides extractor, else the default."""
     reqs = cfg.get("min_vram_gb", {})
-    key = f"{cell.pipeline}:{cell.extractor}"
+    key = f"{cell.method}:{cell.extractor}"
     return int(reqs.get(key, reqs.get(cell.extractor, reqs.get("default", 0))))
 
 
@@ -69,9 +69,9 @@ def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
 
 
 def _is_long_running(cell: Cell, cfg: dict) -> bool:
-    """Whether a cell needs extended wall time, per config ``long_running`` (keyed by extractor or pipeline)."""
+    """Whether a cell needs extended wall time, per config ``long_running`` (keyed by extractor or method)."""
     keys = set(cfg.get("long_running", []))
-    return f"{cell.pipeline}:{cell.extractor}" in keys or cell.extractor in keys
+    return f"{cell.method}:{cell.extractor}" in keys or cell.extractor in keys
 
 
 def _gpu_section(cell: Cell, cfg: dict, default: str) -> str:
@@ -105,14 +105,14 @@ def _experiment_tag(dataset: str, suite: str) -> str:
 
 
 def _job_name(dataset: str, suite: str, cells: list[Cell]) -> str:
-    """Informative SLURM job name: {tag}-{extractors}-{pipelines}-{dataset}.
+    """Informative SLURM job name: {tag}-{extractors}-{methods}-{dataset}.
 
-    Buckets split by resource class, so one array can mix extractors/pipelines; each is
+    Buckets split by resource class, so one array can mix extractors/methods; each is
     listed once (in first-seen order) joined by '+' (e.g. id-li+cv-ocsvm+ae-superviz26).
     """
     extractors = "+".join(dict.fromkeys(c.extractor for c in cells))
-    pipelines = "+".join(dict.fromkeys(c.pipeline for c in cells))
-    return f"{_experiment_tag(dataset, suite)}-{extractors}-{pipelines}-{dataset}"
+    methods = "+".join(dict.fromkeys(c.method for c in cells))
+    return f"{_experiment_tag(dataset, suite)}-{extractors}-{methods}-{dataset}"
 
 
 def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu") -> dict:
@@ -217,7 +217,7 @@ def _submit_array(script: Path, dry_run: bool) -> str | None:
 def submit(
     dataset: Annotated[str, typer.Option(help="Dataset family: superviz26 or superviz25.")] = "superviz26",
     suite: Annotated[str, typer.Option(help="Suite name (e.g. in_domain, lodo, all).")] = "all",
-    pipelines: Annotated[str, typer.Option(help="Comma-separated decision-head names (ocsvm, lof, ae).")] = "ocsvm,ae",
+    methods: Annotated[str, typer.Option(help="Comma-separated decision-head names (ocsvm, lof, ae).")] = "ocsvm,ae",
     extractors: Annotated[
         str, typer.Option(help="Comma-separated feature-extractor names (li, loginov, cv, sbert, codet5).")
     ] = "li",
@@ -247,7 +247,7 @@ def submit(
     if not dry_run:
         _check_venv()
 
-    cells = enumerate_cells(dataset, suite, pipelines, extractors)
+    cells = enumerate_cells(dataset, suite, methods, extractors)
     # An explicit run_id is honoured as-is; an auto-generated one starts as a timestamp so we
     # have a directory to stage manifests/scripts in, then gets renamed to date-<jobid> once
     # sbatch hands back the first array's id (the id doesn't exist until after submission).
@@ -260,8 +260,8 @@ def submit(
     # Pre-create the MLflow parents once, serially, so concurrent array tasks reuse them
     # instead of racing on find-or-create and spawning duplicate parents.
     if track and setup_mlflow(dataset):
-        for pipeline, extractor in {(c.pipeline, c.extractor) for c in cells}:
-            name, tags = parent_run_spec(FAMILIES[dataset], pipeline, extractor)
+        for method, extractor in {(c.method, c.extractor) for c in cells}:
+            name, tags = parent_run_spec(FAMILIES[dataset], method, extractor)
             ensure_parent_run(tags, name)
 
     buckets: dict[str, list[Cell]] = {}

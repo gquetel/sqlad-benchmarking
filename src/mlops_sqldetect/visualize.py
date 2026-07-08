@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 from sklearn.metrics import auc, precision_recall_curve, roc_curve
 
 from mlops_sqldetect.features import EXTRACTOR_LABELS
-from mlops_sqldetect.model import PIPELINE_LABELS
+from mlops_sqldetect.model import METHOD_LABELS
 
 # Disable log clutter because of kaleido
 for _name in ("kaleido", "choreographer", "logistro", "browser_proc"):
@@ -24,10 +24,10 @@ for _name in ("kaleido", "choreographer", "logistro", "browser_proc"):
 
 PAPER_FONT = "CMU Serif"
 
-# Combined-figure styling: extractor sets the colour, pipeline sets the dash so a
-# (pipeline, extractor) cell is identifiable from either axis of comparison.
+# Combined-figure styling: extractor sets the colour, method sets the dash so a
+# (method, extractor) cell is identifiable from either axis of comparison.
 EXTRACTOR_COLORS = {"li": "#ffd54f", "sbert": "#7E57C2", "cv": "#6490f6", "loginov": "#26a69a", "codet5": "#ef5350"}
-PIPELINE_DASHES = {"ae": "solid", "lof": "dash", "ocsvm": "dot"}
+METHOD_DASHES = {"ae": "solid", "lof": "dash", "ocsvm": "dot"}
 
 
 def dump_curve_points(labels: np.ndarray, scores: np.ndarray, out_dir: Path, stem: str) -> tuple[Path, Path]:
@@ -80,24 +80,24 @@ def plot_pr_curve(labels: np.ndarray, scores: np.ndarray, name: str, out_path: P
 
 @dataclass(frozen=True)
 class Curve:
-    """One cell's persisted ROC + PR points, paired with its (pipeline, extractor)."""
+    """One cell's persisted ROC + PR points, paired with its (method, extractor)."""
 
-    pipeline: str
+    method: str
     extractor: str
     roc: pd.DataFrame  # columns: fpr, tpr, threshold
     pr: pd.DataFrame  # columns: precision, recall, threshold
 
     def label(self, metric: str, value: float) -> str:
-        pipe = PIPELINE_LABELS.get(self.pipeline, self.pipeline)
+        pipe = METHOD_LABELS.get(self.method, self.method)
         feat = EXTRACTOR_LABELS.get(self.extractor, self.extractor)
         return f"{pipe} + {feat} ({metric}={value:.4f})"
 
     def _line(self) -> dict:
-        return dict(color=EXTRACTOR_COLORS.get(self.extractor), dash=PIPELINE_DASHES.get(self.pipeline))
+        return dict(color=EXTRACTOR_COLORS.get(self.extractor), dash=METHOD_DASHES.get(self.method))
 
 
 def plot_combined_roc(curves: list[Curve], out_path: Path) -> Path:
-    """Overlay every cell's ROC curve onto a single figure (colour=extractor, dash=pipeline)."""
+    """Overlay every cell's ROC curve onto a single figure (colour=extractor, dash=method)."""
     fig = go.Figure()
     for c in curves:
         fpr, tpr = c.roc["fpr"].to_numpy(), c.roc["tpr"].to_numpy()
@@ -138,8 +138,8 @@ def plot_combined_pr(curves: list[Curve], out_path: Path, prevalence: float | No
 # fonts, line weights and colours match the surrounding LaTeX. The document preamble
 # must load pgfplots (e.g. ``\usepackage{pgfplots}\pgfplotsset{compat=1.18}``).
 #
-# Extractor -> pgfplots line style (mirrors PIPELINE_DASHES, but as TikZ dash names).
-PGF_PIPELINE_STYLES = {"ae": "solid", "lof": "dashed", "ocsvm": "dotted"}
+# Extractor -> pgfplots line style (mirrors METHOD_DASHES, but as TikZ dash names).
+PGF_METHOD_STYLES = {"ae": "solid", "lof": "dashed", "ocsvm": "dotted"}
 
 # ROC/PR curves carry hundreds-to-thousands of points; inlining all of them per curve
 # would bloat the .tex and slow LaTeX to a crawl. Thin each curve to this many points
@@ -190,7 +190,7 @@ def _tikz_figure(curves: list[Curve], out_path: Path, *, metric: str, xlabel: st
             x, y = c.pr["recall"].to_numpy(), c.pr["precision"].to_numpy()
         area = auc(x, y)
         xs, ys = _downsample(x, y)
-        style = f"{_tikz_color_name(c.extractor)}, {PGF_PIPELINE_STYLES.get(c.pipeline, 'solid')}, line width=1pt"
+        style = f"{_tikz_color_name(c.extractor)}, {PGF_METHOD_STYLES.get(c.method, 'solid')}, line width=1pt"
         plot_lines.append(f"      \\addplot[{style}] coordinates {{{_pgf_coords(xs, ys)}}};")
         legend_lines.append(f"      \\addlegendentry{{{c.label(metric, area)}}}")
 
@@ -203,7 +203,7 @@ def _tikz_figure(curves: list[Curve], out_path: Path, *, metric: str, xlabel: st
         "        label style={font=\\small},\n"
         "        grid=both, grid style={dotted},\n"
         "        legend cell align=left,\n"
-        # One column: 16 entries of "Pipeline + Extractor (AUC=x.xxxx)" are too wide to
+        # One column: 16 entries of "Method + Extractor (AUC=x.xxxx)" are too wide to
         # tile two-across inside a half-\textwidth subfigure without overrunning the margin.
         "        legend style={font=\\tiny, at={(0.5,-0.20)}, anchor=north, legend columns=1,\n"
         "          /tikz/every even column/.append style={column sep=0.6em}},"

@@ -1,4 +1,4 @@
-"""Dataset loading for the SQL injection detection pipelines.
+"""Dataset loading for the SQL injection detection methods.
 
 Expected CSV schema: a ``full_query`` column (raw SQL string) and a ``label``
 column (``0`` for normal samples, ``1`` for SQLi attacks). Optional columns such

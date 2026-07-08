@@ -1,13 +1,13 @@
 """Run the same-domain concept-drift protocol over the Superviz26 domains.
 
-For each (domain, pipeline, extractor) cell the detector is trained *once* on the
+For each (domain, method, extractor) cell the detector is trained *once* on the
 benign origin (S1) train rows, the decision threshold is calibrated on a held-out
 slice of those normals at ``--target-fpr``, and the fitted model is then scored on
 two test sets: the origin S1 test set (reference) and the held-out shifted S2 test
 set (post-drift). Drift robustness is the AUROC drop ``delta = auroc_s1 - auroc_s2``.
 One row per cell is appended to ``reports/superviz26-drift_results.csv`` (or a
 per-cell file under ``reports/superviz26-drift/cells/`` for single-scenario runs),
-and the per-domain rows are averaged downstream to obtain the per-pipeline table.
+and the per-domain rows are averaged downstream to obtain the per-method table.
 
 This mirrors :mod:`mlops_sqldetect.evaluate_suite` but evaluates two test sets per
 fit instead of one; the SLURM runner dispatches here when the dataset family's
@@ -43,7 +43,7 @@ from mlops_sqldetect.evaluate_suite import (
 )
 from mlops_sqldetect.features import EXTRACTOR_LABELS
 from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
-from mlops_sqldetect.model import PIPELINE_LABELS, AEDetector, PipelineName, build_pipeline
+from mlops_sqldetect.model import METHOD_LABELS, AEDetector, MethodName, build_method
 from mlops_sqldetect.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
 from mlops_sqldetect.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
 
@@ -54,11 +54,11 @@ DATASET = "superviz26-drift"
 
 @dataclass
 class DriftResultRow:
-    """One row of the concept-drift results table: a single (domain, pipeline, extractor)."""
+    """One row of the concept-drift results table: a single (domain, method, extractor)."""
 
     dataset: str
     domain: str
-    pipeline: str
+    method: str
     extractor: str
     n_train: int
     n_test_s1: int
@@ -121,7 +121,7 @@ def _evaluate_one_set(
 def _run_one(
     family: DatasetFamily,
     domain: Superviz26Drift,
-    pipeline: PipelineName,
+    method: MethodName,
     extractor: str,
     data_root: Path,
     model_dir: Path,
@@ -135,7 +135,7 @@ def _run_one(
 ) -> DriftResultRow:
     """Train one cell on the origin (S1) normals and evaluate it on S1 and the shifted (S2) test set."""
     logger.info(
-        f"=== {PIPELINE_LABELS.get(pipeline, pipeline)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
+        f"=== {METHOD_LABELS.get(method, method)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
         f"on concept-drift/{domain.value} ==="
     )
     origin_train, origin_test, shifted_test = load_drift(domain, root=data_root, limit=limit, seed=seed)
@@ -150,7 +150,7 @@ def _run_one(
     )
 
     run_type = "smoke-run" if limit is not None else "full-run"
-    model = build_pipeline(pipeline, extractor, cache=cache, cache_dir=cache_dir)
+    model = build_method(method, extractor, cache=cache, cache_dir=cache_dir)
     run_name = f"{domain.value}#{time.strftime('%Y%m%d-%H%M%S')}"
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
@@ -166,7 +166,7 @@ def _run_one(
             )
             mlflow.set_tags(
                 {
-                    "decision_engine": pipeline,
+                    "decision_engine": method,
                     "dataset": data_root.name,
                     "feature_extractor": extractor,
                     "domain": domain.value,
@@ -208,7 +208,7 @@ def _run_one(
         scores_s2 = _score_with_insider_mask(model, shifted_test, capture_insider)
         score_s = time.perf_counter() - t0
 
-        stem = f"{pipeline}_{extractor}_{family.name}_{domain.value}"
+        stem = f"{method}_{extractor}_{family.name}_{domain.value}"
         m_s1, rpa_s1, artifacts_s1 = _evaluate_one_set(
             origin_test,
             scores_s1,
@@ -226,13 +226,13 @@ def _run_one(
             model_dir=model_dir,
         )
 
-        model_path = model_dir / _model_filename(family.name, pipeline, extractor, domain)
+        model_path = model_dir / _model_filename(family.name, method, extractor, domain)
         model.save(model_path)
 
         row = DriftResultRow(
             dataset=family.name,
             domain=domain.value,
-            pipeline=pipeline,
+            method=method,
             extractor=extractor,
             n_train=int(len(df_fit)),
             n_test_s1=int(len(origin_test)),
@@ -299,7 +299,7 @@ def evaluate_drift(
     scenario: Annotated[
         str | None, typer.Option(help="Run a single domain (a, b, c, d); overrides --suite. Used by the SLURM runner.")
     ] = None,
-    pipelines: Annotated[str, typer.Option(help="Comma-separated decision-head names.")] = "ocsvm,lof,ae",
+    methods: Annotated[str, typer.Option(help="Comma-separated decision-head names.")] = "ocsvm,lof,ae",
     extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names.")] = "li",
     data_root: Annotated[
         Path | None,
@@ -325,18 +325,18 @@ def evaluate_drift(
         Path | None, typer.Option(help="Feature cache directory (default: $SQLDETECT_CACHE_DIR or data/processed).")
     ] = None,
 ) -> pd.DataFrame:
-    """Run the concept-drift grid and append one (domain, pipeline, extractor) row per cell to ``report``."""
+    """Run the concept-drift grid and append one (domain, method, extractor) row per cell to ``report``."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if dataset not in FAMILIES or FAMILIES[dataset].protocol != "drift":
         raise typer.BadParameter(f"--dataset must be a drift family (protocol='drift'); got {dataset!r}")
-    family, domains, requested_pipelines, requested_extractors = _validate_grid(
-        dataset, suite, pipelines, extractors, scenario
+    family, domains, requested_methods, requested_extractors = _validate_grid(
+        dataset, suite, methods, extractors, scenario
     )
 
     data_root = data_root or family.default_root()
     if report is None:
         report = (
-            Path(f"reports/{dataset}/cells/{requested_pipelines[0]}_{requested_extractors[0]}_{scenario}.csv")
+            Path(f"reports/{dataset}/cells/{requested_methods[0]}_{requested_extractors[0]}_{scenario}.csv")
             if scenario is not None
             else Path(f"reports/{dataset}_results.csv")
         )
@@ -349,9 +349,9 @@ def evaluate_drift(
     track_enabled = track and setup_mlflow(dataset)
 
     rows: list[DriftResultRow] = []
-    for pipeline in requested_pipelines:
+    for method in requested_methods:
         for extractor in requested_extractors:
-            parent_name, parent_tags = parent_run_spec(family, pipeline, extractor)
+            parent_name, parent_tags = parent_run_spec(family, method, extractor)
             parent_ctx = (
                 mlflow.start_run(run_id=ensure_parent_run(parent_tags, parent_name)) if track_enabled else nullcontext()
             )
@@ -360,7 +360,7 @@ def evaluate_drift(
                     row = _run_one(
                         family,
                         domain,  # type: ignore[arg-type]
-                        pipeline,  # type: ignore[arg-type]
+                        method,  # type: ignore[arg-type]
                         extractor,
                         data_root,
                         model_dir,

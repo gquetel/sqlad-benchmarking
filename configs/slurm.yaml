@@ -31,12 +31,12 @@ gpu-long:
     V100-32GB: 32
     V100-16GB: 16
 
-# Minimum per-GPU VRAM per cell, keyed by extractor or pipeline:extractor (the latter wins)
+# Minimum per-GPU VRAM per cell, keyed by extractor or engine:extractor (the latter wins)
 min_vram_gb:
   default: 0
   codet5: 24
 
 # Cells that need the longer wall-time reservation (the `gpu-long` block instead of `gpu`),
-# keyed by extractor or pipeline:extractor. The heavier full-split data pushes these past 12h.
+# keyed by extractor or engine:extractor. The heavier full-split data pushes these past 12h.
 long_running:
   - ocsvm:sbert
