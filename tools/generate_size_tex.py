@@ -132,7 +132,7 @@ def load_aurocs(experiment: str) -> dict[tuple[str, str], float]:
             continue
         try:
             value = float(auroc)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         if not math.isnan(value):
             out[(extractor, scenario)] = value
@@ -161,8 +161,9 @@ def render_table(spec: SizeSpec, full: dict[tuple[str, str], float], big: dict[t
     out = [
         r"\begin{table}[htb]",
         r"  \centering",
-        r"  \footnotesize",
-        rf"  \begin{{tabular*}}{{\linewidth}}{{@{{\extracolsep{{\fill}}}} {colspec} }}",
+        # Natural-width table, only shrunk if it would overflow \linewidth (never stretched).
+        r"  \resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%",
+        rf"  \begin{{tabular}}{{{colspec}}}",
         r"    \hline",
         rf"{header_pad}\multicolumn{{3}}{{c}}{{\textbf{{AUROC}}}} \\",
         rf"    \cline{{{span_start}-{span_start + 2}}}",
@@ -182,7 +183,7 @@ def render_table(spec: SizeSpec, full: dict[tuple[str, str], float], big: dict[t
     if not has_regimes:
         out.append(r"    \hline")
     out += [
-        r"  \end{tabular*}",
+        r"  \end{tabular}}",
         rf"  \caption{{{spec.caption}}}",
         rf"  \label{{{spec.label}}}",
         r"\end{table}",
