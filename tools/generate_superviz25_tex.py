@@ -9,15 +9,15 @@ experiment:
     ``aggregate_curves`` command;
   * ``superviz25-metrics.tex`` (\label{tab:sup25-metrics}): precision, recall, F1, FPR,
     AUPRC and AUROC per method; and
-  * ``superviz25-recall.tex`` (\label{tab:sup25-recall}): recall per attack technique.
+  * ``superviz25-recall.tex`` (\label{tab:sup25-recall}): per-technique recall heatmap.
 
 The downloaded curve CSVs (and, with ``--rasters``, the PNG/PDF figures) go to
 ``--cache-dir`` (a throwaway temp dir by default), so ``--out-dir`` stays ``.tex``-only.
 
 MLflow is the single source of truth: the latest finished full-run per
-``(feature_extractor, decision_engine)`` cell wins. Missing cells render as ``--`` in the
-tables and are dropped from the figures, so re-running after new runs finish (e.g. the
-Loginov / CodeT5+ cells) refreshes every artefact.
+``(feature_extractor, decision_engine)`` cell wins. Cells with no finished run yet render
+as empty fields in the tables and are dropped from the figures, so re-running after new
+runs finish (e.g. a pending Secure-BERT / LOF cell) refreshes every artefact.
 
 Usage:
     python -m tools.generate_superviz25_tex
@@ -44,10 +44,9 @@ from mlops_sqldetect.features import EXTRACTORS
 from mlops_sqldetect.tracking import setup_mlflow
 from mlops_sqldetect.visualize import (
     Curve,
+    plot_combined_curves_tikz,
     plot_combined_pr,
-    plot_combined_pr_tikz,
     plot_combined_roc,
-    plot_combined_roc_tikz,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,31 +80,63 @@ METHODS: list[tuple[str, str, str]] = [
     ("codet5", "ocsvm", "CodeT5+ + OCSVM"),
 ]
 
+# Thesis-facing extractor labels for the combined figure legend, taken from the same
+# paper labels as the tables (the "<Extractor> + <Engine>" prefix). This keeps the
+# figure legend spelling ("Secure-BERT") consistent with the metrics table instead of
+# the package's canonical EXTRACTOR_LABELS ("SecureBERT").
+PAPER_EXTRACTOR_LABELS: dict[str, str] = {ext: label.split(" + ")[0] for ext, _, label in METHODS}
+
 # Per-technique recall columns: (MLflow metric suffix, column header). The metric key is
 # ``recall_<suffix>`` (see evaluate_suite._mlflow_key). Insider attacks are forced to false
 # negatives during evaluation, so their recall is 0 wherever a run exists.
+# Headers are abbreviated to keep the heatmap within \linewidth; the metric key stays the
+# full technique name (recall_<suffix>).
 TECHNIQUES: list[tuple[str, str]] = [
     ("union", "Union"),
-    ("boolean", "Boolean"),
-    ("stacked", "Stacked"),
+    ("boolean", "Bool."),
+    ("stacked", "Stack."),
     ("error", "Error"),
     ("time", "Time"),
     ("inline", "Inline"),
     ("insider", "Insider"),
 ]
 
-# Metric columns of the performance table: (internal key, column header).
-METRIC_COLUMNS: list[tuple[str, str]] = [
-    ("precision", "Precision"),
-    ("recall", "Recall"),
-    ("f1", "F1"),
-    ("fpr", "FPR"),
-    ("auprc", "AUPRC"),
-    ("auroc", "AUROC"),
+# Metric columns of the performance table: (internal key, siunitx table-format, header).
+# Percentages carry one decimal, curve scores three; the unit lives in the header so the
+# S columns stay purely numeric and decimal-aligned.
+METRIC_COLUMNS: list[tuple[str, str, str]] = [
+    ("precision", "2.1", r"P (\%)"),
+    ("recall", "2.1", r"R (\%)"),
+    ("f1", "2.1", r"F1 (\%)"),
+    ("fpr", "1.2", r"FPR (\%)"),
+    ("auprc", "1.3", "AUPRC"),
+    ("auroc", "1.3", "AUROC"),
 ]
 
-METRICS_CAPTION = "Performance metrics for studied novelty detection methods."
-RECALL_CAPTION = "Recall score per technique for studied detection methods."
+# Outcome columns eligible for the per-column best-value bold. FPR is a controlled protocol
+# target (~0.1% FPR), not an outcome to maximise, so it is deliberately never bolded.
+BOLD_KEYS: tuple[str, ...] = ("precision", "recall", "f1", "auprc", "auroc")
+
+# Paper-facing row labels for the split Embedding | Detector columns. Embeddings use the
+# thesis spelling ("Li et al.", "Secure-BERT"); the combined-figure legend keeps the terser
+# PAPER_EXTRACTOR_LABELS ("Li") since a plot legend has less room.
+EMBEDDING_LABELS: dict[str, str] = {
+    "cv": "CountVectorizer",
+    "li": "Li et al.",
+    "loginov": "Loginov",
+    "sbert": "Secure-BERT",
+    "codet5": "CodeT5+",
+}
+DETECTOR_LABELS: dict[str, str] = {"ae": "AE", "lof": "LOF", "ocsvm": "OCSVM"}
+
+METRICS_CAPTION = (
+    "Performance metrics for studied novelty detection methods. Best value per outcome "
+    "column in bold."
+)
+RECALL_CAPTION = (
+    r"Per-technique recall (\%) heatmap for studied detection methods. Cell shading "
+    r"encodes recall from 0\% (white) to 100\% (green)."
+)
 
 Metrics = dict[str, float | None]
 Results = dict[tuple[str, str], Metrics]
@@ -170,78 +201,145 @@ def _warn_missing(data: Results) -> None:
 # --- table rendering ---------------------------------------------------------
 
 
-def _fmt_pct(v: float | None) -> str:
-    return "--" if v is None else rf"{v * 100:.2f}\%"
+def _fmt_metric(v: float | None, key: str) -> str:
+    """One metrics-table value: 1-decimal % (precision/recall/f1), 2-decimal % (fpr) or
+    3-decimal score (auprc/auroc). ``None`` -> empty cell (run not available yet)."""
+    if v is None:
+        return ""
+    if key in ("auprc", "auroc"):
+        return f"{v:.3f}"
+    if key == "fpr":
+        return f"{v * 100:.2f}"
+    return f"{v * 100:.1f}"
 
 
-def _fmt_score(v: float | None) -> str:
-    return "--" if v is None else f"{v:.4f}"
+def _fmt_heat(v: float | None) -> str:
+    r"""Recall as a heatmap cell ``\hc{p}`` (integer percent). ``None`` -> empty cell."""
+    return "" if v is None else rf"\hc{{{round(v * 100)}}}"
 
 
-# Rows share the METHODS order, so a group ends wherever the next method switches
-# feature extractor; those rows get 20% extra vertical space to separate the groups.
-GROUP_END_ROWS = frozenset(i for i in range(len(METHODS) - 1) if METHODS[i][0] != METHODS[i + 1][0])
-GROUP_VSPACE = r"0.2\normalbaselineskip"
+# Source-padding widths so the generated .tex stays column-aligned and diff-friendly.
+_METRIC_WIDTH = {"precision": 4, "recall": 4, "f1": 4, "fpr": 4, "auprc": 5, "auroc": 5}
+_HEAT_WIDTH = 7
+_DETECTOR_WIDTH = 5
 
 
-def _render_table(header: list[str], rows: list[list[str]], caption: str, label: str) -> str:
-    """Render a ``Model | <cols>`` table, space-padding cells so the source stays readable."""
-    ncols = len(header) - 1
-    label_w = max(len(r[0]) for r in rows)
-    cell_w = max(len(c) for r in rows for c in r[1:])
+def _extractor_groups() -> list[tuple[str, list[str]]]:
+    """Group METHODS into ``(extractor, [engine, ...])`` runs, preserving display order."""
+    groups: list[tuple[str, list[str]]] = []
+    for extractor, engine, _ in METHODS:
+        if not groups or groups[-1][0] != extractor:
+            groups.append((extractor, []))
+        groups[-1][1].append(engine)
+    return groups
 
-    def body_line(cells: list[str], i: int) -> str:
-        first = cells[0].ljust(label_w)
-        rest = " & ".join(c.rjust(cell_w) for c in cells[1:])
-        end = rf" \\[{GROUP_VSPACE}]" if i in GROUP_END_ROWS else r" \\"
-        return f"    {first} & {rest}{end}"
 
-    # Header is left unpadded (like the hand-written tables); only body cells are aligned.
-    header_line = "    " + " & ".join(rf"\bfseries {h}" for h in header) + r" \\"
-    out = [
-        r"\begin{table}[!htb]",
-        r"  \centering",
-        rf"  \begin{{tabular*}}{{\linewidth}}{{@{{\extracolsep{{\fill}}}} c|{'c' * ncols} }}",
-        r"    \hline",
-        header_line,
-        r"    \hline",
-    ]
-    out += [body_line(r, i) for i, r in enumerate(rows)]
-    out += [
-        r"    \hline",
-        r"  \end{tabular*}",
-        rf"  \caption{{{caption}}}",
-        rf"  \label{{{label}}}",
-        r"\end{table}",
-    ]
-    return "\n".join(out)
+def _column_best(data: Results, key: str) -> float | None:
+    """Best (max) present value of ``key`` across all cells, or None if none present."""
+    vals = [c[key] for c in data.values() if c.get(key) is not None]
+    return max(vals) if vals else None
+
+
+def _header_row(headers: list[str]) -> str:
+    """`\\toprule` header row: bold Embedding/Detector labels then the bold column headers."""
+    cols = " & ".join(rf"{{\bfseries {h}}}" for h in headers)
+    return rf"    {{\bfseries Embedding}} & {{\bfseries Detector}} & {cols} \\"
+
+
+def _group_rows(row_cells) -> list[str]:
+    """Emit the multirow-grouped body: one ``\\multirow`` line per embedding then one line
+    per detector. ``row_cells(extractor, engine)`` returns that row's already-formatted
+    cells (from the Detector column onward)."""
+    lines: list[str] = []
+    for gi, (extractor, engines) in enumerate(_extractor_groups()):
+        if gi:
+            lines.append(r"    \midrule")
+        lines.append(rf"    \multirow{{{len(engines)}}}{{*}}{{{EMBEDDING_LABELS[extractor]}}}")
+        for engine in engines:
+            detector = DETECTOR_LABELS[engine].ljust(_DETECTOR_WIDTH)
+            lines.append(rf"      & {detector} & {row_cells(extractor, engine)} \\")
+    return lines
 
 
 def render_metrics_table(data: Results) -> str:
-    """Precision/Recall/F1/FPR/AUPRC/AUROC per method (tab:sup25-metrics)."""
-    header = ["Model", *(h for _, h in METRIC_COLUMNS)]
-    rows: list[list[str]] = []
-    for extractor, engine, label in METHODS:
+    """Precision/Recall/F1/FPR/AUPRC/AUROC per method (tab:sup25-metrics).
+
+    Embedding | Detector split via \\multirow, siunitx S columns, best value per outcome
+    column in bold (FPR excluded), missing runs left as empty cells.
+    """
+    best = {k: _column_best(data, k) for k in BOLD_KEYS}
+    colspec = "@{}l l " + " ".join(f"S[table-format={tf}]" for _, tf, _ in METRIC_COLUMNS) + "@{}"
+
+    def row_cells(extractor: str, engine: str) -> str:
         cell = data.get((extractor, engine))
-        row = [label]
-        for key, _ in METRIC_COLUMNS:
+        out: list[str] = []
+        for key, _, _ in METRIC_COLUMNS:
             v = None if cell is None else cell[key]
-            row.append(_fmt_score(v) if key in ("auprc", "auroc") else _fmt_pct(v))
-        rows.append(row)
-    return _render_table(header, rows, METRICS_CAPTION, "tab:sup25-metrics")
+            s = _fmt_metric(v, key)
+            if not s:
+                out.append("")
+            elif key in best and best[key] is not None and v == best[key]:
+                out.append(r"\bfseries " + s)  # best cells left unpadded, like the header
+            else:
+                out.append(s.rjust(_METRIC_WIDTH[key]))
+        return " & ".join(out)
+
+    lines = [
+        r"\begin{table}[!htb]",
+        r"  \centering",
+        r"  % Embedding | Detector splits the former X + Y label; \multirow groups the",
+        r"  % detectors under each embedding. S columns align on the decimal point. Bold marks",
+        r"  % the best value per outcome column; FPR is a controlled protocol target (~0.1\%),",
+        r"  % not an outcome, so it is left unbolded. Missing runs render as empty cells.",
+        rf"  \begin{{tabular}}{{{colspec}}}",
+        r"    \toprule",
+        _header_row([h for _, _, h in METRIC_COLUMNS]),
+        r"    \midrule",
+        *_group_rows(row_cells),
+        r"    \bottomrule",
+        r"  \end{tabular}",
+        rf"  \caption{{{METRICS_CAPTION}}}",
+        r"  \label{tab:sup25-metrics}",
+        r"\end{table}",
+    ]
+    return "\n".join(lines)
 
 
 def render_recall_table(data: Results) -> str:
-    """Per-technique recall per method (tab:sup25-recall)."""
-    header = ["Model", *(h for _, h in TECHNIQUES)]
-    rows: list[list[str]] = []
-    for extractor, engine, label in METHODS:
+    """Per-technique recall heatmap per method (tab:sup25-recall).
+
+    Same Embedding | Detector layout; each cell is a \\hc{}-shaded recall value, missing
+    runs left empty. The all-zero Insider column is kept intentionally (see module docs).
+    """
+
+    def row_cells(extractor: str, engine: str) -> str:
         cell = data.get((extractor, engine))
-        row = [label]
-        for suffix, _ in TECHNIQUES:
-            row.append(_fmt_pct(None if cell is None else cell[f"recall_{suffix}"]))
-        rows.append(row)
-    return _render_table(header, rows, RECALL_CAPTION, "tab:sup25-recall")
+        cells = (
+            _fmt_heat(None if cell is None else cell[f"recall_{suffix}"]).ljust(_HEAT_WIDTH)
+            for suffix, _ in TECHNIQUES
+        )
+        return " & ".join(cells).rstrip()
+
+    lines = [
+        r"\begin{table}[!htb]",
+        r"  \centering",
+        r"  % Heatmap: \hc{v} shades the cell by recall v (integer %, 0=white..100=green) and",
+        r"  % prints v (see \hc / heat in head/colors.tex). Missing runs render as empty cells.",
+        r"  % The Insider column is structurally 0 -- insider traffic never reaches the",
+        r"  % detector's observation point -- kept to make that explicit.",
+        r"  \setlength{\tabcolsep}{5pt}",
+        r"  \begin{tabular}{@{}l l *{7}{c}@{}}",
+        r"    \toprule",
+        _header_row([h for _, h in TECHNIQUES]),
+        r"    \midrule",
+        *_group_rows(row_cells),
+        r"    \bottomrule",
+        r"  \end{tabular}",
+        rf"  \caption{{{RECALL_CAPTION}}}",
+        r"  \label{tab:sup25-recall}",
+        r"\end{table}",
+    ]
+    return "\n".join(lines)
 
 
 # --- combined curve figures (folded in from the former aggregate_curves) -----
@@ -329,9 +427,10 @@ def generate_curves(out_dir: Path, cache_dir: Path, max_workers: int, rasters: b
     # there equals the test-set prevalence -- the PR random-classifier baseline.
     pr0 = curves[0].pr
     prevalence = float(pr0.loc[pr0["recall"].idxmax(), "precision"])
-    roc_tex = plot_combined_roc_tikz(curves, out_dir / f"{base}_roc.tex")
-    pr_tex = plot_combined_pr_tikz(curves, out_dir / f"{base}_auprc.tex", prevalence=prevalence)
-    logger.info(f"Wrote {len(curves)} curves as pgfplots figures to {roc_tex} and {pr_tex}")
+    curves_tex = plot_combined_curves_tikz(
+        curves, out_dir / f"{base}_curves.tex", prevalence=prevalence, extractor_labels=PAPER_EXTRACTOR_LABELS
+    )
+    logger.info(f"Wrote {len(curves)} curves as a combined pgfplots figure to {curves_tex}")
     if rasters:
         roc_path = plot_combined_roc(curves, cache_dir / f"{base}_roc.png")
         pr_path = plot_combined_pr(curves, cache_dir / f"{base}_auprc.png", prevalence=prevalence)
