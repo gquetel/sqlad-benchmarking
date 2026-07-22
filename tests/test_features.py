@@ -28,8 +28,21 @@ def _frame() -> pd.DataFrame:
     )
 
 
-def test_registry_exposes_all_three_extractors():
-    assert set(EXTRACTORS) == {"li", "cv", "sbert", "loginov", "codet5"}
+def test_registry_exposes_all_extractors():
+    assert set(EXTRACTORS) == {
+        "li",
+        "cv",
+        "sbert",
+        "loginov",
+        "codet5",
+        "gaur-expert",
+        "gaur-chatgpt",
+        "gaur-claude",
+        "gaur-llama",
+        "gaur-mistral",
+        "gaur-gpt-oss",
+        "gaur-ruleid",
+    }
 
 
 def test_build_extractor_unknown_name_raises():

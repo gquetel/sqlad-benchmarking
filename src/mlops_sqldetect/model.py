@@ -42,13 +42,14 @@ METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoenco
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    CountVectorizer counts and SecureBERT/CodeT5+ embeddings are fed to OCSVM/LOF
-    unscaled (an identity transform): word counts go in raw, SecureBERT's
-    pooler_output is tanh-bounded to [-1, 1], and CodeT5+ embeddings are
-    L2-normalized (the references apply no scaler). Li dense features use
-    StandardScaler, where centring and unit variance help.
+    CountVectorizer and GAUR's ruleid counts are fed to OCSVM/LOF unscaled (an
+    identity transform): both are sparse, and StandardScaler's mean-centring does
+    not support sparse input. SecureBERT/CodeT5+ embeddings are also left unscaled
+    (SecureBERT's pooler_output is tanh-bounded to [-1, 1] and CodeT5+ embeddings
+    are L2-normalized; the references apply no scaler). Li dense features and the
+    other GAUR modes use StandardScaler, where centring and unit variance help.
     """
-    return FunctionTransformer() if extractor in ("cv", "sbert", "codet5") else StandardScaler()
+    return FunctionTransformer() if extractor in ("cv", "sbert", "codet5", "gaur-ruleid") else StandardScaler()
 
 
 # ----- OCSVM -----------------------------------------------------------------
@@ -499,7 +500,8 @@ def build_method(
         # Raw word counts (cv) and the SecureBERT/CodeT5+ embeddings have a wider
         # spread than Li features, so the QP solver needs a higher iteration budget
         # to converge; Li keeps the default.
-        config = OCSVMConfig(max_iter=10000) if extractor in ("cv", "sbert", "codet5") else OCSVMConfig()
+        # gaur-ruleid's one-hot rule-identifier counts are as wide as cv's vocabulary.
+        config = OCSVMConfig(max_iter=10000) if extractor in ("cv", "sbert", "codet5", "gaur-ruleid") else OCSVMConfig()
         return OCSVMDetector(
             config=config, extractor=maybe_wrap(extractor_instance, cdir), scaler=_scaler_for(extractor)
         )
@@ -528,6 +530,16 @@ def build_method(
                 extractor=maybe_wrap(extractor_instance, cdir),
                 scaler=FunctionTransformer(),
                 output_activation="tanh",
+            )
+        if extractor == "gaur-ruleid":
+            # Same shape as cv: raw, unbounded, non-negative rule-identifier counts
+            # in a sparse matrix, so no scaler (an identity transform) and a ReLU
+            # output to reconstruct them.
+            return AEDetector(
+                config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=4096),
+                extractor=maybe_wrap(extractor_instance, cdir),
+                scaler=FunctionTransformer(),
+                output_activation="relu",
             )
         # Li dense features are non-negative, so a sigmoid output needs inputs in
         # [0, 1]: MaxAbsScaler maps the feature matrix into that range.

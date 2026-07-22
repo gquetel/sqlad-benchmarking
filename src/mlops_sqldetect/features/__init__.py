@@ -9,6 +9,7 @@ in use. To add a new extractor: implement the transformer, then register it here
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Callable
 
@@ -17,6 +18,7 @@ from sklearn.base import TransformerMixin
 from mlops_sqldetect.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
 from mlops_sqldetect.features.codet5 import CodeT5Extractor
 from mlops_sqldetect.features.countvect import CountVectorizerExtractor
+from mlops_sqldetect.features.gaur import GaurExtractor
 from mlops_sqldetect.features.li import LiExtractor, extract_li_features
 from mlops_sqldetect.features.loginov import LoginovExtractor, extract_loginov_features
 from mlops_sqldetect.features.securebert import SecureBertExtractor
@@ -28,19 +30,33 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "sbert": SecureBertExtractor,
     "loginov": LoginovExtractor,
     "codet5": CodeT5Extractor,
+    "gaur-expert": functools.partial(GaurExtractor, mode="expert"),
+    "gaur-chatgpt": functools.partial(GaurExtractor, mode="chatgpt"),
+    "gaur-claude": functools.partial(GaurExtractor, mode="claude"),
+    "gaur-llama": functools.partial(GaurExtractor, mode="llama"),
+    "gaur-mistral": functools.partial(GaurExtractor, mode="mistral"),
+    "gaur-gpt-oss": functools.partial(GaurExtractor, mode="gpt-oss"),
+    "gaur-ruleid": functools.partial(GaurExtractor, mode="ruleid"),
 }
 
 # Default extractor used when a caller does not specify one.
 DEFAULT_EXTRACTOR = "li"
 
 # Human-readable labels for logs and MLflow run names. Acronyms stay uppercase;
-# labels mirror their reference works (Li et al., SecureBERT).
+# labels mirror their reference works (Li et al., SecureBERT, GAUR).
 EXTRACTOR_LABELS: dict[str, str] = {
     "li": "Li",
     "cv": "CountVectorizer",
     "sbert": "SecureBERT",
     "loginov": "Loginov",
     "codet5": "CodeT5+",
+    "gaur-expert": "GAUR (Expert)",
+    "gaur-chatgpt": "GAUR (ChatGPT)",
+    "gaur-claude": "GAUR (Claude)",
+    "gaur-llama": "GAUR (Llama)",
+    "gaur-mistral": "GAUR (Mistral)",
+    "gaur-gpt-oss": "GAUR (GPT-OSS)",
+    "gaur-ruleid": "GAUR (RuleID)",
 }
 
 
@@ -65,6 +81,7 @@ __all__ = [
     "CachingExtractor",
     "CodeT5Extractor",
     "CountVectorizerExtractor",
+    "GaurExtractor",
     "LiExtractor",
     "LoginovExtractor",
     "SecureBertExtractor",
