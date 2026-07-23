@@ -2,19 +2,15 @@
 
 Trace collection needs a live GAUR-instrumented MySQL server (via ``gaur_sqld``),
 so these tests exercise trace parsing, tag counting, and the extractor's output
-shape/order by monkeypatching ``_collect_traces`` and the keyword regex rather
-than talking to a real server or requiring ``gaur_sqld`` to be installed.
-``test_collect_traces_reindexes_dropped_rows`` covers ``_collect_traces`` itself
-by injecting a fake ``gaur_sqld`` module into ``sys.modules``, since that
-function's lazy ``from gaur_sqld...`` imports would otherwise need the real
-package.
+shape/order by monkeypatching ``_collect_one_trace`` (the per-query collection
+seam) and the keyword regex rather than talking to a real server or requiring
+``gaur_sqld`` to be installed. The checkpoint/resume and never-drop-a-row
+behavior of ``_collect_and_featurize`` itself is covered directly further down.
 """
 
 from __future__ import annotations
 
 import re
-import sys
-import types
 
 import numpy as np
 import pandas as pd
@@ -30,10 +26,6 @@ from mlops_sqldetect.features.gaur import (
     parse_semantic_tree,
 )
 from mlops_sqldetect.features.li import FEATURE_NAMES as LI_FEATURE_NAMES
-
-# Captured before the autouse fixture below replaces gaur._collect_traces, so
-# test_collect_traces_reindexes_dropped_rows can still exercise the real thing.
-_REAL_COLLECT_TRACES = gaur._collect_traces
 
 # A trace with two nodes: one tagged CREATE/USER with a literal, one untagged.
 _SAMPLE_TRACE = "1:2979:100:CREATE:USER:admin|2:15:101::: ||-||edges"
@@ -94,24 +86,33 @@ def _frame() -> pd.DataFrame:
     return pd.DataFrame({"full_query": ["select 1", "create user 'a'@'b' identified by 'x'"]})
 
 
-def _stub_traces(df: pd.DataFrame, trace_type: str) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "n_terminal": 3,
-            "n_nonterminal": 2,
-            "is_syntax_error": 0,
-            "semantic_tree": _SAMPLE_TRACE,
-            "depth": 4,
-            "n_parser_invoc": 1,
-        },
-        index=df.index,
-    )
+def _stub_trace_row() -> dict:
+    return {
+        "n_terminal": 3,
+        "n_nonterminal": 2,
+        "is_syntax_error": 0,
+        "semantic_tree": _SAMPLE_TRACE,
+        "depth": 4,
+        "n_parser_invoc": 1,
+    }
+
+
+def _stub_collect_one(query: str, sqlc, gtc) -> dict:
+    return _stub_trace_row()
 
 
 @pytest.fixture(autouse=True)
-def _stub_gaur_sqld(monkeypatch):
-    """Avoid depending on gaur_sqld/a live server for extractor-level tests."""
-    monkeypatch.setattr(gaur, "_collect_traces", _stub_traces)
+def _stub_gaur_sqld(monkeypatch, tmp_path):
+    """Avoid depending on gaur_sqld/a live server for extractor-level tests.
+
+    Redirects checkpointing to a per-test tmp_path too, so tests never write into
+    the real repo working directory.
+    """
+    monkeypatch.setattr(gaur, "_configure_trace_type", lambda trace_type: None)
+    monkeypatch.setattr(gaur, "_ensure_server", lambda trace_type: None)
+    monkeypatch.setattr(gaur, "_new_connector_and_collector", lambda: (None, None))
+    monkeypatch.setattr(gaur, "_collect_one_trace", _stub_collect_one)
+    monkeypatch.setattr(gaur, "_trace_checkpoint_dir", lambda: tmp_path)
     monkeypatch.setattr(gaur, "_sql_keyword_re", lambda: re.compile(r"\bselect\b", re.IGNORECASE))
 
 
@@ -157,18 +158,15 @@ def test_ruleid_extractor_output_is_sparse_and_matches_dense_counts(monkeypatch)
     in_range_trace = "1:1000:100:CREATE:USER:admin|2:1000:101::: ||-||edges"
     monkeypatch.setattr(
         gaur,
-        "_collect_traces",
-        lambda df, trace_type: pd.DataFrame(
-            {
-                "n_terminal": 3,
-                "n_nonterminal": 2,
-                "is_syntax_error": 0,
-                "semantic_tree": in_range_trace,
-                "depth": 4,
-                "n_parser_invoc": 1,
-            },
-            index=df.index,
-        ),
+        "_collect_one_trace",
+        lambda query, sqlc, gtc: {
+            "n_terminal": 3,
+            "n_nonterminal": 2,
+            "is_syntax_error": 0,
+            "semantic_tree": in_range_trace,
+            "depth": 4,
+            "n_parser_invoc": 1,
+        },
     )
     ext = GaurExtractor(mode="ruleid")
     df = _frame()
@@ -191,58 +189,76 @@ def test_non_ruleid_extractors_stay_dense():
     assert not issparse(matrix)
 
 
-# ----- _collect_traces: reindexing rows get_traces_from_df drops ---------------
+# ----- _collect_and_featurize: never drop a row, checkpoint, resume ------------
 
 
-def test_collect_traces_reindexes_dropped_rows(monkeypatch):
-    """get_traces_from_df drops failed rows; _collect_traces must reinstate them.
+def test_collect_and_featurize_never_drops_a_failed_row(monkeypatch):
+    """A per-query collection failure must not shrink the output below len(query_df).
 
-    Simulates gaur_sqld.utils.traces_collector.get_traces_from_df by injecting a
-    fake gaur_sqld package into sys.modules (the real one isn't a project
-    dependency), returning only the surviving row — indexed as
-    get_traces_from_df itself does, on the original df's index, before it drops
-    failures — so this exercises _collect_traces's own reindex, not a stub of it.
+    Mirrors what get_traces_from_query itself returns on failure (a row of NaNs)
+    for one query; _collect_and_featurize must still emit one feature row per
+    input row, not silently drop it the way get_traces_from_df does.
     """
-    fake_gaur_sqld = types.ModuleType("gaur_sqld")
-    fake_config = types.ModuleType("gaur_sqld.config")
-    fake_config.update_location_mysqlfiles = lambda trace_type: None
-    fake_utils = types.ModuleType("gaur_sqld.utils")
-    fake_traces_collector = types.ModuleType("gaur_sqld.utils.traces_collector")
 
-    df_in = pd.DataFrame({"full_query": ["select 1", "select 2", "select 3"]})
+    def fake_collect_one(query: str, sqlc, gtc) -> dict:
+        if query == "select 2":
+            return {
+                "n_terminal": pd.NA,
+                "n_nonterminal": pd.NA,
+                "is_syntax_error": pd.NA,
+                "semantic_tree": pd.NA,
+                "depth": pd.NA,
+                "n_parser_invoc": pd.NA,
+            }
+        return _stub_trace_row()
 
-    def fake_get_traces_from_df(df: pd.DataFrame) -> pd.DataFrame:
-        assert list(df.columns) == ["full_query"]
-        # Row at original index 1 failed to collect a trace and was dropped;
-        # the survivors keep their original index labels.
-        surviving = df.index.difference([1])
-        return pd.DataFrame(
-            {
-                "n_terminal": 3,
-                "n_nonterminal": 2,
-                "is_syntax_error": 0,
-                "semantic_tree": _SAMPLE_TRACE,
-                "depth": 4,
-                "n_parser_invoc": 1,
-            },
-            index=surviving,
-        )
+    monkeypatch.setattr(gaur, "_collect_one_trace", fake_collect_one)
+    query_df = pd.DataFrame({"full_query": ["select 1", "select 2", "select 3"]})
 
-    fake_traces_collector.get_traces_from_df = fake_get_traces_from_df
-    fake_gaur_sqld.config = fake_config
-    fake_gaur_sqld.utils = fake_utils
-    fake_utils.traces_collector = fake_traces_collector
+    rows = gaur._collect_and_featurize("expert", query_df)
 
-    monkeypatch.setitem(sys.modules, "gaur_sqld", fake_gaur_sqld)
-    monkeypatch.setitem(sys.modules, "gaur_sqld.config", fake_config)
-    monkeypatch.setitem(sys.modules, "gaur_sqld.utils", fake_utils)
-    monkeypatch.setitem(sys.modules, "gaur_sqld.utils.traces_collector", fake_traces_collector)
+    assert len(rows) == len(query_df)
+    # The failed row still yields a (degraded) feature row rather than being dropped.
+    assert rows[1]["is_syntax_error"] == 1.0
+    assert rows[1]["n_terminal"] == 0.0
+    assert rows[0]["is_syntax_error"] == 0.0
 
-    result = _REAL_COLLECT_TRACES(df_in, "expert")
 
-    # Row count matches the input despite the collection failure...
-    assert list(result.index) == list(df_in.index)
-    assert result.loc[0, "semantic_tree"] == _SAMPLE_TRACE
-    assert result.loc[2, "semantic_tree"] == _SAMPLE_TRACE
-    # ...and the dropped row comes back as NaN, not absent.
-    assert pd.isna(result.loc[1, "semantic_tree"])
+def test_collect_and_featurize_checkpoints_and_resumes_after_failure(monkeypatch, tmp_path):
+    """A mid-collection failure checkpoints progress; a rerun resumes from it,
+    only re-collecting the rows not yet covered, and cleans up on success.
+    """
+    monkeypatch.setattr(gaur, "_trace_checkpoint_dir", lambda: tmp_path)
+    query_df = pd.DataFrame({"full_query": [f"select {i}" for i in range(20)]})
+    calls: list[str] = []
+
+    def failing_collect_one(query: str, sqlc, gtc) -> dict:
+        calls.append(query)
+        if len(calls) == 12:
+            raise RuntimeError("simulated connection drop")
+        return _stub_trace_row()
+
+    monkeypatch.setattr(gaur, "_collect_one_trace", failing_collect_one)
+    with pytest.raises(RuntimeError, match="simulated connection drop"):
+        gaur._collect_and_featurize("expert", query_df)
+
+    ckpt_path = gaur._checkpoint_path("expert", query_df)
+    assert ckpt_path.exists()
+    rows_so_far, n_done = gaur._load_checkpoint(ckpt_path)
+    assert 0 < n_done < len(query_df)
+    assert len(rows_so_far) == n_done
+
+    calls.clear()
+
+    def resumed_collect_one(query: str, sqlc, gtc) -> dict:
+        calls.append(query)
+        return _stub_trace_row()
+
+    monkeypatch.setattr(gaur, "_collect_one_trace", resumed_collect_one)
+    result = gaur._collect_and_featurize("expert", query_df)
+
+    assert len(result) == len(query_df)
+    # Only the rows not covered by the checkpoint were re-collected.
+    assert len(calls) == len(query_df) - n_done
+    # Checkpoint is removed once the whole collection succeeds.
+    assert not ckpt_path.exists()

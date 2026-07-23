@@ -1,10 +1,6 @@
 """GAUR feature extractor: parser-instrumentation-derived features for MySQL queries.
 
-GAUR (https://github.com/gquetel/gaur) instruments a Bison grammar so that the
-generated parser emits, for every query, a trace mirroring its parse tree:
-lexical tokens, syntactic node identifiers (``symbkind``), and — where a
-semantic model has been attached to a grammar rule — a semantic tag. This
-module talks to :mod:`gaur_sqld` (https://github.com/gquetel/gaur-sql-detect),
+This module talks to :mod:`gaur_sqld` (https://github.com/gquetel/gaur-sql-detect),
 which drives a GAUR-instrumented MySQL server (auto-provisioned via Nix from
 gaur-instrumented-apps) to collect one trace per query, then turns each trace
 into a fixed-width feature vector.
@@ -18,17 +14,21 @@ so it reuses the ``expert`` GAUR-instrumented server and only its rule
 identifiers (``symbkind``) are read from the trace.
 
 Every mode concatenates its own features with Li et al.'s hand-crafted features
-(:mod:`mlops_sqldetect.features.li`) — the "hybrid" combination is the default,
-not an opt-in, for every ``gaur-*`` extractor registered in this project.
+(:mod:`mlops_sqldetect.features.li`) to create a collector with a full view on
+lexical, syntactic and semantic features.
 """
 
 from __future__ import annotations
 
 import functools
+import hashlib
 import logging
+import os
 import re
 from collections.abc import Iterable
+from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix, hstack
@@ -39,10 +39,9 @@ from mlops_sqldetect.features.li import extract_li_features
 
 logger = logging.getLogger(__name__)
 
-GaurMode = str  # one of _SERVER_TRACE_TYPE's keys; kept as str for sklearn get_params round-tripping.
+GaurMode = str
 
-# ruleid reads plain rule identifiers out of a trace, no semantic tags: it reuses
-# the expert-tagged server rather than needing an instrumented server of its own.
+
 _SERVER_TRACE_TYPE: dict[str, str] = {
     "expert": "expert",
     "chatgpt": "chatgpt",
@@ -212,6 +211,16 @@ _RULEID_TAGS: tuple[str, ...] = tuple(f"kind_{i}" for i in range(_RULEID_MIN, _R
 
 _MODES: tuple[str, ...] = ("expert", "chatgpt", "claude", "llama", "mistral", "gpt-oss", "ruleid")
 
+# Trace collection checkpoints every this fraction
+_CHECKPOINT_FRACTION = 0.05
+
+# Where checkpoints (derived feature rows, never raw traces) are written.
+_TRACE_CHECKPOINT_DIR = Path("data/processed/gaur_trace_checkpoints")
+
+
+def _trace_checkpoint_dir() -> Path:
+    return _TRACE_CHECKPOINT_DIR
+
 
 def _tag_names(mode: str) -> tuple[str, ...]:
     if mode == "expert":
@@ -343,35 +352,156 @@ def _tag_counts(mode: str, nodes: list[TraceNode]) -> dict[str, float]:
 
 
 # ----- Trace collection ---------------------------------------------------------
+#
+# GAUR traces are collected one query at a time via gaur_sqld's own
+# get_traces_from_query (rather than its df-level get_traces_from_df) so a single
+# MySQL connection is kept open for the whole collection instead of reconnecting
+# per checkpoint. Each raw trace is reduced to its feature row immediately and
+# never accumulated or written to disk; only the small derived rows are
+# checkpointed, every ~5% of input rows (see _collect_and_featurize). Every input
+# row always yields exactly one feature row — a per-query collection failure
+# produces a row of defaults (via _row_features) rather than being dropped, unlike
+# get_traces_from_df, which silently drops failed rows from its output.
 
 
-def _collect_traces(df: pd.DataFrame, trace_type: str) -> pd.DataFrame:
-    """Collect one GAUR trace row per query, via ``gaur_sqld``'s own collector.
-
-    Delegates to ``gaur_sqld.utils.traces_collector.get_traces_from_df``, which
-    starts (or reuses) the instrumented server for ``trace_type`` — auto-
-    provisioned through Nix from gaur-instrumented-apps on first use — and caches
-    collected traces to disk (zstd-compressed, keyed by a hash of ``df``, with
-    incremental checkpoints), so repeated calls over the same queries, or a run
-    interrupted partway through a large collection, don't restart from scratch.
-    ``expert`` and ``ruleid`` share this cache automatically: both resolve to the
-    ``expert`` trace type, and their cache key only depends on ``df`` and the
-    trace type, not the mode requesting it.
-
-    ``get_traces_from_df`` drops rows whose trace collection failed, after first
-    setting the result's index to ``df.index`` (so surviving rows keep their
-    original position). Reindexing onto ``df.index`` here reinstates the dropped
-    rows as all-NaN, which ``_row_features`` already treats as "no trace
-    collected" (zero tag counts, ``is_syntax_error`` defaulting to 1), so the
-    extractor's row count always matches the input regardless of collection
-    failures.
-    """
+def _configure_trace_type(trace_type: str) -> None:
+    """Point gaur_sqld's MySQL socket/datadir at the server for ``trace_type``."""
     from gaur_sqld import config as gcfg
-    from gaur_sqld.utils.traces_collector import get_traces_from_df
 
     gcfg.update_location_mysqlfiles(trace_type)
-    traces = get_traces_from_df(df[["full_query"]])
-    return traces.reindex(df.index)
+
+
+def _ensure_server(trace_type: str) -> None:
+    """Start (or reuse) the GAUR-instrumented MySQL server for ``trace_type``."""
+    from gaur_sqld.server import ensure_server
+
+    ensure_server(trace_type)
+
+
+def _new_connector_and_collector():
+    """Build a fresh, unconnected ``(SQLConnector, GaurTraceCollector)`` pair.
+
+    The connection itself is established lazily, by ``get_traces_from_query`` on
+    its first call, exactly as ``get_traces_from_df`` does internally.
+    """
+    from gaur_sqld import config as gcfg
+    from gaur_sqld.utils.mysql_wrapper import SQLConnector
+    from gaur_sqld.utils.traces_collector import GaurTraceCollector
+
+    sqlc = SQLConnector(
+        user=gcfg.mysql_info.user,
+        pwd=gcfg.mysql_info.password,
+        socket_path=gcfg.mysql_info.socket_path,
+        database=gcfg.mysql_info.database,
+    )
+    gtc = GaurTraceCollector(fp_datadir=gcfg.mysql_info.datadir_path)
+    return sqlc, gtc
+
+
+def _collect_one_trace(query: str, sqlc, gtc) -> dict[str, object]:
+    """Collect the raw trace fields for one query.
+
+    Delegates to ``gaur_sqld.utils.traces_collector.get_traces_from_query``, which
+    (re)establishes the MySQL connection as needed, executes the query, and merges
+    multiple parser invocations into a single row. A per-query collection failure
+    (e.g. a syntax error) comes back as a row of NaNs rather than raising —
+    ``_row_features`` already treats that as "no trace collected" — so only a
+    connection-level failure propagates out of here.
+    """
+    from gaur_sqld.utils.traces_collector import get_traces_from_query
+
+    return get_traces_from_query(query, sqlc, gtc).iloc[0].to_dict()
+
+
+def _checkpoint_path(mode: str, query_df: pd.DataFrame) -> Path:
+    """On-disk path for this collection's resume checkpoint.
+
+    Keyed by mode + the exact ordered queries, so an interrupted run only ever
+    resumes against a rerun of the identical input.
+    """
+    h = hashlib.blake2b(digest_size=16)
+    h.update(mode.encode())
+    for q in query_df["full_query"]:
+        h.update(b"\0")
+        h.update(str(q).encode("utf-8", "surrogatepass"))
+    directory = _trace_checkpoint_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{mode}-{h.hexdigest()}.pkl"
+
+
+def _load_checkpoint(path: Path) -> tuple[list[dict[str, float]], int]:
+    """Return ``(feature rows collected so far, how many input rows they cover)``."""
+    if not path.exists():
+        return [], 0
+    state = joblib.load(path)
+    return state["rows"], state["n_done"]
+
+
+def _save_checkpoint(path: Path, rows: list[dict[str, float]], n_done: int) -> None:
+    # Atomic write (tmp + rename), pid-suffixed so a concurrent job never sees a
+    # half-written checkpoint (mirrors CachingExtractor._save).
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    joblib.dump({"rows": rows, "n_done": n_done}, tmp)
+    os.replace(tmp, path)
+
+
+def _collect_and_featurize(mode: str, query_df: pd.DataFrame) -> list[dict[str, float]]:
+    """Collect GAUR traces for ``mode`` and reduce each one to its feature row immediately.
+
+    Progress is checkpointed to disk every ``_CHECKPOINT_FRACTION`` of rows, as the
+    feature rows collected so far (never the raw traces), keyed by a hash of
+    ``query_df`` so a rerun over the same input resumes from the last checkpoint
+    instead of recollecting from scratch. On any failure while collecting a row
+    (most commonly a dropped MySQL connection), whatever has been collected so far
+    is checkpointed before the exception is re-raised. The checkpoint is deleted
+    once collection finishes successfully — nothing is meant to outlive a run.
+
+    Every input row always yields exactly one feature row: a per-query collection
+    failure produces a row of defaults (``_row_features`` already treats an all-NaN
+    trace as "no trace collected"), so the output length always equals ``len(query_df)``
+    — this function never drops an observation the way ``get_traces_from_df`` does.
+    """
+    trace_type = _SERVER_TRACE_TYPE[mode]
+    n = len(query_df)
+    ckpt_path = _checkpoint_path(mode, query_df)
+    rows, start_idx = _load_checkpoint(ckpt_path)
+
+    if start_idx >= n:
+        ckpt_path.unlink(missing_ok=True)
+        return rows
+    if start_idx:
+        logger.info("Resuming GAUR collection for %s from row %d/%d", mode, start_idx, n)
+
+    _configure_trace_type(trace_type)
+    _ensure_server(trace_type)
+    sqlc, gtc = _new_connector_and_collector()
+    checkpoint_interval = max(1, round(n * _CHECKPOINT_FRACTION))
+
+    for i in range(start_idx, n):
+        query = str(query_df.iloc[i]["full_query"])
+        try:
+            trace_row = _collect_one_trace(query, sqlc, gtc)
+        except Exception:
+            logger.error(
+                "GAUR collection failed on row %d/%d for %s; checkpointing %d completed rows",
+                i,
+                n,
+                mode,
+                len(rows),
+            )
+            _save_checkpoint(ckpt_path, rows, i)
+            raise
+        rows.append(_row_features(mode, trace_row))
+
+        done = i + 1
+        if done % checkpoint_interval == 0:
+            _save_checkpoint(ckpt_path, rows, done)
+            logger.info("GAUR collection checkpoint: %d/%d rows (%s)", done, n, mode)
+
+    if len(rows) != n:
+        raise RuntimeError(f"GAUR collection for {mode} produced {len(rows)} feature rows for {n} input rows")
+    ckpt_path.unlink(missing_ok=True)
+    return rows
 
 
 def _row_features(mode: str, trace_row: dict) -> dict[str, float]:
@@ -398,12 +528,12 @@ class GaurExtractor(BaseEstimator, TransformerMixin):
     Stateless like :class:`~mlops_sqldetect.features.li.LiExtractor`: ``fit`` is a
     no-op, and every mode produces a fixed-width vector so ``transform`` never
     depends on what it has seen before. Collecting the GAUR side requires a live
-    GAUR-instrumented MySQL server for ``mode`` (see :func:`_collect_traces`),
-    though its own on-disk trace cache already avoids re-collecting an input
-    already seen; :func:`~mlops_sqldetect.features.build_extractor` additionally
-    wraps the extractor in a
-    :class:`~mlops_sqldetect.features.cache.CachingExtractor`, caching the
-    (smaller, derived) feature matrix this class returns.
+    GAUR-instrumented MySQL server for ``mode`` (see :func:`_collect_and_featurize`),
+    which checkpoints its (feature-row, never raw-trace) progress to disk so an
+    interrupted collection resumes rather than restarting from scratch;
+    :func:`~mlops_sqldetect.features.build_extractor` additionally wraps the
+    extractor in a :class:`~mlops_sqldetect.features.cache.CachingExtractor`,
+    caching the (smaller, derived) feature matrix this class returns.
     """
 
     def __init__(self, mode: GaurMode = "expert") -> None:
@@ -421,9 +551,8 @@ class GaurExtractor(BaseEstimator, TransformerMixin):
             queries = [str(q) for q in X]
         query_df = pd.DataFrame({"full_query": queries})
 
-        traces = _collect_traces(query_df, _SERVER_TRACE_TYPE[self.mode])
         gaur_names = gaur_feature_names(self.mode)
-        gaur_rows = [_row_features(self.mode, row) for row in traces.to_dict("records")]
+        gaur_rows = _collect_and_featurize(self.mode, query_df)
 
         li_rows = [extract_li_features(q) for q in queries]
         li_matrix = np.asarray([[r[name] for name in LI_FEATURE_NAMES] for r in li_rows], dtype=np.float32)

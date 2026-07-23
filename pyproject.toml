@@ -24,11 +24,12 @@ dependencies = [
   "numpy",
   "pandas",
   "scikit-learn",
-  "torch==2.12.0",  
-  "transformers==5.12.0",  
+  "torch==2.12.0",
+  "transformers==5.12.0",
   "typer",
   "plotly",
   "kaleido",
+  "gaur-sql-detect",
 ]
 
 [dependency-groups]
@@ -73,3 +74,6 @@ quote-style = "double"
 [tool.coverage.run]
 source = ["src/mlops_sqldetect"]
 omit = ["tests/*"]
+
+[tool.uv.sources]
+gaur-sql-detect = { git = "https://github.com/gquetel/gaur-sql-detect", rev = "40596e0cc45c6cf295790e264745bca4e21d0afc" }

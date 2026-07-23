@@ -132,7 +132,7 @@ def load_aurocs(experiment: str) -> dict[tuple[str, str], float]:
             continue
         try:
             value = float(auroc)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if not math.isnan(value):
             out[(extractor, scenario)] = value
