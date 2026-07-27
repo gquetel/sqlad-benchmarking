@@ -71,6 +71,11 @@ CLUSTER_EXTRACTORS = "li,loginov,sbert,codet5"
 DEFAULT_FIGURE_OUT = REPO_ROOT / "reports" / "superviz25" / "overhead-inference.tex"
 # Per-cell latency CSVs (one file per array task, no shared writer).
 CELLS_DIR = REPO_ROOT / "reports" / "superviz25" / "cells-inference"
+# Latency is a per-query figure (infer_ms_per_query), so timing over a random
+# sample of the test split gives the same number as the full 3.35M rows at a
+# fraction of the cost -- GAUR cells re-collect traces uncached on every one of
+# the warmup+repeats passes, so the full split is prohibitively slow. 0 = full split.
+TIMING_SAMPLE = 5000
 
 try:
     import torch
@@ -158,11 +163,21 @@ def _train_model(method: MethodName, extractor: str, df_fit: pd.DataFrame, model
     return model
 
 
-def _load_test_df(data_root: Path | None) -> pd.DataFrame:
-    """Load the SuperViz25 test split used for timing (carries attack_technique)."""
+def _load_test_df(data_root: Path | None, sample: int = TIMING_SAMPLE, seed: int = 7) -> pd.DataFrame:
+    """Load the SuperViz25 test split used for timing (carries attack_technique).
+
+    Latency is reported per query, so a random ``sample`` of the split is timed
+    instead of all 3.35M rows -- the same ``infer_ms_per_query`` for a tiny
+    fraction of the cost (critical for GAUR cells, which re-collect traces uncached
+    on every pass). ``sample <= 0`` (or larger than the split) times the full split.
+    Sampling is ``seed``-deterministic so every cell is timed on the same queries.
+    """
     family = FAMILIES[DATASET]
     scenario = family.suites["all"][0]
-    return family.load_split(scenario, "test", root=data_root, columns=("full_query", "label", "attack_technique"))
+    df = family.load_split(scenario, "test", root=data_root, columns=("full_query", "label", "attack_technique"))
+    if 0 < sample < len(df):
+        df = df.sample(n=sample, random_state=seed).reset_index(drop=True)
+    return df
 
 
 def _load_fit_df(data_root: Path | None, seed: int) -> pd.DataFrame:
@@ -289,7 +304,17 @@ def _header(job_name: str, cfg: dict, log_pattern: str, extra: list[str]) -> str
 
 
 def _write_array_script(
-    path: Path, *, job_name: str, res: dict, cfg: dict, manifest: Path, n: int, log_pattern: str, seed: int, track: bool
+    path: Path,
+    *,
+    job_name: str,
+    res: dict,
+    cfg: dict,
+    manifest: Path,
+    n: int,
+    log_pattern: str,
+    seed: int,
+    sample: int,
+    track: bool,
 ) -> None:
     """One array script: full #SBATCH header, then benchmark one cell per array index."""
     extra = [f"#SBATCH --partition={res['partition']}"]
@@ -312,6 +337,7 @@ python -m tools.benchmark run-cell \\
   --manifest {manifest} \\
   --index "$SLURM_ARRAY_TASK_ID" \\
   --seed {seed} \\
+  --sample {sample} \\
   {track_flag}
 """
     )
@@ -346,7 +372,8 @@ def cluster(
     extractors: Annotated[str, typer.Option(help="Comma-separated feature extractors (no GAUR).")] = CLUSTER_EXTRACTORS,
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     gpu_section: Annotated[str, typer.Option(help="GPU resource block (e.g. 'gpu', 'gpu-long').")] = "gpu",
-    seed: Annotated[int, typer.Option(help="Train/val split seed for the train-missing fallback.")] = 7,
+    sample: Annotated[int, typer.Option(help="Random test-set rows to time per cell (0 = full split).")] = TIMING_SAMPLE,
+    seed: Annotated[int, typer.Option(help="Seed for the timing sample and the train-missing split.")] = 7,
     no_track: Annotated[bool, typer.Option(help="Disable MLflow logging for the submitted jobs.")] = False,
     run_id: Annotated[str | None, typer.Option(help="Submission id (names the dir under submit_dir).")] = None,
     dry_run: Annotated[bool, typer.Option(help="Print manifests and sbatch commands without submitting.")] = False,
@@ -391,6 +418,7 @@ def cluster(
             n=len(group_cells),
             log_pattern=str(submit_dir / "logs" / f"{bucket}-%A_%a.log"),
             seed=seed,
+            sample=sample,
             track=track,
         )
         logger.info(f"{bucket}: {len(group_cells)} cells (partition {res['partition']})")
@@ -412,7 +440,8 @@ def lames(
     data_root: Annotated[Path | None, typer.Option(help="SuperViz25 CSV directory (default: repo data dir).")] = None,
     repeats: Annotated[int, typer.Option(help="Timed runs per cell (median taken).")] = 5,
     warmup: Annotated[int, typer.Option(help="Untimed warm-up runs before timing.")] = 1,
-    seed: Annotated[int, typer.Option(help="Train/val split seed for the train-missing fallback.")] = 7,
+    sample: Annotated[int, typer.Option(help="Random test-set rows to time per cell (0 = full split).")] = TIMING_SAMPLE,
+    seed: Annotated[int, typer.Option(help="Seed for the timing sample and the train-missing split.")] = 7,
     train_missing: Annotated[bool, typer.Option(help="Fit and save any missing model, then time it.")] = True,
     cache: Annotated[bool, typer.Option(help="Cache features during the train-missing fit.")] = True,
     track: Annotated[bool, typer.Option(help="Log a latency run per cell to MLflow.")] = True,
@@ -436,7 +465,7 @@ def lames(
         track = False
 
     cells = enumerate_cells(DATASET, "all", methods, extractors)
-    df_test = _load_test_df(data_root)
+    df_test = _load_test_df(data_root, sample, seed)
     df_fit = _load_fit_df(data_root, seed) if train_missing else None
 
     rows = []
@@ -467,7 +496,8 @@ def run_cell(
     data_root: Annotated[Path | None, typer.Option(help="SuperViz25 CSV directory (default: repo data dir).")] = None,
     repeats: Annotated[int, typer.Option(help="Timed runs (median taken).")] = 5,
     warmup: Annotated[int, typer.Option(help="Untimed warm-up runs before timing.")] = 1,
-    seed: Annotated[int, typer.Option(help="Train/val split seed for the train-missing fallback.")] = 7,
+    sample: Annotated[int, typer.Option(help="Random test-set rows to time (0 = full split).")] = TIMING_SAMPLE,
+    seed: Annotated[int, typer.Option(help="Seed for the timing sample and the train-missing split.")] = 7,
     train_missing: Annotated[bool, typer.Option(help="Fit and save the model if absent, then time it.")] = True,
     cache: Annotated[bool, typer.Option(help="Cache features during the train-missing fit.")] = True,
     track: Annotated[bool, typer.Option(help="Log the latency run to MLflow when configured.")] = True,
@@ -485,7 +515,7 @@ def run_cell(
         logger.warning("MLflow unavailable; writing CSV only.")
         track = False
 
-    df_test = _load_test_df(data_root)
+    df_test = _load_test_df(data_root, sample, seed)
     df_fit = _load_fit_df(data_root, seed) if train_missing else None
     row = _benchmark_cell(method, extractor, df_test, df_fit, model_dir, repeats, warmup, cache, train_missing, track)
     if row is None:
