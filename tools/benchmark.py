@@ -1,24 +1,25 @@
-"""Inference-latency benchmark for the IFIPSEC RQ2.3 figure: fan-out + per-cell task.
+"""Inference-latency benchmark for the IFIPSEC RQ2.3 figure, split by where a cell can run.
 
-The single command to reproduce the figure, from a SLURM submit node:
+GAUR cells re-collect traces from a live instrumented MySQL server (via ``gaur_sqld``),
+so they can only run where that server lives -- lame25 -- not on arbitrary SLURM nodes.
+The other extractors have no such dependency and fan out to the cluster. Two commands:
 
-    python -m tools.benchmark submit
+    python -m tools.benchmark cluster   # li/loginov/sbert/codet5 -> SLURM (run on the submit node)
+    python -m tools.benchmark lames     # gaur-* -> in-process (run on lame25); renders the figure
 
-It fans each ``(method, extractor)`` cell out as one array task (``run-cell``
-below), then schedules a dependent CPU job that renders the pgfplots figure once
-every cell is done. Each task load-or-trains the fitted model, times scoring with
-the feature cache off, and logs ``infer_ms_per_query`` to the dedicated
-``Inference-Latency-Superviz25`` experiment. Detection results are reused, never
-recomputed.
+``cluster`` fans each cell out as a SLURM array task (``run-cell`` below). ``lames`` runs the
+GAUR cells sequentially in-process and, once done, renders the figure from every latency logged
+so far (so run it after ``cluster`` has finished). Both load-or-train the fitted model, time
+scoring with the feature cache off, and log ``infer_ms_per_query`` to the dedicated
+``Inference-Latency-Superviz25`` experiment. Detection results are reused, never recomputed.
 
 Why the cache must be off: the feature cache
-(:class:`~mlops_sqldetect.features.cache.CachingExtractor`) is shared across
-decision engines, so per extractor only the first run computes features cold and
-the rest read the matrix back -- the suite's ``score_seconds`` is therefore not a
-usable latency. Device policy matches the paper: only embedding extractors
-(SecureBERT, CodeT5+) time on GPU; every other cell -- including the autoencoders
--- times on CPU. Resources come from ``configs/slurm.yaml`` (same machinery as
-:mod:`tools.slurm_submit`).
+(:class:`~mlops_sqldetect.features.cache.CachingExtractor`) is shared across decision engines,
+so per extractor only the first run computes features cold and the rest read the matrix back --
+the suite's ``score_seconds`` is therefore not a usable latency. Device policy matches the paper:
+only SecureBERT/CodeT5+ time on GPU (their cluster GPU bucket); every other cell -- including the
+autoencoders and all GAUR cells -- times on CPU. Cluster resources come from
+``configs/slurm.yaml`` (same machinery as :mod:`tools.slurm_submit`).
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from mlops_sqldetect.evaluate_suite import VAL_FRACTION, Cell, _model_filename, 
 from mlops_sqldetect.features.cache import CachingExtractor
 from mlops_sqldetect.model import AEDetector, Detector, MethodName, build_method, load_method
 from mlops_sqldetect.tracking import setup_mlflow
+from tools.generate_overhead_inference_figure import load_points, render_figure
 from tools.slurm_submit import (
     ENV_SETUP,
     REPO_ROOT,
@@ -61,7 +63,10 @@ logger = logging.getLogger(__name__)
 DATASET = "superviz25"
 # Latency runs go to their own experiment so they never touch the eval runs.
 BENCHMARK_EXPERIMENT = "Inference-Latency-Superviz25"
-DEFAULT_EXTRACTORS = "gaur-expert,gaur-chatgpt,gaur-claude,gaur-llama,gaur-mistral,gaur-gpt-oss,gaur-ruleid,li,sbert"
+# GAUR cells need a live instrumented MySQL server + gaur_sqld -> run in-process on lame25.
+GAUR_EXTRACTORS = "gaur-expert,gaur-chatgpt,gaur-claude,gaur-llama,gaur-mistral,gaur-gpt-oss,gaur-ruleid"
+# The rest have no such dependency and fan out to the SLURM cluster.
+CLUSTER_EXTRACTORS = "li,loginov,sbert,codet5"
 # Figure default: repo-local (git-ignored). Point --figure-out at the paper to write there.
 DEFAULT_FIGURE_OUT = REPO_ROOT / "reports" / "superviz25" / "overhead-inference.tex"
 # Per-cell latency CSVs (one file per array task, no shared writer).
@@ -101,6 +106,22 @@ def _disable_feature_cache(model: Detector) -> bool:
 
 def _is_cuda_model(model: Detector) -> bool:
     return _CUDA and isinstance(model, AEDetector) and model.device.type == "cuda"
+
+
+def _force_cpu(model: Detector) -> None:
+    """Move an autoencoder to CPU so it is timed on CPU (the paper times all GAUR pipelines on CPU)."""
+    if isinstance(model, AEDetector) and model.net is not None:
+        model.device = torch.device("cpu")
+        model.net.to(model.device)
+
+
+def _enable_benchmark_tracking() -> bool:
+    """Configure MLflow and make the dedicated benchmark experiment active; returns availability."""
+    if not setup_mlflow(DATASET):
+        return False
+    # setup_mlflow picks the eval experiment; redirect logging to the benchmark one.
+    mlflow.set_experiment(BENCHMARK_EXPERIMENT)
+    return True
 
 
 def _time_score(model: Detector, df: pd.DataFrame, repeats: int, warmup: int) -> list[float]:
@@ -164,6 +185,7 @@ def _benchmark_cell(
     cache: bool,
     train_missing: bool,
     track: bool,
+    force_cpu: bool = False,
 ) -> dict | None:
     """Benchmark one cell; returns a result dict, or None when its model is missing and not trained."""
     scenario = FAMILIES[DATASET].suites["all"][0]
@@ -178,6 +200,8 @@ def _benchmark_cell(
         logger.warning(f"Skipping {method}+{extractor}: no model at {model_path} (pass --train-missing to fit it)")
         return None
 
+    if force_cpu:
+        _force_cpu(model)
     cached = _disable_feature_cache(model)
     times = _time_score(model, df_test, repeats, warmup)
 
@@ -293,32 +317,9 @@ python -m tools.benchmark run-cell \\
     )
 
 
-def _write_figure_script(path: Path, *, cfg: dict, log_pattern: str, figure_out: Path) -> None:
-    """A light CPU job that renders the figure once the arrays have logged their latencies."""
-    cpu = cfg["cpu"]
-    extra = [
-        f"#SBATCH --partition={cpu['partition']}",
-        "#SBATCH --cpus-per-task=2",
-        "#SBATCH --mem=8G",
-        "#SBATCH --time=00:20:00",
-    ]
-    path.write_text(
-        f"""#!/bin/bash
-{_header("lat-figure-superviz25", cfg, log_pattern, extra)}
-set -euo pipefail
-cd {REPO_ROOT}
-{ENV_SETUP}
-python -m tools.generate_overhead_inference_figure --figure-out {figure_out}
-"""
-    )
-
-
-def _sbatch(script: Path, dry_run: bool, dependency: str | None = None) -> str | None:
-    """Submit (or, in dry-run, print) one job; return its job id. ``dependency`` is an afterok id list."""
-    cmd = ["sbatch"]
-    if dependency:
-        cmd.append(f"--dependency=afterok:{dependency}")
-    cmd.append(str(script))
+def _sbatch(script: Path, dry_run: bool) -> str | None:
+    """Submit (or, in dry-run, print) one job array and return its job id."""
+    cmd = ["sbatch", str(script)]
     if dry_run:
         logger.info("DRY-RUN: " + " ".join(cmd))
         return None
@@ -340,20 +341,24 @@ app = typer.Typer(add_completion=False, help=__doc__)
 
 
 @app.command()
-def submit(
+def cluster(
     methods: Annotated[str, typer.Option(help="Comma-separated decision engines.")] = "ocsvm,ae",
-    extractors: Annotated[str, typer.Option(help="Comma-separated feature extractors.")] = DEFAULT_EXTRACTORS,
+    extractors: Annotated[str, typer.Option(help="Comma-separated feature extractors (no GAUR).")] = CLUSTER_EXTRACTORS,
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     gpu_section: Annotated[str, typer.Option(help="GPU resource block (e.g. 'gpu', 'gpu-long').")] = "gpu",
     seed: Annotated[int, typer.Option(help="Train/val split seed for the train-missing fallback.")] = 7,
     no_track: Annotated[bool, typer.Option(help="Disable MLflow logging for the submitted jobs.")] = False,
-    figure: Annotated[bool, typer.Option(help="Schedule the dependent figure job after the arrays.")] = True,
-    figure_out: Annotated[Path, typer.Option(help="Where the figure job writes the .tex.")] = DEFAULT_FIGURE_OUT,
     run_id: Annotated[str | None, typer.Option(help="Submission id (names the dir under submit_dir).")] = None,
     dry_run: Annotated[bool, typer.Option(help="Print manifests and sbatch commands without submitting.")] = False,
 ) -> None:
-    """Enumerate the grid and submit one benchmark array per resource class, plus the figure job."""
+    """Fan the non-GAUR cells out to SLURM, one array per resource class (run on the submit node).
+
+    The figure is written separately once the GAUR cells are done too -- see ``lames`` (or
+    ``python -m tools.generate_overhead_inference_figure``).
+    """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    if any(e.strip().startswith("gaur") for e in extractors.split(",")):
+        raise typer.BadParameter("GAUR extractors need the MySQL server; run them with the 'lames' command.")
     cfg = yaml.safe_load(config.read_text())
     track = not no_track
 
@@ -393,21 +398,65 @@ def submit(
         if job_id:
             job_ids.append(job_id)
 
-    if figure:
-        if not track:
-            logger.warning("Figure job skipped: it needs MLflow (AUROC + latency); pass without --no-track.")
-        else:
-            script = submit_dir / "bench_figure.sbatch"
-            _write_figure_script(
-                script, cfg=cfg, log_pattern=str(submit_dir / "logs" / "figure-%j.log"), figure_out=figure_out
-            )
-            logger.info(f"figure: renders after arrays complete -> {figure_out}")
-            _sbatch(script, dry_run, dependency=":".join(job_ids) or None)
-
     if dry_run:
         logger.info("Dry run: nothing submitted.")
     elif job_ids:
         logger.info(f"Submitted job arrays: {', '.join(job_ids)}")
+
+
+@app.command()
+def lames(
+    methods: Annotated[str, typer.Option(help="Comma-separated decision engines.")] = "ocsvm,ae",
+    extractors: Annotated[str, typer.Option(help="Comma-separated GAUR extractors.")] = GAUR_EXTRACTORS,
+    model_dir: Annotated[Path, typer.Option(help="Directory holding the fitted models.")] = REPO_ROOT / "models",
+    data_root: Annotated[Path | None, typer.Option(help="SuperViz25 CSV directory (default: repo data dir).")] = None,
+    repeats: Annotated[int, typer.Option(help="Timed runs per cell (median taken).")] = 5,
+    warmup: Annotated[int, typer.Option(help="Untimed warm-up runs before timing.")] = 1,
+    seed: Annotated[int, typer.Option(help="Train/val split seed for the train-missing fallback.")] = 7,
+    train_missing: Annotated[bool, typer.Option(help="Fit and save any missing model, then time it.")] = True,
+    cache: Annotated[bool, typer.Option(help="Cache features during the train-missing fit.")] = True,
+    track: Annotated[bool, typer.Option(help="Log a latency run per cell to MLflow.")] = True,
+    figure: Annotated[
+        bool, typer.Option(help="Render the figure at the end (needs the cluster cells logged too).")
+    ] = True,
+    figure_out: Annotated[Path, typer.Option(help="Where to write the figure .tex.")] = DEFAULT_FIGURE_OUT,
+) -> None:
+    """Benchmark the GAUR cells in-process on lame25 (needs the instrumented MySQL server), CPU-timed.
+
+    GAUR feature extraction re-collects traces from a live instrumented MySQL server, so these
+    cells cannot go through SLURM; run this where that server and ``gaur_sqld`` live (lame25).
+    """
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    if not all(e.strip().startswith("gaur") for e in extractors.split(",") if e.strip()):
+        raise typer.BadParameter("The 'lames' command is for GAUR extractors only; use 'cluster' for the rest.")
+
+    mlflow_ok = _enable_benchmark_tracking() if track else False
+    if track and not mlflow_ok:
+        logger.warning("MLflow unavailable; writing CSV only.")
+        track = False
+
+    cells = enumerate_cells(DATASET, "all", methods, extractors)
+    df_test = _load_test_df(data_root)
+    df_fit = _load_fit_df(data_root, seed) if train_missing else None
+
+    rows = []
+    for cell in cells:
+        # force_cpu: the paper times every GAUR pipeline on CPU, even the autoencoders.
+        row = _benchmark_cell(
+            cell.method, cell.extractor, df_test, df_fit, model_dir, repeats, warmup, cache, train_missing, track, True
+        )
+        if row is not None:
+            rows.append(row)
+    if not rows:
+        raise typer.Exit(code=1)
+
+    CELLS_DIR.mkdir(parents=True, exist_ok=True)
+    for row in rows:
+        pd.DataFrame([row]).to_csv(CELLS_DIR / f"{row['method']}_{row['extractor']}.csv", index=False)
+    logger.info(f"Wrote {len(rows)} per-cell CSVs to {CELLS_DIR}")
+
+    if figure:
+        _render_figure(figure_out, mlflow_ok)
 
 
 @app.command("run-cell")
@@ -432,10 +481,7 @@ def run_cell(
     method, extractor = cell["method"], cell["extractor"]
     logger.info(f"Benchmarking cell {index}/{len(lines) - 1}: {method}+{extractor}")
 
-    # setup_mlflow selects the eval experiment; redirect logging to the benchmark one.
-    if track and setup_mlflow(DATASET):
-        mlflow.set_experiment(BENCHMARK_EXPERIMENT)
-    elif track:
+    if track and not _enable_benchmark_tracking():
         logger.warning("MLflow unavailable; writing CSV only.")
         track = False
 
@@ -449,6 +495,21 @@ def run_cell(
     out = CELLS_DIR / f"{method}_{extractor}.csv"
     pd.DataFrame([row]).to_csv(out, index=False)
     logger.info(f"Wrote {out}")
+
+
+def _render_figure(figure_out: Path, mlflow_ok: bool) -> None:
+    """Render the figure from all latencies + AUROC in MLflow (partial if some cells are missing)."""
+    if not mlflow_ok:
+        logger.warning("Figure skipped: MLflow is needed to read AUROC and latencies.")
+        return
+    try:
+        points = load_points()
+    except RuntimeError as exc:
+        logger.warning(f"Figure skipped: {exc}")
+        return
+    figure_out.parent.mkdir(parents=True, exist_ok=True)
+    figure_out.write_text(render_figure(points) + "\n")
+    logger.info(f"Wrote figure {figure_out}")
 
 
 if __name__ == "__main__":
