@@ -499,9 +499,13 @@ def build_method(
     if name == "ocsvm":
         # Raw word counts (cv) and the SecureBERT/CodeT5+ embeddings have a wider
         # spread than Li features, so the QP solver needs a higher iteration budget
-        # to converge; Li keeps the default.
-        # gaur-ruleid's one-hot rule-identifier counts are as wide as cv's vocabulary.
-        config = OCSVMConfig(max_iter=10000) if extractor in ("cv", "sbert", "codet5", "gaur-ruleid") else OCSVMConfig()
+        # to converge. Every GAUR mode (semantic and gaur-ruleid) uses max_iter=10000
+        # to match the reference gaur-sql-detect implementation; Li keeps the default.
+        config = (
+            OCSVMConfig(max_iter=10000)
+            if extractor in ("cv", "sbert", "codet5") or extractor.startswith("gaur-")
+            else OCSVMConfig()
+        )
         return OCSVMDetector(
             config=config, extractor=maybe_wrap(extractor_instance, cdir), scaler=_scaler_for(extractor)
         )
@@ -540,6 +544,16 @@ def build_method(
                 extractor=maybe_wrap(extractor_instance, cdir),
                 scaler=FunctionTransformer(),
                 output_activation="relu",
+            )
+        if extractor.startswith("gaur-"):
+            # Semantic GAUR modes (expert + five LLMs): sigmoid output over the
+            # MaxAbsScaler-mapped [0, 1] features. Learning rate and batch size match
+            # the reference gaur-sql-detect AE (1e-3 / 4096) so the released code
+            # reproduces these numbers.
+            return AEDetector(
+                config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=4096),
+                extractor=maybe_wrap(extractor_instance, cdir),
+                scaler=MaxAbsScaler(),
             )
         # Li dense features are non-negative, so a sigmoid output needs inputs in
         # [0, 1]: MaxAbsScaler maps the feature matrix into that range.
