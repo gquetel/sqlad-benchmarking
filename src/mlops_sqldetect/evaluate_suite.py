@@ -30,7 +30,7 @@ from sklearn.model_selection import train_test_split
 
 from mlops_sqldetect.data import load_whole_sampled, split_normals
 from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
-from mlops_sqldetect.features import EXTRACTOR_LABELS, EXTRACTORS
+from mlops_sqldetect.features import EXTRACTOR_LABELS, EXTRACTORS, extractor_observes_insider
 from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
 from mlops_sqldetect.model import METHOD_LABELS, AEDetector, MethodName, build_method
 from mlops_sqldetect.tracking import (
@@ -254,6 +254,11 @@ def _run_one_tracked(
         f"=== {METHOD_LABELS.get(method, method)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
         f"on {family.name.capitalize()}/{scenario.value} ==="
     )
+    # Whether insider attacks reach the collector's observation point is a property of the
+    # collector, declared per extractor (see features.extractor_observes_insider): GAUR
+    # instruments the parser and observes insider traffic, external collectors do not. The
+    # CLI --capture-insider stays an explicit override on top of that declared capability.
+    capture_insider = capture_insider or extractor_observes_insider(extractor)
     # attack_technique is needed for per-technique recall; it is NaN on normal rows.
     if limit is not None:
         # Smoke run: sample `limit` rows from the whole file (all splits, both

@@ -12,7 +12,9 @@ experiment (the same grid the Chapter 3 tables draw from, so the baseline block 
     across its seven semantic-model instantiations x OCSVM/LOF/AE; and
   * ``perfs-vs-sota.tex`` (tab:perfs-vs-sota): the three best \gaur{}-based methods by F1
     (auto-selected) above a double rule, over the full reference-baseline block of
-    Chapter 3.
+    Chapter 3; and
+  * ``perfs-recall.tex`` (tab:perfs-recall): the per-technique recall heatmap for the same
+    two blocks (\hc{}-shaded, mirroring tab:sup25-recall).
 
 Both tables adopt the Chapter 3 ``tab:sup25-metrics`` theme (Model | Detector split via
 ``\multirow``, siunitx S columns, best value per outcome column in bold, FPR never
@@ -47,9 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Default output: the observation chapter's data dir (\input{data/...} resolves here via
 # the \import of chapters/04-observation/ in the thesis main).
-DEFAULT_OUT_DIR = (
-    Path.home() / "repos" / "quetel_phd_latex" / "thesis" / "chapters" / "04-observation" / "data"
-)
+DEFAULT_OUT_DIR = Path.home() / "repos" / "quetel_phd_latex" / "thesis" / "chapters" / "04-observation" / "data"
 
 # The eval experiment holding the full SuperViz25 grid (baselines + every GAUR cell).
 EXPERIMENT = "Superviz25-SQL"
@@ -66,7 +66,7 @@ def _num(x: object) -> float | None:
     """Coerce an MLflow metric cell to a float, mapping missing/NaN to None."""
     try:
         v = float(x)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return None if math.isnan(v) else v
 
@@ -96,7 +96,7 @@ def load_results() -> Results:
             engine = r.get("tags.pipeline")
         if not (isinstance(extractor, str) and isinstance(engine, str)):
             continue
-        data[(extractor, engine)] = {
+        cell = {
             "precision": _num(r.get("metrics.precision")),
             "recall": _num(r.get("metrics.recall")),
             "f1": _num(r.get("metrics.f1")),
@@ -104,6 +104,9 @@ def load_results() -> Results:
             "auprc": _num(r.get("metrics.auprc")),
             "auroc": _num(r.get("metrics.roc_auc")),
         }
+        for suffix, _ in TECHNIQUES:
+            cell[f"recall_{suffix}"] = _num(r.get(f"metrics.recall_{suffix}"))
+        data[(extractor, engine)] = cell
     logger.info(f"Loaded {len(data)} cells from {EXPERIMENT}.")
     return data
 
@@ -125,6 +128,21 @@ METRIC_COLUMNS: list[tuple[str, str, str]] = [
 # Outcome columns eligible for the per-column best-value bold. FPR is a controlled protocol
 # target (~0.1% FPR), not an outcome to maximise, so it is deliberately never bolded.
 BOLD_KEYS: tuple[str, ...] = ("precision", "recall", "f1", "auprc", "auroc")
+
+# Per-technique recall columns of the heatmap (tab:perfs-recall): (MLflow metric suffix,
+# column header). The metric key is ``recall_<suffix>`` (see evaluate_suite._mlflow_key),
+# matching tab:sup25-recall so the two heatmaps share their columns exactly. Insider recall
+# is 0 for every method whose collector sits above the DBMS, but \gaur{}'s parser-level
+# integration makes it non-zero -- the point the column is there to expose.
+TECHNIQUES: list[tuple[str, str]] = [
+    ("union", "Union"),
+    ("boolean", "Bool."),
+    ("stacked", "Stack."),
+    ("error", "Error"),
+    ("time", "Time"),
+    ("inline", "Inline"),
+    ("insider", "Insider"),
+]
 
 # Decision engines in display order, matching tab:sup25-metrics (AE, LOF, OCSVM).
 DETECTOR_ORDER: list[str] = ["ae", "lof", "ocsvm"]
@@ -276,11 +294,7 @@ def _top_gaur_by_f1(data: Results, k: int = 3) -> list[tuple[str, str, str]]:
     the same model share a ``\multirow`` label), then flattened to per-cell groups of one
     engine each -- the ordering, not the grouping, is what the selection needs.
     """
-    scored = [
-        (ext, eng, c["f1"])
-        for (ext, eng), c in data.items()
-        if ext in GAUR_GLABEL and c.get("f1") is not None
-    ]
+    scored = [(ext, eng, c["f1"]) for (ext, eng), c in data.items() if ext in GAUR_GLABEL and c.get("f1") is not None]
     scored.sort(key=lambda t: t[2], reverse=True)
     top = scored[:k]
     if len(top) < k:
@@ -331,6 +345,87 @@ def render_perfs_vs_sota(data: Results) -> str:
         r"  \end{tabular}",
         rf"  \caption{{{SOTA_CAPTION}}}",
         r"  \label{tab:perfs-vs-sota}",
+        r"\end{table}",
+    ]
+    return "\n".join(lines)
+
+
+# --- Table 4.5: per-technique recall heatmap (tab:perfs-recall) --------------
+
+# Source-padding width so the generated heatmap stays column-aligned and diff-friendly.
+_HEAT_WIDTH = 7
+
+RECALL_CAPTION = (
+    r"Per-technique recall (\%) heatmap for the best-performing \gaur{}-based methods (top, "
+    r"the same three selected by F1 in Table~\ref{tab:perfs-vs-sota}) against the reference "
+    r"baselines of Chapter~\ref{chap:eval} (bottom, below the double rule). Cell shading "
+    r"encodes recall from 0\% (white) to 100\% (green)."
+)
+
+
+def _fmt_heat(v: float | None) -> str:
+    r"""Recall as a heatmap cell ``\hc{p}`` (integer percent). ``None`` -> empty cell."""
+    return "" if v is None else rf"\hc{{{round(v * 100)}}}"
+
+
+def _heat_header_row() -> str:
+    r"""``\toprule`` header row for the heatmap: the two bold left labels then the bold
+    per-technique headers."""
+    cols = " & ".join(rf"{{\bfseries {h}}}" for _, h in TECHNIQUES)
+    return rf"    {{\bfseries Method}} & {{\bfseries Detector}} & {cols} \\"
+
+
+def _emit_heat_block(groups: list[tuple[str, str, list[str]]], data: Results) -> list[str]:
+    r"""Body lines for a block of ``(row_label, extractor_tag, [engine, ...])`` groups, each
+    cell a ``\hc{}``-shaded per-technique recall. Mirrors ``_emit_block`` but for the heatmap;
+    missing runs render as empty cells."""
+    lines: list[str] = []
+    for gi, (label, extractor, engines) in enumerate(groups):
+        if gi:
+            lines.append(r"    \midrule")
+        lines.append(rf"    \multirow{{{len(engines)}}}{{*}}{{{label}}}")
+        for engine in engines:
+            detector = DETECTOR_LABELS[engine].ljust(_DETECTOR_WIDTH)
+            cell = data.get((extractor, engine))
+            techs = " & ".join(
+                _fmt_heat(None if cell is None else cell.get(f"recall_{suffix}")).ljust(_HEAT_WIDTH)
+                for suffix, _ in TECHNIQUES
+            ).rstrip()
+            lines.append(rf"      & {detector} & {techs} \\")
+    return lines
+
+
+def render_perfs_recall(data: Results) -> str:
+    r"""Per-technique recall heatmap: best GAUR methods over the Chapter-3 baselines (tab:perfs-recall).
+
+    Same two-block layout as tab:perfs-vs-sota (identical top-3 GAUR selection by F1, double
+    rule, then every baseline row) but each cell is a ``\hc{}``-shaded recall for one attack
+    technique instead of the aggregate metrics. The Insider column is kept to expose that only
+    \gaur{}'s parser-level observation reaches insider traffic.
+    """
+    top_groups = _top_gaur_by_f1(data)
+    base_groups = [(label, ext, list(DETECTOR_ORDER)) for ext, label in BASELINES]
+
+    lines = [
+        r"\begin{table}[!htb]",
+        r"  \centering",
+        r"  % Auto-generated by tools.generate_observation_tex -- do not edit by hand.",
+        r"  % Top block: the same 3 best GAUR methods by F1 as tab:perfs-vs-sota. Double rule,",
+        r"  % then the Chapter-3 baseline block. \hc{v} shades the cell by recall v (integer %,",
+        r"  % 0=white..100=green) and prints v (see \hc / heat in head/colors.tex); missing runs",
+        r"  % render as empty cells.",
+        r"  \setlength{\tabcolsep}{5pt}",
+        rf"  \begin{{tabular}}{{@{{}}l l *{{{len(TECHNIQUES)}}}{{c}}@{{}}}}",
+        r"    \toprule",
+        _heat_header_row(),
+        r"    \midrule",
+        *_emit_heat_block(top_groups, data),
+        r"    \hline\hline",
+        *_emit_heat_block(base_groups, data),
+        r"    \bottomrule",
+        r"  \end{tabular}",
+        rf"  \caption{{{RECALL_CAPTION}}}",
+        r"  \label{tab:perfs-recall}",
         r"\end{table}",
     ]
     return "\n".join(lines)
@@ -455,9 +550,7 @@ def figure_points(data: Results) -> FigPoint:
     and the per-query benchmark (LATENCY_EXPERIMENT) for the rest (codet5, loginov,
     CountVectorizer). RAW totals take precedence where a cell has both.
     """
-    latencies: dict[tuple[str, str], float] = {
-        (e, x): _parse_hms(t) / N_SAMPLES * 1000.0 for e, x, t in RAW_INFERENCE
-    }
+    latencies: dict[tuple[str, str], float] = {(e, x): _parse_hms(t) / N_SAMPLES * 1000.0 for e, x, t in RAW_INFERENCE}
     for key, ms in _bench_latencies().items():
         latencies.setdefault(key, ms)
     points: FigPoint = {}
@@ -561,6 +654,7 @@ def main(
     data = load_results()
     _write(render_performance_nov(data), out_dir / "performance-nov.tex")
     _write(render_perfs_vs_sota(data), out_dir / "perfs-vs-sota.tex")
+    _write(render_perfs_recall(data), out_dir / "perfs-recall.tex")
     _write(render_figure(figure_points(data)), out_dir / "overhead-inference.tex")
 
 

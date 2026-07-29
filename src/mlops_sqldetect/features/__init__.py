@@ -60,6 +60,20 @@ EXTRACTOR_LABELS: dict[str, str] = {
 }
 
 
+def extractor_observes_insider(name: str) -> bool:
+    """Whether the named collector observes insider traffic (queries issued directly against
+    the DBMS, bypassing the application).
+
+    Declared per collector via the extractor class' ``observes_insider`` attribute: GAUR
+    instruments the parser and sees every executed query, so it observes insider attacks;
+    external collectors sit above the DBMS and default to ``False``. Resolved off the
+    registered factory (unwrapping :func:`functools.partial`) so no extractor is built.
+    """
+    factory = EXTRACTORS.get(name)
+    cls = getattr(factory, "func", factory)  # unwrap functools.partial(GaurExtractor, ...)
+    return bool(getattr(cls, "observes_insider", False))
+
+
 def build_extractor(name: str = DEFAULT_EXTRACTOR, cache_dir: str | os.PathLike | None = None) -> TransformerMixin:
     """Instantiate a feature extractor by short name (see :data:`EXTRACTORS`).
 
@@ -86,6 +100,7 @@ __all__ = [
     "LoginovExtractor",
     "SecureBertExtractor",
     "build_extractor",
+    "extractor_observes_insider",
     "extract_li_features",
     "extract_loginov_features",
     "resolve_cache_dir",

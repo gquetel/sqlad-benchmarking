@@ -536,6 +536,12 @@ class GaurExtractor(BaseEstimator, TransformerMixin):
     caching the (smaller, derived) feature matrix this class returns.
     """
 
+    # GAUR instruments the DBMS parser, so its collector observes every executed query,
+    # including insider attacks issued directly against the DBMS. External collectors sit
+    # above the DBMS and never see that traffic (they leave this attribute at its False
+    # default), which is what the evaluation's insider blind-spot models.
+    observes_insider: bool = True
+
     def __init__(self, mode: GaurMode = "expert") -> None:
         if mode not in _MODES:
             raise ValueError(f"Unknown GAUR mode: {mode!r} (expected one of {_MODES})")
