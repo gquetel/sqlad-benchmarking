@@ -6,8 +6,8 @@ experiment (the same grid the Chapter 3 tables draw from, so the baseline block 
 ``perfs-vs-sota.tex`` reproduces ``tab:sup25-metrics`` exactly):
 
   * ``overhead-inference.tex`` (fig:overhead-inference-raw): AUROC versus per-query
-    *inference-only* latency scatter -- latencies hardcoded (see RAW_INFERENCE), AUROC
-    fetched live from MLflow;
+    *inference-only* latency scatter -- AUROC and the benchmark latencies (codet5, loginov,
+    CountVectorizer) fetched live from MLflow, the IFIP-SEC raw totals hardcoded (RAW_INFERENCE);
   * ``performance-nov.tex`` (tab:performance-nov): P/R/F1/FPR/AUPRC/AUROC of \gaur{}
     across its seven semantic-model instantiations x OCSVM/LOF/AE; and
   * ``perfs-vs-sota.tex`` (tab:perfs-vs-sota): the three best \gaur{}-based methods by F1
@@ -366,14 +366,12 @@ RAW_INFERENCE: list[tuple[str, str, str]] = [
     ("ocsvm", "sbert", "14:05:34.200465"),
 ]
 
-# codet5/loginov infer_ms_per_query from a one-time MLflow benchmark query. Inference-only
-# already (no collection step), so they mix cleanly with the raw totals above.
-MLFLOW_LATENCY_MS: dict[tuple[str, str], float] = {
-    ("ae", "codet5"): 6.742606724239886,
-    ("ocsvm", "codet5"): 11.9822740662843,
-    ("ae", "loginov"): 0.04221667516976595,
-    ("ocsvm", "loginov"): 0.7687311675399542,
-}
+# Per-query inference-latency benchmark experiment: the single source of truth for the
+# cells the IFIP-SEC raw totals do not cover (codet5, loginov and CountVectorizer). Each run
+# logs infer_ms_per_query for one (feature_extractor, decision_engine) cell, inference-only
+# (no collection step), so it mixes cleanly with the raw totals above. Fetched live rather
+# than hardcoded so a newly benchmarked extractor is picked up on the next run.
+LATENCY_EXPERIMENT = "Inference-Latency-Superviz25"
 
 # Feature extractors in figure-legend order: (extractor tag, legend label, HEX colour).
 # Paper-facing colours/labels, intentionally distinct from EXTRACTOR_LABELS.
@@ -385,6 +383,7 @@ FIG_EXTRACTORS: list[tuple[str, str, str]] = [
     ("gaur-mistral", "Mistral", "9FA8DA"),
     ("gaur-gpt-oss", "GPT-OSS", "66BB6A"),
     ("gaur-ruleid", "Naive", "0D47A1"),
+    ("cv", "CountVectorizer", "FB8C00"),
     ("li", "Li et al.", "FFD54F"),
     ("sbert", "SecureBERT", "7E57C2"),
     ("codet5", "CodeT5+", "26A69A"),
@@ -421,12 +420,46 @@ def _color_name(extractor: str) -> str:
     return "ext" + extractor.replace("-", "")
 
 
+def _bench_latencies() -> dict[tuple[str, str], float]:
+    """infer_ms_per_query per (engine, extractor) from the latency-benchmark experiment.
+
+    Latest finished run per cell wins. Used only for cells absent from RAW_INFERENCE
+    (codet5, loginov, CountVectorizer); the IFIP-SEC raw totals stay authoritative for the
+    extractors they cover. Legacy runs tag the decision head ``pipeline`` not ``decision_engine``.
+    """
+    runs = mlflow.search_runs(
+        experiment_names=[LATENCY_EXPERIMENT],
+        filter_string="attributes.status = 'FINISHED'",
+        output_format="pandas",
+    )
+    if runs.empty:
+        logger.warning(f"No finished run in {LATENCY_EXPERIMENT!r}; MLflow-sourced latencies unavailable.")
+        return {}
+    runs = runs.sort_values("start_time")
+    out: dict[tuple[str, str], float] = {}
+    for _, r in runs.iterrows():
+        extractor = r.get("tags.feature_extractor")
+        engine = r.get("tags.decision_engine")
+        if not isinstance(engine, str):
+            engine = r.get("tags.pipeline")
+        ms = _num(r.get("metrics.infer_ms_per_query"))
+        if isinstance(extractor, str) and isinstance(engine, str) and ms is not None:
+            out[(engine, extractor)] = ms
+    return out
+
+
 def figure_points(data: Results) -> FigPoint:
-    """Join each cell's live AUROC with its inference-only latency (raw totals + MLflow ms)."""
+    """Join each cell's live AUROC with its inference-only latency.
+
+    Latency is the IFIP-SEC raw total (RAW_INFERENCE) for the extractors those totals cover,
+    and the per-query benchmark (LATENCY_EXPERIMENT) for the rest (codet5, loginov,
+    CountVectorizer). RAW totals take precedence where a cell has both.
+    """
     latencies: dict[tuple[str, str], float] = {
         (e, x): _parse_hms(t) / N_SAMPLES * 1000.0 for e, x, t in RAW_INFERENCE
     }
-    latencies.update(MLFLOW_LATENCY_MS)
+    for key, ms in _bench_latencies().items():
+        latencies.setdefault(key, ms)
     points: FigPoint = {}
     for (extractor, engine), cell in data.items():
         auroc = cell["auroc"]
