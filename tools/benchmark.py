@@ -372,7 +372,9 @@ def cluster(
     extractors: Annotated[str, typer.Option(help="Comma-separated feature extractors (no GAUR).")] = CLUSTER_EXTRACTORS,
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     gpu_section: Annotated[str, typer.Option(help="GPU resource block (e.g. 'gpu', 'gpu-long').")] = "gpu",
-    sample: Annotated[int, typer.Option(help="Random test-set rows to time per cell (0 = full split).")] = TIMING_SAMPLE,
+    sample: Annotated[
+        int, typer.Option(help="Random test-set rows to time per cell (0 = full split).")
+    ] = TIMING_SAMPLE,
     seed: Annotated[int, typer.Option(help="Seed for the timing sample and the train-missing split.")] = 7,
     no_track: Annotated[bool, typer.Option(help="Disable MLflow logging for the submitted jobs.")] = False,
     run_id: Annotated[str | None, typer.Option(help="Submission id (names the dir under submit_dir).")] = None,
@@ -440,7 +442,9 @@ def lames(
     data_root: Annotated[Path | None, typer.Option(help="SuperViz25 CSV directory (default: repo data dir).")] = None,
     repeats: Annotated[int, typer.Option(help="Timed runs per cell (median taken).")] = 5,
     warmup: Annotated[int, typer.Option(help="Untimed warm-up runs before timing.")] = 1,
-    sample: Annotated[int, typer.Option(help="Random test-set rows to time per cell (0 = full split).")] = TIMING_SAMPLE,
+    sample: Annotated[
+        int, typer.Option(help="Random test-set rows to time per cell (0 = full split).")
+    ] = TIMING_SAMPLE,
     seed: Annotated[int, typer.Option(help="Seed for the timing sample and the train-missing split.")] = 7,
     train_missing: Annotated[bool, typer.Option(help="Fit and save any missing model, then time it.")] = True,
     cache: Annotated[bool, typer.Option(help="Cache features during the train-missing fit.")] = True,

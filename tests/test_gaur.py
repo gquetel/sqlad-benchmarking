@@ -21,7 +21,6 @@ from mlops_sqldetect.features import gaur
 from mlops_sqldetect.features.gaur import (
     GAUR_SYNT_NAMES,
     GaurExtractor,
-    _sparse_block,
     gaur_feature_names,
     parse_semantic_tree,
 )
@@ -139,20 +138,10 @@ def test_extractor_accepts_list_of_strings():
     assert matrix.shape[0] == 2
 
 
-# ----- ruleid sparsity ---------------------------------------------------------
+# ----- ruleid output -----------------------------------------------------------
 
 
-def test_sparse_block_matches_dense_construction():
-    names = ("a", "b", "c")
-    rows = [{"a": 0.0, "b": 2.0, "c": 0.0}, {"a": 0.0, "b": 0.0, "c": 5.0}]
-    block = _sparse_block(rows, names)
-    assert issparse(block)
-    expected = np.array([[0.0, 2.0, 0.0], [0.0, 0.0, 5.0]], dtype=np.float32)
-    np.testing.assert_array_equal(block.toarray(), expected)
-    assert block.nnz == 2
-
-
-def test_ruleid_extractor_output_is_sparse_and_matches_dense_counts(monkeypatch):
+def test_ruleid_extractor_output_is_dense_and_matches_counts(monkeypatch):
     # symbkind 2979 (used elsewhere to match the paper's worked example) falls
     # outside ruleid's [832, 1844] range, so use an in-range value here instead.
     in_range_trace = "1:1000:100:CREATE:USER:admin|2:1000:101::: ||-||edges"
@@ -170,9 +159,11 @@ def test_ruleid_extractor_output_is_sparse_and_matches_dense_counts(monkeypatch)
     )
     ext = GaurExtractor(mode="ruleid")
     df = _frame()
-    matrix = ext.fit(df).transform(df)
-    assert issparse(matrix)
-    dense = matrix.toarray()
+    dense = ext.fit(df).transform(df)
+    # ruleid is dense like every other mode so the reference's StandardScaler /
+    # MaxAbsScaler (mean-centrable) can be applied downstream.
+    assert isinstance(dense, np.ndarray)
+    assert not issparse(dense)
     names = ext.get_feature_names_out()
     assert dense.shape == (2, len(names))
     # Both sample rows share the same stubbed trace: symbkind 1000 appears twice.

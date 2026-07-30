@@ -42,14 +42,13 @@ METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoenco
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    CountVectorizer and GAUR's ruleid counts are fed to OCSVM/LOF unscaled (an
-    identity transform): both are sparse, and StandardScaler's mean-centring does
-    not support sparse input. SecureBERT/CodeT5+ embeddings are also left unscaled
-    (SecureBERT's pooler_output is tanh-bounded to [-1, 1] and CodeT5+ embeddings
-    are L2-normalized; the references apply no scaler). Li dense features and the
-    other GAUR modes use StandardScaler, where centring and unit variance help.
+    CountVectorizer counts are fed to OCSVM/LOF unscaled (an identity transform):
+    the matrix is sparse and StandardScaler's mean-centring does not support sparse
+    input. SecureBERT/CodeT5+ embeddings are also left unscaled (tanh-bounded /
+    L2-normalized; the references apply no scaler). Li dense features and every GAUR
+    mode (including ruleid, which is dense) use StandardScaler, matching gaur-sql-detect.
     """
-    return FunctionTransformer() if extractor in ("cv", "sbert", "codet5", "gaur-ruleid") else StandardScaler()
+    return FunctionTransformer() if extractor in ("cv", "sbert", "codet5") else StandardScaler()
 
 
 # ----- OCSVM -----------------------------------------------------------------
@@ -535,18 +534,8 @@ def build_method(
                 scaler=FunctionTransformer(),
                 output_activation="tanh",
             )
-        if extractor == "gaur-ruleid":
-            # Same shape as cv: raw, unbounded, non-negative rule-identifier counts
-            # in a sparse matrix, so no scaler (an identity transform) and a ReLU
-            # output to reconstruct them.
-            return AEDetector(
-                config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=4096),
-                extractor=maybe_wrap(extractor_instance, cdir),
-                scaler=FunctionTransformer(),
-                output_activation="relu",
-            )
         if extractor.startswith("gaur-"):
-            # Semantic GAUR modes (expert + five LLMs): sigmoid output over the
+            # Every GAUR mode (expert, five LLMs, ruleid): sigmoid output over the
             # MaxAbsScaler-mapped [0, 1] features. Learning rate and batch size match
             # the reference gaur-sql-detect AE (1e-3 / 4096) so the released code
             # reproduces these numbers.

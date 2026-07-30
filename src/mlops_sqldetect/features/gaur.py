@@ -31,7 +31,6 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from scipy.sparse import csr_matrix, hstack
 from sklearn.base import BaseEstimator, TransformerMixin
 
 from mlops_sqldetect.features.li import FEATURE_NAMES as LI_FEATURE_NAMES
@@ -322,27 +321,6 @@ def _ruleid_counts(nodes: Iterable[TraceNode]) -> dict[str, float]:
     return counts
 
 
-def _sparse_block(rows: list[dict[str, float]], names: tuple[str, ...]) -> csr_matrix:
-    """Build a sparse ``(len(rows), len(names))`` matrix from per-row feature dicts.
-
-    Only the nonzero entries of each row are visited, so memory scales with the
-    number of nonzero counts rather than ``len(rows) * len(names)`` — the point of
-    keeping ``ruleid``'s ~1,013 mostly-zero rule-identifier columns out of a dense
-    array in the first place.
-    """
-    col_of = {name: i for i, name in enumerate(names)}
-    data: list[float] = []
-    row_idx: list[int] = []
-    col_idx: list[int] = []
-    for r, feats in enumerate(rows):
-        for name, value in feats.items():
-            if value:
-                row_idx.append(r)
-                col_idx.append(col_of[name])
-                data.append(value)
-    return csr_matrix((data, (row_idx, col_idx)), shape=(len(rows), len(names)), dtype=np.float32)
-
-
 def _tag_counts(mode: str, nodes: list[TraceNode]) -> dict[str, float]:
     if mode == "expert":
         return _expert_tag_counts(nodes)
@@ -563,14 +541,9 @@ class GaurExtractor(BaseEstimator, TransformerMixin):
         li_rows = [extract_li_features(q) for q in queries]
         li_matrix = np.asarray([[r[name] for name in LI_FEATURE_NAMES] for r in li_rows], dtype=np.float32)
 
-        if self.mode == "ruleid":
-            # ruleid's one-hot rule-identifier counts are ~1,013 columns and almost
-            # entirely zero per query: build them sparse instead of densifying the
-            # full matrix, mirroring CountVectorizerExtractor's sparse output — the
-            # other wide, high-cardinality extractor in this project.
-            gaur_block = _sparse_block(gaur_rows, gaur_names)
-            return hstack([gaur_block, csr_matrix(li_matrix)], format="csr")
-
+        # Every mode (including ruleid's ~1,013 rule-identifier columns) is returned
+        # dense: the reference gaur-sql-detect scales the whole feature frame with
+        # StandardScaler/MaxAbsScaler, which needs mean-centrable dense input.
         gaur_matrix = np.asarray([[r[name] for name in gaur_names] for r in gaur_rows], dtype=np.float32)
         return np.concatenate([gaur_matrix, li_matrix], axis=1)
 
