@@ -5,7 +5,7 @@ One invocation writes ``--out-dir`` (default the chapter's ``data/`` dir) with o
 experiment (the same grid the Chapter 3 tables draw from, so the baseline block of
 ``perfs-vs-sota.tex`` reproduces ``tab:sup25-metrics`` exactly):
 
-  * ``overhead-inference.tex`` (fig:overhead-inference-raw): AUROC versus per-query
+  * ``overhead-inference.tex`` (fig:overhead-inference): AUROC versus per-query
     *inference-only* latency scatter -- AUROC and the benchmark latencies (codet5, loginov,
     CountVectorizer) fetched live from MLflow, the IFIP-SEC raw totals hardcoded (RAW_INFERENCE);
   * ``performance-nov.tex`` (tab:performance-nov): P/R/F1/FPR/AUPRC/AUROC of \gaur{}
@@ -168,7 +168,7 @@ BASELINES: list[tuple[str, str]] = [
     ("cv", "CountVectorizer"),
     ("li", "Li et al."),
     ("loginov", "Loginov"),
-    ("sbert", "Secure-BERT"),
+    ("sbert", "SecureBERT"),
     ("codet5", "CodeT5+"),
 ]
 
@@ -468,34 +468,37 @@ RAW_INFERENCE: list[tuple[str, str, str]] = [
 # than hardcoded so a newly benchmarked extractor is picked up on the next run.
 LATENCY_EXPERIMENT = "Inference-Latency-Superviz25"
 
-# Feature extractors in figure-legend order: (extractor tag, legend label, HEX colour).
-# Paper-facing colours/labels, intentionally distinct from EXTRACTOR_LABELS.
+# Feature extractors in figure-legend order: (extractor tag, legend label, colour macro).
+# Paper-facing labels, intentionally distinct from EXTRACTOR_LABELS. The colour macro is
+# one already \definecolor'd in thesis/head/colors.tex (loaded once in the thesis
+# preamble), so the figure only ever references it by name -- it never redefines it.
 FIG_EXTRACTORS: list[tuple[str, str, str]] = [
-    ("gaur-expert", "Expert", "DCE775"),
-    ("gaur-chatgpt", "ChatGPT", "4FC3F7"),
-    ("gaur-claude", "Claude", "E57373"),
-    ("gaur-llama", "Llama", "8B7E74"),
-    ("gaur-mistral", "Mistral", "9FA8DA"),
-    ("gaur-gpt-oss", "GPT-OSS", "66BB6A"),
-    ("gaur-ruleid", "Naive", "0D47A1"),
-    ("cv", "CountVectorizer", "FB8C00"),
-    ("li", "Li et al.", "FFD54F"),
-    ("sbert", "SecureBERT", "7E57C2"),
-    ("codet5", "CodeT5+", "26A69A"),
-    ("loginov", "Loginov et al.", "EC407A"),
+    ("gaur-expert", "Expert", "expert"),
+    ("gaur-chatgpt", "ChatGPT", "chatgpt"),
+    ("gaur-claude", "Claude", "claude"),
+    ("gaur-llama", "Llama", "llama"),
+    ("gaur-mistral", "Mistral", "mistral"),
+    ("gaur-gpt-oss", "GPT-OSS", "ossgpt"),
+    ("gaur-ruleid", "Naive", "ruleid"),
+    ("cv", "CountVectorizer", "cv"),
+    ("li", "Li et al.", "li"),
+    ("sbert", "SecureBERT", "securebert"),
+    ("codet5", "CodeT5+", "codet5"),
+    ("loginov", "Loginov et al.", "loginov"),
 ]
 
 # Decision engines in legend order: (engine tag, legend label, pgfplots mark).
 FIG_ENGINES: list[tuple[str, str, str]] = [
     ("ocsvm", "OCSVM", "square*"),
     ("ae", "AE", "triangle*"),
+    ("lof", "LOF", "diamond*"),
 ]
 
 FIG_CAPTION = (
     r"AUROC score versus average per-query \emph{inference-only} time (data collection "
     r"excluded), measured on the \dataset{} dataset."
 )
-FIG_LABEL = "fig:overhead-inference-raw"
+FIG_LABEL = "fig:overhead-inference"
 
 # pgfplots mark size for the scatter points and legend swatches (raised from 3pt so the
 # overlapping low-latency cluster stays legible).
@@ -508,11 +511,6 @@ def _parse_hms(hms: str) -> float:
     """Seconds for a ``HH:MM:SS.micro`` wall-clock string."""
     h, m, s = hms.split(":")
     return int(h) * 3600 + int(m) * 60 + float(s)
-
-
-def _color_name(extractor: str) -> str:
-    """xcolor name for an extractor's colour (letters/digits only, tex-safe)."""
-    return "ext" + extractor.replace("-", "")
 
 
 def _bench_latencies() -> dict[tuple[str, str], float]:
@@ -573,18 +571,17 @@ def render_figure(points: FigPoint) -> str:
 
     aurocs = [xy[0] for xy in points.values()]
     xmin = math.floor(min(aurocs) * 50 - 1) / 50  # one 0.02 step below the smallest AUROC
-    color_defs = "\n".join(f"  \\definecolor{{{_color_name(e)}}}{{HTML}}{{{hexc}}}" for e, _, hexc in present)
 
     point_lines: list[str] = []
     for engine, _, mark in FIG_ENGINES:
-        for extractor, _, _ in present:
+        for extractor, _, color in present:
             xy = points.get((engine, extractor))
             if xy is None:
                 continue
             auroc, latency = xy
             point_lines.append(
                 f"      \\addplot[only marks, forget plot, mark={mark}, mark size={FIG_MARK_SIZE}, "
-                f"color={_color_name(extractor)}, mark options={{draw=black, line width=0.4pt}}] "
+                f"color={color}, mark options={{draw=black, line width=0.4pt}}] "
                 f"coordinates {{({auroc:.5f},{latency:.5f})}};"
             )
 
@@ -592,9 +589,9 @@ def render_figure(points: FigPoint) -> str:
     for _, label, mark in FIG_ENGINES:
         legend_lines.append(f"      \\addlegendimage{{only marks, mark={mark}, mark size={FIG_MARK_SIZE}, black}}")
         legend_lines.append(f"      \\addlegendentry{{{label}}}")
-    for extractor, label, _ in present:
+    for _, label, color in present:
         legend_lines.append(
-            f"      \\addlegendimage{{only marks, mark=square*, mark size={FIG_MARK_SIZE}, color={_color_name(extractor)}}}"
+            f"      \\addlegendimage{{only marks, mark=square*, mark size={FIG_MARK_SIZE}, color={color}}}"
         )
         legend_lines.append(f"      \\addlegendentry{{{label}}}")
 
@@ -612,10 +609,11 @@ def render_figure(points: FigPoint) -> str:
     )
     return (
         "% Auto-generated by tools.generate_observation_tex -- do not edit by hand.\n"
-        "% Requires \\usepackage{pgfplots} and \\pgfplotsset{compat=1.18} in the preamble.\n"
+        "% Requires \\usepackage{pgfplots} and \\pgfplotsset{compat=1.18} in the preamble, plus\n"
+        "% the colour macros \\definecolor'd in thesis/head/colors.tex (already loaded once in\n"
+        "% the thesis preamble, so they are not redefined here).\n"
         "\\begin{figure}[htb]\n"
         "  \\centering\n"
-        f"{color_defs}\n"
         "  \\begin{tikzpicture}\n"
         f"    \\begin{{axis}}[\n{axis_opts}\n      ]\n"
         f"{chr(10).join(point_lines)}\n"
