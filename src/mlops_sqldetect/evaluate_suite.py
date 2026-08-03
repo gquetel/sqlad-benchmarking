@@ -30,7 +30,7 @@ from sklearn.model_selection import train_test_split
 
 from mlops_sqldetect.data import load_whole_sampled, split_normals
 from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
-from mlops_sqldetect.features import EXTRACTOR_LABELS, EXTRACTORS
+from mlops_sqldetect.features import EXTRACTOR_LABELS, EXTRACTORS, extractor_observes_insider
 from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
 from mlops_sqldetect.model import METHOD_LABELS, AEDetector, MethodName, build_method
 from mlops_sqldetect.tracking import (
@@ -42,6 +42,10 @@ from mlops_sqldetect.tracking import (
 from mlops_sqldetect.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
 
 logger = logging.getLogger(__name__)
+# Dedicated to writing a failed cell's traceback into its own log file. propagate=False
+# keeps it off the root logger's console handler to prevent double print in stdout.
+_cell_failure_logger = logging.getLogger(f"{__name__}.cell_failure")
+_cell_failure_logger.propagate = False
 
 ALL_METHODS: tuple[MethodName, ...] = ("ocsvm", "lof", "ae")
 
@@ -198,6 +202,7 @@ def _run_one(
     log_handler.setLevel(logging.DEBUG)
     log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.getLogger().addHandler(log_handler)
+    _cell_failure_logger.addHandler(log_handler)
     try:
         return _run_one_tracked(
             family=family,
@@ -220,6 +225,7 @@ def _run_one(
         )
     finally:
         logging.getLogger().removeHandler(log_handler)
+        _cell_failure_logger.removeHandler(log_handler)
         log_handler.close()
 
 
@@ -248,13 +254,16 @@ def _run_one_tracked(
         f"=== {METHOD_LABELS.get(method, method)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
         f"on {family.name.capitalize()}/{scenario.value} ==="
     )
+    # Insider observability is a declared property of the collector (see
+    # features.extractor_observes_insider); --capture-insider is an explicit override.
+    capture_insider = capture_insider or extractor_observes_insider(extractor)
     # attack_technique is needed for per-technique recall; it is NaN on normal rows.
     if limit is not None:
         # Smoke run: sample `limit` rows from the whole file (all splits, both
         # labels) *before* splitting on `split`, rather than subsampling each
         # split independently. Split proportions follow the file's distribution.
         df_all = load_whole_sampled(
-            family.resolve_path(dataset, data_root),
+            family.resolve_path(scenario, data_root),
             columns=("full_query", "label", "split", "attack_technique"),
             limit=limit,
             seed=seed,
@@ -443,10 +452,12 @@ def _run_one_tracked(
                     log_and_register_detector(model_path, registered_name, df_test[["full_query"]].head(3))
 
             return row
+        except Exception:
+            _cell_failure_logger.exception(f"Cell {stem} failed")
+            raise
         finally:
             # Attach the captured per-cell log even if the cell raised: a failed run
-            # should still carry its diagnostics in MLflow. Best-effort — never let a
-            # logging error mask the original exception.
+            # should still carry its diagnostics in MLflow.
             if track:
                 try:
                     log_handler.flush()

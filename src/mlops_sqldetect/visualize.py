@@ -287,9 +287,7 @@ def plot_combined_curves_tikz(
         "% and \\usepgfplotslibrary{groupplots} in the preamble.\n"
         f"{color_defs}\n"
         "\\begin{tikzpicture}\n"
-        f"    \\begin{{groupplot}}[\n        {group_opts}\n      ]\n"
-        + "\n".join(panels)
-        + "\n    \\end{groupplot}\n"
+        f"    \\begin{{groupplot}}[\n        {group_opts}\n      ]\n" + "\n".join(panels) + "\n    \\end{groupplot}\n"
         "\\end{tikzpicture}\n"
         "\\par\\vspace{0.4\\baselineskip}\n"
         "\\ref{perfleg}\n"

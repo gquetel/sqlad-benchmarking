@@ -9,6 +9,7 @@ in use. To add a new extractor: implement the transformer, then register it here
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Callable
 
@@ -17,6 +18,7 @@ from sklearn.base import TransformerMixin
 from mlops_sqldetect.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
 from mlops_sqldetect.features.codet5 import CodeT5Extractor
 from mlops_sqldetect.features.countvect import CountVectorizerExtractor
+from mlops_sqldetect.features.gaur import GaurExtractor
 from mlops_sqldetect.features.li import LiExtractor, extract_li_features
 from mlops_sqldetect.features.loginov import LoginovExtractor, extract_loginov_features
 from mlops_sqldetect.features.securebert import SecureBertExtractor
@@ -28,20 +30,45 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "sbert": SecureBertExtractor,
     "loginov": LoginovExtractor,
     "codet5": CodeT5Extractor,
+    "gaur-expert": functools.partial(GaurExtractor, mode="expert"),
+    "gaur-chatgpt": functools.partial(GaurExtractor, mode="chatgpt"),
+    "gaur-claude": functools.partial(GaurExtractor, mode="claude"),
+    "gaur-llama": functools.partial(GaurExtractor, mode="llama"),
+    "gaur-mistral": functools.partial(GaurExtractor, mode="mistral"),
+    "gaur-gpt-oss": functools.partial(GaurExtractor, mode="gpt-oss"),
+    "gaur-ruleid": functools.partial(GaurExtractor, mode="ruleid"),
 }
 
 # Default extractor used when a caller does not specify one.
 DEFAULT_EXTRACTOR = "li"
 
 # Human-readable labels for logs and MLflow run names. Acronyms stay uppercase;
-# labels mirror their reference works (Li et al., SecureBERT).
+# labels mirror their reference works (Li et al., SecureBERT, GAUR).
 EXTRACTOR_LABELS: dict[str, str] = {
     "li": "Li",
     "cv": "CountVectorizer",
     "sbert": "SecureBERT",
     "loginov": "Loginov",
     "codet5": "CodeT5+",
+    "gaur-expert": "GAUR (Expert)",
+    "gaur-chatgpt": "GAUR (ChatGPT)",
+    "gaur-claude": "GAUR (Claude)",
+    "gaur-llama": "GAUR (Llama)",
+    "gaur-mistral": "GAUR (Mistral)",
+    "gaur-gpt-oss": "GAUR (GPT-OSS)",
+    "gaur-ruleid": "GAUR (RuleID)",
 }
+
+
+def extractor_observes_insider(name: str) -> bool:
+    """Whether the named collector observes insider traffic (queries run directly against the DBMS).
+
+    Declared per collector via its ``observes_insider`` class attribute; resolved off the
+    registered factory (unwrapping ``functools.partial``) so no extractor is built.
+    """
+    factory = EXTRACTORS.get(name)
+    cls = getattr(factory, "func", factory)  # unwrap functools.partial(GaurExtractor, ...)
+    return bool(getattr(cls, "observes_insider", False))
 
 
 def build_extractor(name: str = DEFAULT_EXTRACTOR, cache_dir: str | os.PathLike | None = None) -> TransformerMixin:
@@ -65,10 +92,12 @@ __all__ = [
     "CachingExtractor",
     "CodeT5Extractor",
     "CountVectorizerExtractor",
+    "GaurExtractor",
     "LiExtractor",
     "LoginovExtractor",
     "SecureBertExtractor",
     "build_extractor",
+    "extractor_observes_insider",
     "extract_li_features",
     "extract_loginov_features",
     "resolve_cache_dir",

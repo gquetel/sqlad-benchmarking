@@ -129,10 +129,7 @@ EMBEDDING_LABELS: dict[str, str] = {
 }
 DETECTOR_LABELS: dict[str, str] = {"ae": "AE", "lof": "LOF", "ocsvm": "OCSVM"}
 
-METRICS_CAPTION = (
-    "Performance metrics for studied novelty detection methods. Best value per outcome "
-    "column in bold."
-)
+METRICS_CAPTION = "Performance metrics for studied novelty detection methods. Best value per outcome column in bold."
 RECALL_CAPTION = (
     r"Per-technique recall (\%) heatmap for studied detection methods. Cell shading "
     r"encodes recall from 0\% (white) to 100\% (green)."
@@ -315,8 +312,7 @@ def render_recall_table(data: Results) -> str:
     def row_cells(extractor: str, engine: str) -> str:
         cell = data.get((extractor, engine))
         cells = (
-            _fmt_heat(None if cell is None else cell[f"recall_{suffix}"]).ljust(_HEAT_WIDTH)
-            for suffix, _ in TECHNIQUES
+            _fmt_heat(None if cell is None else cell[f"recall_{suffix}"]).ljust(_HEAT_WIDTH) for suffix, _ in TECHNIQUES
         )
         return " & ".join(cells).rstrip()
 

@@ -42,11 +42,8 @@ METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoenco
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    CountVectorizer counts and SecureBERT/CodeT5+ embeddings are fed to OCSVM/LOF
-    unscaled (an identity transform): word counts go in raw, SecureBERT's
-    pooler_output is tanh-bounded to [-1, 1], and CodeT5+ embeddings are
-    L2-normalized (the references apply no scaler). Li dense features use
-    StandardScaler, where centring and unit variance help.
+    cv/sbert/codet5 stay unscaled (cv is sparse; the embeddings are already bounded).
+    Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
     """
     return FunctionTransformer() if extractor in ("cv", "sbert", "codet5") else StandardScaler()
 
@@ -496,10 +493,13 @@ def build_method(
     extractor_instance = build_extractor(extractor)
     cdir = resolve_cache_dir(cache, cache_dir)
     if name == "ocsvm":
-        # Raw word counts (cv) and the SecureBERT/CodeT5+ embeddings have a wider
-        # spread than Li features, so the QP solver needs a higher iteration budget
-        # to converge; Li keeps the default.
-        config = OCSVMConfig(max_iter=10000) if extractor in ("cv", "sbert", "codet5") else OCSVMConfig()
+        # cv/sbert/codet5/gaur-* need a higher QP iteration budget to converge
+        # (wider spread than Li); Li keeps the default.
+        config = (
+            OCSVMConfig(max_iter=10000)
+            if extractor in ("cv", "sbert", "codet5") or extractor.startswith("gaur-")
+            else OCSVMConfig()
+        )
         return OCSVMDetector(
             config=config, extractor=maybe_wrap(extractor_instance, cdir), scaler=_scaler_for(extractor)
         )
@@ -528,6 +528,14 @@ def build_method(
                 extractor=maybe_wrap(extractor_instance, cdir),
                 scaler=FunctionTransformer(),
                 output_activation="tanh",
+            )
+        if extractor.startswith("gaur-"):
+            # Sigmoid output over MaxAbsScaler's [0, 1] features; lr/batch size match
+            # the reference gaur-sql-detect AE.
+            return AEDetector(
+                config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=4096),
+                extractor=maybe_wrap(extractor_instance, cdir),
+                scaler=MaxAbsScaler(),
             )
         # Li dense features are non-negative, so a sigmoid output needs inputs in
         # [0, 1]: MaxAbsScaler maps the feature matrix into that range.

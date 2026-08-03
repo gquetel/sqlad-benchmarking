@@ -41,7 +41,7 @@ from mlops_sqldetect.evaluate_suite import (
     _validate_grid,
     parent_run_spec,
 )
-from mlops_sqldetect.features import EXTRACTOR_LABELS
+from mlops_sqldetect.features import EXTRACTOR_LABELS, extractor_observes_insider
 from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
 from mlops_sqldetect.model import METHOD_LABELS, AEDetector, MethodName, build_method
 from mlops_sqldetect.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
@@ -351,6 +351,9 @@ def evaluate_drift(
     rows: list[DriftResultRow] = []
     for method in requested_methods:
         for extractor in requested_extractors:
+            # Insider observability is a declared property of the collector (see
+            # features.extractor_observes_insider); --capture-insider is an explicit override.
+            cell_capture_insider = capture_insider or extractor_observes_insider(extractor)
             parent_name, parent_tags = parent_run_spec(family, method, extractor)
             parent_ctx = (
                 mlflow.start_run(run_id=ensure_parent_run(parent_tags, parent_name)) if track_enabled else nullcontext()
@@ -366,7 +369,7 @@ def evaluate_drift(
                         model_dir,
                         limit=limit,
                         target_fpr=target_fpr,
-                        capture_insider=capture_insider,
+                        capture_insider=cell_capture_insider,
                         seed=seed,
                         track=track_enabled,
                         cache=cache,

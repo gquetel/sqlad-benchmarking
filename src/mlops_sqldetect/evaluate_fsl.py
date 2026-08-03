@@ -48,7 +48,7 @@ from mlops_sqldetect.data import split_normals
 from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
 from mlops_sqldetect.datasets.superviz26_fsl import Superviz26, Superviz26FSL, load_fsl, lodo_source
 from mlops_sqldetect.evaluate_suite import _model_filename, _validate_grid, parent_run_spec
-from mlops_sqldetect.features import EXTRACTOR_LABELS
+from mlops_sqldetect.features import EXTRACTOR_LABELS, extractor_observes_insider
 from mlops_sqldetect.metrics import threshold_for_fpr, wilson_ci
 from mlops_sqldetect.model import AEDetector
 from mlops_sqldetect.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
@@ -387,6 +387,9 @@ def evaluate_fsl(
 
     rows: list[FSLResultRow] = []
     for extractor in requested_extractors:
+        # Insider observability is a declared property of the collector (see
+        # features.extractor_observes_insider); --capture-insider is an explicit override.
+        cell_capture_insider = capture_insider or extractor_observes_insider(extractor)
         parent_name, parent_tags = parent_run_spec(family, "ae", extractor)
         parent_ctx = (
             mlflow.start_run(run_id=ensure_parent_run(parent_tags, parent_name)) if track_enabled else nullcontext()
@@ -404,7 +407,7 @@ def evaluate_fsl(
                     test_limit=test_limit,
                     lr_scale=lr_scale,
                     target_fpr=target_fpr,
-                    capture_insider=capture_insider,
+                    capture_insider=cell_capture_insider,
                     track=track_enabled,
                 )
                 rows.extend(cell_rows)
