@@ -219,7 +219,8 @@ def submit(
     suite: Annotated[str, typer.Option(help="Suite name (e.g. in_domain, lodo, all).")] = "all",
     methods: Annotated[str, typer.Option(help="Comma-separated decision-head names (ocsvm, lof, ae).")] = "ocsvm,ae",
     extractors: Annotated[
-        str, typer.Option(help="Comma-separated feature-extractor names (li, loginov, cv, sbert, codet5).")
+        str,
+        typer.Option(help="Comma-separated feature-extractor names (li, loginov, cv, cv-kw, cv-nokw, sbert, codet5)."),
     ] = "li",
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     gpu_section: Annotated[

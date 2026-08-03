@@ -28,7 +28,7 @@ from sklearn.svm import OneClassSVM
 from torch import nn
 
 from sqlad_benchmarking.determinism import enable_determinism
-from sqlad_benchmarking.features import DEFAULT_EXTRACTOR, build_extractor
+from sqlad_benchmarking.features import CV_EXTRACTORS, CV_MAX_FEATURES, DEFAULT_EXTRACTOR, build_extractor
 from sqlad_benchmarking.features.cache import maybe_wrap, resolve_cache_dir
 
 logger = logging.getLogger(__name__)
@@ -42,10 +42,11 @@ METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoenco
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    cv/sbert/codet5 stay unscaled (cv is sparse; the embeddings are already bounded).
-    Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
+    The cv family and sbert/codet5 stay unscaled (cv is sparse; the embeddings are
+    already bounded). Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
     """
-    return FunctionTransformer() if extractor in ("cv", "sbert", "codet5") else StandardScaler()
+    unscaled = extractor in CV_EXTRACTORS or extractor in ("sbert", "codet5")
+    return FunctionTransformer() if unscaled else StandardScaler()
 
 
 # ----- OCSVM -----------------------------------------------------------------
@@ -208,11 +209,6 @@ class LOFDetector:
 
 
 # ----- AutoEncoder -----------------------------------------------------------
-
-# Caps the CountVectorizer vocabulary feeding the AE: its input width equals the
-# feature count and the matrix is densified, so an unbounded vocabulary would blow
-# up the network size and memory. Other heads keep the full vocabulary.
-AE_CV_MAX_FEATURES = 20000
 
 
 @dataclass
@@ -493,25 +489,23 @@ def build_method(
     extractor_instance = build_extractor(extractor)
     cdir = resolve_cache_dir(cache, cache_dir)
     if name == "ocsvm":
-        # cv/sbert/codet5/gaur-* need a higher QP iteration budget to converge
+        # cv family/sbert/codet5/gaur-* need a higher QP iteration budget to converge
         # (wider spread than Li); Li keeps the default.
-        config = (
-            OCSVMConfig(max_iter=10000)
-            if extractor in ("cv", "sbert", "codet5") or extractor.startswith("gaur-")
-            else OCSVMConfig()
-        )
+        wide = extractor in CV_EXTRACTORS or extractor in ("sbert", "codet5") or extractor.startswith("gaur-")
+        config = OCSVMConfig(max_iter=10000) if wide else OCSVMConfig()
         return OCSVMDetector(
             config=config, extractor=maybe_wrap(extractor_instance, cdir), scaler=_scaler_for(extractor)
         )
     if name == "lof":
         return LOFDetector(extractor=maybe_wrap(extractor_instance, cdir), scaler=_scaler_for(extractor))
     if name == "ae":
-        if extractor == "cv":
-            # cv AE trains directly on raw word counts: no scaler (an identity
+        if extractor in CV_EXTRACTORS:
+            # cv AEs train directly on raw word counts: no scaler (an identity
             # transform) and a ReLU output to reconstruct the non-negative,
             # unbounded counts. The vocabulary is capped because the AE densifies
-            # its input and its width equals the feature count.
-            extractor_instance.set_params(max_features=AE_CV_MAX_FEATURES)
+            # its input and its width equals the feature count; cv-kw ignores the
+            # cap, its vocabulary being fixed and already narrow.
+            extractor_instance.set_params(max_features=CV_MAX_FEATURES)
             return AEDetector(
                 config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=4096),
                 extractor=maybe_wrap(extractor_instance, cdir),

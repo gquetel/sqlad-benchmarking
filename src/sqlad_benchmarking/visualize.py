@@ -26,7 +26,15 @@ PAPER_FONT = "CMU Serif"
 
 # Combined-figure styling: extractor sets the colour, method sets the dash so a
 # (method, extractor) cell is identifiable from either axis of comparison.
-EXTRACTOR_COLORS = {"li": "#ffd54f", "sbert": "#7E57C2", "cv": "#6490f6", "loginov": "#26a69a", "codet5": "#ef5350"}
+EXTRACTOR_COLORS = {
+    "li": "#ffd54f",
+    "sbert": "#7E57C2",
+    "cv": "#6490f6",
+    "cv-kw": "#1e88e5",
+    "cv-nokw": "#90caf9",
+    "loginov": "#26a69a",
+    "codet5": "#ef5350",
+}
 METHOD_DASHES = {"ae": "solid", "lof": "dash", "ocsvm": "dot"}
 
 

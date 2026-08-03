@@ -17,7 +17,12 @@ from sklearn.base import TransformerMixin
 
 from sqlad_benchmarking.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
 from sqlad_benchmarking.features.codet5 import CodeT5Extractor
-from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
+from sqlad_benchmarking.features.countvect import (
+    CV_MAX_FEATURES,
+    CountVectorizerExtractor,
+    NonSqlKeywordCountVectorizerExtractor,
+    SqlKeywordCountVectorizerExtractor,
+)
 from sqlad_benchmarking.features.gaur import GaurExtractor
 from sqlad_benchmarking.features.li import LiExtractor, extract_li_features
 from sqlad_benchmarking.features.loginov import LoginovExtractor, extract_loginov_features
@@ -27,6 +32,8 @@ from sqlad_benchmarking.features.securebert import SecureBertExtractor
 EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "li": LiExtractor,
     "cv": CountVectorizerExtractor,
+    "cv-kw": SqlKeywordCountVectorizerExtractor,
+    "cv-nokw": NonSqlKeywordCountVectorizerExtractor,
     "sbert": SecureBertExtractor,
     "loginov": LoginovExtractor,
     "codet5": CodeT5Extractor,
@@ -42,11 +49,17 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
 # Default extractor used when a caller does not specify one.
 DEFAULT_EXTRACTOR = "li"
 
+# Extractors producing a sparse, non-negative word-count matrix; decision heads
+# treat them alike (no scaling, ReLU reconstruction, capped AE input width).
+CV_EXTRACTORS: frozenset[str] = frozenset({"cv", "cv-kw", "cv-nokw"})
+
 # Human-readable labels for logs and MLflow run names. Acronyms stay uppercase;
 # labels mirror their reference works (Li et al., SecureBERT, GAUR).
 EXTRACTOR_LABELS: dict[str, str] = {
     "li": "Li",
     "cv": "CountVectorizer",
+    "cv-kw": "CountVectorizer (SQL keywords)",
+    "cv-nokw": "CountVectorizer (non-keywords)",
     "sbert": "SecureBERT",
     "loginov": "Loginov",
     "codet5": "CodeT5+",
@@ -86,6 +99,8 @@ def build_extractor(name: str = DEFAULT_EXTRACTOR, cache_dir: str | os.PathLike 
 
 
 __all__ = [
+    "CV_EXTRACTORS",
+    "CV_MAX_FEATURES",
     "DEFAULT_EXTRACTOR",
     "EXTRACTORS",
     "EXTRACTOR_LABELS",
@@ -95,7 +110,9 @@ __all__ = [
     "GaurExtractor",
     "LiExtractor",
     "LoginovExtractor",
+    "NonSqlKeywordCountVectorizerExtractor",
     "SecureBertExtractor",
+    "SqlKeywordCountVectorizerExtractor",
     "build_extractor",
     "extractor_observes_insider",
     "extract_li_features",

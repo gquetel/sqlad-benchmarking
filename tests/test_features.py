@@ -12,7 +12,13 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 from sqlad_benchmarking.features import EXTRACTORS, build_extractor
 from sqlad_benchmarking.features.cache import CachingExtractor
-from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
+from sqlad_benchmarking.features.countvect import (
+    CV_MAX_FEATURES,
+    SQL_TERMS,
+    CountVectorizerExtractor,
+    NonSqlKeywordCountVectorizerExtractor,
+    SqlKeywordCountVectorizerExtractor,
+)
 from sqlad_benchmarking.features.loginov import FEATURE_NAMES, LoginovExtractor, extract_loginov_features
 
 
@@ -32,6 +38,8 @@ def test_registry_exposes_all_extractors():
     assert set(EXTRACTORS) == {
         "li",
         "cv",
+        "cv-kw",
+        "cv-nokw",
         "sbert",
         "loginov",
         "codet5",
@@ -66,6 +74,37 @@ def test_countvect_is_stateful_and_sparse():
 def test_countvect_accepts_list_of_strings():
     ext = CountVectorizerExtractor().fit(["select 1", "select 2"])
     assert ext.transform(["select 1"]).shape == (1, ext.transform(["select 1"]).shape[1])
+
+
+def test_countvect_keyword_variant_has_a_corpus_independent_vocabulary():
+    ext = SqlKeywordCountVectorizerExtractor().fit(_frame())
+    assert tuple(ext.get_feature_names_out()) == SQL_TERMS
+    # Fitting on unrelated queries must not move the feature space.
+    other = SqlKeywordCountVectorizerExtractor().fit(["insert into t values (2)"])
+    assert tuple(other.get_feature_names_out()) == SQL_TERMS
+
+    counts = ext.transform(["select name from t union select password from admin"]).toarray()[0]
+    index = ext.vectorizer_.vocabulary_
+    assert counts[index["select"]] == 2
+    assert counts[index["union"]] == 1
+    assert "password" not in index
+
+
+def test_countvect_non_keyword_variant_drops_sql_terms():
+    ext = NonSqlKeywordCountVectorizerExtractor().fit(_frame())
+    vocab = set(ext.get_feature_names_out())
+    assert ext.max_features == CV_MAX_FEATURES
+    assert not vocab & set(SQL_TERMS)
+    assert {"users", "airports", "password", "admin"} <= vocab
+
+
+def test_countvect_variants_partition_the_plain_vocabulary():
+    df = _frame()
+    plain = set(CountVectorizerExtractor().fit(df).get_feature_names_out())
+    keyword = set(SqlKeywordCountVectorizerExtractor().fit(df).get_feature_names_out())
+    non_keyword = set(NonSqlKeywordCountVectorizerExtractor().fit(df).get_feature_names_out())
+    assert plain - keyword == non_keyword
+    assert plain & keyword == plain - non_keyword
 
 
 def test_li_extractor_is_dense_fixed_width():

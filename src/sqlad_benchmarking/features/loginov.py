@@ -20,7 +20,7 @@ from sklearn.utils.validation import check_is_fitted
 
 # Union of MySQL reserved keywords and built-in function names (upper-cased),
 # ported from the reference constants module. Used to flag keyword tokens.
-_SQL_KEYWORDS: frozenset[str] = frozenset(
+SQL_KEYWORDS: frozenset[str] = frozenset(
     {
         "!",
         "ABS",
@@ -692,7 +692,7 @@ def _classify_tokens(tokens: list[str]) -> tuple[int, int, int, int]:
     for tok in tokens:
         if not tok:
             continue
-        if tok.upper() in _SQL_KEYWORDS:
+        if tok.upper() in SQL_KEYWORDS:
             n_kw += 1
         elif tok.isalpha():
             n_alpha += 1

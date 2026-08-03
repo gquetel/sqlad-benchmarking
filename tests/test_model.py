@@ -51,6 +51,8 @@ def test_scaler_for_routes_per_extractor():
     # cv (raw counts) and the sbert/codet5 embeddings go to OCSVM/LOF unscaled;
     # the Li and Loginov dense features are standardised.
     assert isinstance(_scaler_for("cv"), FunctionTransformer)
+    assert isinstance(_scaler_for("cv-kw"), FunctionTransformer)
+    assert isinstance(_scaler_for("cv-nokw"), FunctionTransformer)
     assert isinstance(_scaler_for("sbert"), FunctionTransformer)
     assert isinstance(_scaler_for("codet5"), FunctionTransformer)
     assert isinstance(_scaler_for("li"), StandardScaler)
@@ -64,6 +66,8 @@ def test_scaler_for_routes_per_extractor():
         "li",
         "loginov",
         "cv",
+        "cv-kw",
+        "cv-nokw",
         pytest.param("sbert", marks=pytest.mark.slow),
         pytest.param("codet5", marks=pytest.mark.slow),
     ],
@@ -92,6 +96,8 @@ def test_sklearn_heads_rank_attacks_above_normals(head, extractor):
         "li",
         "loginov",
         "cv",
+        "cv-kw",
+        "cv-nokw",
         pytest.param("sbert", marks=pytest.mark.slow),
         pytest.param("codet5", marks=pytest.mark.slow),
     ],
