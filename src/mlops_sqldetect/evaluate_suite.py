@@ -254,10 +254,8 @@ def _run_one_tracked(
         f"=== {METHOD_LABELS.get(method, method)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
         f"on {family.name.capitalize()}/{scenario.value} ==="
     )
-    # Whether insider attacks reach the collector's observation point is a property of the
-    # collector, declared per extractor (see features.extractor_observes_insider): GAUR
-    # instruments the parser and observes insider traffic, external collectors do not. The
-    # CLI --capture-insider stays an explicit override on top of that declared capability.
+    # Insider observability is a declared property of the collector (see
+    # features.extractor_observes_insider); --capture-insider is an explicit override.
     capture_insider = capture_insider or extractor_observes_insider(extractor)
     # attack_technique is needed for per-technique recall; it is NaN on normal rows.
     if limit is not None:

@@ -1,26 +1,16 @@
-"""Inference-latency benchmark for the IFIPSEC RQ2.3 figure, split by where a cell can run.
+"""Inference-latency benchmark for the IFIPSEC RQ2.3 figure.
 
-GAUR cells re-collect traces from a live instrumented MySQL server (via ``gaur_sqld``),
-so they can only run where that server lives -- lame25 -- not on arbitrary SLURM nodes.
-The other extractors have no such dependency and fan out to the cluster. Two commands:
+GAUR cells need a live instrumented MySQL server, so they run in-process on
+lame25; everything else fans out to SLURM as array jobs.
 
-    python -m tools.benchmark cluster   # cv/li/loginov/sbert/codet5 -> SLURM (run on the submit node)
-    python -m tools.benchmark lames     # gaur-* -> in-process (run on lame25)
+    python -m tools.benchmark cluster   # cv/li/loginov/sbert/codet5 -> SLURM
+    python -m tools.benchmark lames     # gaur-* -> in-process on lame25
 
-``cluster`` fans each cell out as a SLURM array task (``run-cell`` below). ``lames`` runs the
-GAUR cells sequentially in-process. Both load-or-train the fitted model, time scoring with the
-feature cache off, and log ``infer_ms_per_query`` to the dedicated
-``Inference-Latency-Superviz25`` experiment. Detection results are reused, never recomputed.
-The overhead figure is rendered separately by :mod:`tools.generate_observation_tex`, which reads
-the logged ``infer_ms_per_query`` values back (feed cv/lof numbers into its latency tables).
-
-Why the cache must be off: the feature cache
-(:class:`~mlops_sqldetect.features.cache.CachingExtractor`) is shared across decision engines,
-so per extractor only the first run computes features cold and the rest read the matrix back --
-the suite's ``score_seconds`` is therefore not a usable latency. Device policy matches the paper:
-only SecureBERT/CodeT5+ time on GPU (their cluster GPU bucket); every other cell -- including the
-autoencoders and all GAUR cells -- times on CPU. Cluster resources come from
-``configs/slurm.yaml`` (same machinery as :mod:`tools.slurm_submit`).
+Both load-or-train the model, time scoring with the feature cache off (a warm
+cache would time a cache hit, not real inference), and log
+``infer_ms_per_query`` to the ``Inference-Latency-Superviz25`` experiment.
+Device policy matches the paper: only SecureBERT/CodeT5+ time on GPU, everything
+else on CPU. The figure itself is rendered by :mod:`tools.generate_observation_tex`.
 """
 
 from __future__ import annotations
@@ -71,10 +61,8 @@ CLUSTER_EXTRACTORS = "cv,li,loginov,sbert,codet5"
 DEFAULT_METHODS = "ocsvm,ae,lof"
 # Per-cell latency CSVs (one file per array task, no shared writer).
 CELLS_DIR = REPO_ROOT / "reports" / "superviz25" / "cells-inference"
-# Latency is a per-query figure (infer_ms_per_query), so timing over a random
-# sample of the test split gives the same number as the full 3.35M rows at a
-# fraction of the cost -- GAUR cells re-collect traces uncached on every one of
-# the warmup+repeats passes, so the full split is prohibitively slow. 0 = full split.
+# Timing a random sample gives the same per-query number as the full 3.35M rows,
+# much cheaper since GAUR re-collects traces uncached each pass. 0 = full split.
 TIMING_SAMPLE = 5000
 
 try:
@@ -97,11 +85,7 @@ def _extractor_step(model: Detector) -> object:
 
 
 def _disable_feature_cache(model: Detector) -> bool:
-    """Turn the feature cache off so ``transform`` recomputes features every call.
-
-    Returns True when the model carried a cache wrapper (i.e. was trained with
-    caching on); a model trained cache-off already recomputes and needs no change.
-    """
+    """Turn the feature cache off so ``transform`` recomputes every call; returns True if it had one."""
     ext = _extractor_step(model)
     if isinstance(ext, CachingExtractor):
         ext.cache_dir = None
@@ -130,10 +114,9 @@ def _enable_benchmark_tracking() -> bool:
 
 
 def _time_score(model: Detector, df: pd.DataFrame, repeats: int, warmup: int) -> list[float]:
-    """Time ``score_samples(df)`` ``repeats`` times after ``warmup`` untimed runs.
+    """Time ``score_samples(df)`` ``repeats`` times after ``warmup`` untimed runs; returns per-run seconds.
 
-    Returns the per-run wall-clock seconds. CUDA work is synchronised around each
-    timed run so GPU latency is not undercounted by asynchronous kernel launches.
+    Syncs CUDA around each run so async kernel launches don't undercount GPU latency.
     """
     sync = _is_cuda_model(model)
     for _ in range(warmup):
@@ -151,11 +134,7 @@ def _time_score(model: Detector, df: pd.DataFrame, repeats: int, warmup: int) ->
 
 
 def _train_model(method: MethodName, extractor: str, df_fit: pd.DataFrame, model_path: Path, cache: bool) -> Detector:
-    """Fit a model on ``df_fit`` and save it, mirroring the eval suite's training.
-
-    ``df_fit`` is the seed-split 90% of the train-normal rows, so the fitted model
-    matches the one behind the detection results already in MLflow.
-    """
+    """Fit a model on ``df_fit`` (the eval suite's seed-split 90% of train normals) and save it."""
     logger.info(f"Training missing model {method}+{extractor} on {len(df_fit)} normals -> {model_path}")
     model = build_method(method, extractor, cache=cache)
     model.fit(df_fit)
@@ -164,14 +143,7 @@ def _train_model(method: MethodName, extractor: str, df_fit: pd.DataFrame, model
 
 
 def _load_test_df(data_root: Path | None, sample: int = TIMING_SAMPLE, seed: int = 7) -> pd.DataFrame:
-    """Load the SuperViz25 test split used for timing (carries attack_technique).
-
-    Latency is reported per query, so a random ``sample`` of the split is timed
-    instead of all 3.35M rows -- the same ``infer_ms_per_query`` for a tiny
-    fraction of the cost (critical for GAUR cells, which re-collect traces uncached
-    on every pass). ``sample <= 0`` (or larger than the split) times the full split.
-    Sampling is ``seed``-deterministic so every cell is timed on the same queries.
-    """
+    """Load the SuperViz25 test split for timing, seed-sampled to ``sample`` rows (<=0 = full split)."""
     family = FAMILIES[DATASET]
     scenario = family.suites["all"][0]
     df = family.load_split(scenario, "test", root=data_root, columns=("full_query", "label", "attack_technique"))
@@ -380,11 +352,7 @@ def cluster(
     run_id: Annotated[str | None, typer.Option(help="Submission id (names the dir under submit_dir).")] = None,
     dry_run: Annotated[bool, typer.Option(help="Print manifests and sbatch commands without submitting.")] = False,
 ) -> None:
-    """Fan the non-GAUR cells out to SLURM, one array per resource class (run on the submit node).
-
-    The figure is rendered separately by ``tools.generate_observation_tex`` from the
-    ``infer_ms_per_query`` values logged here (run it after the GAUR cells are timed too).
-    """
+    """Fan the non-GAUR cells out to SLURM, one array per resource class (run on the submit node)."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if any(e.strip().startswith("gaur") for e in extractors.split(",")):
         raise typer.BadParameter("GAUR extractors need the MySQL server; run them with the 'lames' command.")
@@ -450,11 +418,7 @@ def lames(
     cache: Annotated[bool, typer.Option(help="Cache features during the train-missing fit.")] = True,
     track: Annotated[bool, typer.Option(help="Log a latency run per cell to MLflow.")] = True,
 ) -> None:
-    """Benchmark the GAUR cells in-process on lame25 (needs the instrumented MySQL server), CPU-timed.
-
-    GAUR feature extraction re-collects traces from a live instrumented MySQL server, so these
-    cells cannot go through SLURM; run this where that server and ``gaur_sqld`` live (lame25).
-    """
+    """Benchmark the GAUR cells in-process on lame25 (needs the instrumented MySQL server), CPU-timed."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if not all(e.strip().startswith("gaur") for e in extractors.split(",") if e.strip()):
         raise typer.BadParameter("The 'lames' command is for GAUR extractors only; use 'cluster' for the rest.")

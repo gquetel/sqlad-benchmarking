@@ -1,21 +1,9 @@
-"""GAUR feature extractor: parser-instrumentation-derived features for MySQL queries.
+"""GAUR feature extractor: turns MySQL parser traces into fixed-width features.
 
-This module talks to :mod:`gaur_sqld` (https://github.com/gquetel/gaur-sql-detect),
-which drives a GAUR-instrumented MySQL server (auto-provisioned via Nix from
-gaur-instrumented-apps) to collect one trace per query, then turns each trace
-into a fixed-width feature vector.
-
-Seven modes are supported, one per semantic model instantiation evaluated in
-the paper: ``expert`` (hand-crafted action/object tags), five LLM-instantiated
-tag sets (``chatgpt``, ``claude``, ``llama``, ``mistral``, ``gpt-oss``), and
-``ruleid``, a purely syntactic ablation that maps every grammar rule to its own
-tag instead of a semantic one. ``ruleid`` carries no semantic tags of its own,
-so it reuses the ``expert`` GAUR-instrumented server and only its rule
-identifiers (``symbkind``) are read from the trace.
-
-Every mode concatenates its own features with Li et al.'s hand-crafted features
-(:mod:`mlops_sqldetect.features.li`) to create a collector with a full view on
-lexical, syntactic and semantic features.
+Uses :mod:`gaur_sqld` to run a GAUR-instrumented MySQL server and collect one
+trace per query. 7 modes: ``expert`` (hand-tagged), 5 LLM-tagged sets, and
+``ruleid`` (raw grammar-rule ids, no semantics). Every mode is concatenated
+with Li et al.'s features (:mod:`mlops_sqldetect.features.li`).
 """
 
 from __future__ import annotations
@@ -202,9 +190,8 @@ _LLM_TAGS: dict[str, tuple[str, ...]] = {
     "mistral": _MISTRAL_TAGS,
 }
 
-# The range of grammar-rule symbol kinds seen in the instrumented MySQL parser:
-# 832 is YYSYMBOL_YYACCEPT, 1844 is YYSYMBOL_json_attribute (both found in the
-# generated sql_yacc.cc). Fixed at build time, so this range is stable across runs.
+# Grammar-rule symbol kind range in the instrumented parser (832=YYSYMBOL_YYACCEPT,
+# 1844=YYSYMBOL_json_attribute in sql_yacc.cc). Fixed at build time.
 _RULEID_MIN, _RULEID_MAX = 832, 1844
 _RULEID_TAGS: tuple[str, ...] = tuple(f"kind_{i}" for i in range(_RULEID_MIN, _RULEID_MAX + 1))
 
@@ -239,11 +226,9 @@ def gaur_feature_names(mode: str) -> tuple[str, ...]:
 
 @functools.lru_cache(maxsize=1)
 def _sql_keyword_re() -> re.Pattern[str]:
-    """Regex matching any MySQL reserved word or built-in function, word-bounded.
+    """Regex matching any MySQL keyword or builtin function, word-bounded.
 
-    Imports ``gaur_sqld`` lazily (rather than at module load) so importing this
-    module — and the extractor registry that pulls it in — does not require
-    ``gaur_sqld`` to be installed unless a ``gaur-*`` extractor is actually used.
+    Imports gaur_sqld lazily so this module doesn't require it unless a gaur-* extractor is used.
     """
     from gaur_sqld.utils.constants import mysql_functions, mysql_keywords
 
@@ -263,11 +248,7 @@ TraceNode = tuple[str, str, str, str]  # (symbkind, tag1, tag2, sem_value)
 def parse_semantic_tree(trace: str | float | None) -> list[TraceNode]:
     """Parse a GAUR ``semantic_tree`` trace into its ``(symbkind, tag1, tag2, value)`` nodes.
 
-    Each node in the node section of the trace (before the ``||-||`` edge
-    separator) is formatted as ``order:symbkind:id:tag1:tag2:sem_value``. Nodes
-    that fail to unpack are skipped and logged; a missing/``NaN`` trace (e.g. a
-    query GAUR could not collect a trace for) yields an empty list, so downstream
-    feature counts are zero rather than raising.
+    Malformed nodes are skipped and logged; a missing/NaN trace returns an empty list.
     """
     if pd.isna(trace):
         return []
@@ -331,15 +312,9 @@ def _tag_counts(mode: str, nodes: list[TraceNode]) -> dict[str, float]:
 
 # ----- Trace collection ---------------------------------------------------------
 #
-# GAUR traces are collected one query at a time via gaur_sqld's own
-# get_traces_from_query (rather than its df-level get_traces_from_df) so a single
-# MySQL connection is kept open for the whole collection instead of reconnecting
-# per checkpoint. Each raw trace is reduced to its feature row immediately and
-# never accumulated or written to disk; only the small derived rows are
-# checkpointed, every ~5% of input rows (see _collect_and_featurize). Every input
-# row always yields exactly one feature row — a per-query collection failure
-# produces a row of defaults (via _row_features) rather than being dropped, unlike
-# get_traces_from_df, which silently drops failed rows from its output.
+# Collects one query at a time (not gaur_sqld's batch get_traces_from_df) so one
+# MySQL connection stays open for the whole run. Failed rows get a default
+# feature row instead of being dropped.
 
 
 def _configure_trace_type(trace_type: str) -> None:
@@ -357,11 +332,7 @@ def _ensure_server(trace_type: str) -> None:
 
 
 def _new_connector_and_collector():
-    """Build a fresh, unconnected ``(SQLConnector, GaurTraceCollector)`` pair.
-
-    The connection itself is established lazily, by ``get_traces_from_query`` on
-    its first call, exactly as ``get_traces_from_df`` does internally.
-    """
+    """Build a fresh, unconnected ``(SQLConnector, GaurTraceCollector)`` pair; connects lazily on first use."""
     from gaur_sqld import config as gcfg
     from gaur_sqld.utils.mysql_wrapper import SQLConnector
     from gaur_sqld.utils.traces_collector import GaurTraceCollector
@@ -377,14 +348,9 @@ def _new_connector_and_collector():
 
 
 def _collect_one_trace(query: str, sqlc, gtc) -> dict[str, object]:
-    """Collect the raw trace fields for one query.
+    """Collect the raw trace fields for one query via gaur_sqld.
 
-    Delegates to ``gaur_sqld.utils.traces_collector.get_traces_from_query``, which
-    (re)establishes the MySQL connection as needed, executes the query, and merges
-    multiple parser invocations into a single row. A per-query collection failure
-    (e.g. a syntax error) comes back as a row of NaNs rather than raising —
-    ``_row_features`` already treats that as "no trace collected" — so only a
-    connection-level failure propagates out of here.
+    Syntax errors come back as a row of NaNs, not an exception; only connection failures propagate.
     """
     from gaur_sqld.utils.traces_collector import get_traces_from_query
 
@@ -392,11 +358,7 @@ def _collect_one_trace(query: str, sqlc, gtc) -> dict[str, object]:
 
 
 def _checkpoint_path(mode: str, query_df: pd.DataFrame) -> Path:
-    """On-disk path for this collection's resume checkpoint.
-
-    Keyed by mode + the exact ordered queries, so an interrupted run only ever
-    resumes against a rerun of the identical input.
-    """
+    """Checkpoint path, keyed by mode + exact query order so a rerun only resumes against identical input."""
     h = hashlib.blake2b(digest_size=16)
     h.update(mode.encode())
     for q in query_df["full_query"]:
@@ -424,20 +386,11 @@ def _save_checkpoint(path: Path, rows: list[dict[str, float]], n_done: int) -> N
 
 
 def _collect_and_featurize(mode: str, query_df: pd.DataFrame) -> list[dict[str, float]]:
-    """Collect GAUR traces for ``mode`` and reduce each one to its feature row immediately.
+    """Collect GAUR traces for ``mode``, reducing each to a feature row immediately.
 
-    Progress is checkpointed to disk every ``_CHECKPOINT_FRACTION`` of rows, as the
-    feature rows collected so far (never the raw traces), keyed by a hash of
-    ``query_df`` so a rerun over the same input resumes from the last checkpoint
-    instead of recollecting from scratch. On any failure while collecting a row
-    (most commonly a dropped MySQL connection), whatever has been collected so far
-    is checkpointed before the exception is re-raised. The checkpoint is deleted
-    once collection finishes successfully — nothing is meant to outlive a run.
-
-    Every input row always yields exactly one feature row: a per-query collection
-    failure produces a row of defaults (``_row_features`` already treats an all-NaN
-    trace as "no trace collected"), so the output length always equals ``len(query_df)``
-    — this function never drops an observation the way ``get_traces_from_df`` does.
+    Checkpoints progress to disk every ``_CHECKPOINT_FRACTION`` of rows so a rerun
+    resumes instead of recollecting from scratch. Every input row yields exactly
+    one feature row — failures get a default row rather than being dropped.
     """
     trace_type = _SERVER_TRACE_TYPE[mode]
     n = len(query_df)
@@ -503,21 +456,13 @@ def _row_features(mode: str, trace_row: dict) -> dict[str, float]:
 class GaurExtractor(BaseEstimator, TransformerMixin):
     """GAUR features (one semantic model) concatenated with Li et al.'s features.
 
-    Stateless like :class:`~mlops_sqldetect.features.li.LiExtractor`: ``fit`` is a
-    no-op, and every mode produces a fixed-width vector so ``transform`` never
-    depends on what it has seen before. Collecting the GAUR side requires a live
-    GAUR-instrumented MySQL server for ``mode`` (see :func:`_collect_and_featurize`),
-    which checkpoints its (feature-row, never raw-trace) progress to disk so an
-    interrupted collection resumes rather than restarting from scratch;
-    :func:`~mlops_sqldetect.features.build_extractor` additionally wraps the
-    extractor in a :class:`~mlops_sqldetect.features.cache.CachingExtractor`,
-    caching the (smaller, derived) feature matrix this class returns.
+    Stateless: ``fit`` is a no-op. Collecting the GAUR side needs a live
+    GAUR-instrumented MySQL server for ``mode``, and checkpoints progress to disk
+    so an interrupted collection resumes instead of restarting.
     """
 
-    # GAUR instruments the DBMS parser, so its collector observes every executed query,
-    # including insider attacks issued directly against the DBMS. External collectors sit
-    # above the DBMS and never see that traffic (they leave this attribute at its False
-    # default), which is what the evaluation's insider blind-spot models.
+    # GAUR instruments the DBMS parser, so it sees insider attacks run directly
+    # against the DBMS. External collectors sit above it and miss that traffic.
     observes_insider: bool = True
 
     def __init__(self, mode: GaurMode = "expert") -> None:
@@ -541,9 +486,8 @@ class GaurExtractor(BaseEstimator, TransformerMixin):
         li_rows = [extract_li_features(q) for q in queries]
         li_matrix = np.asarray([[r[name] for name in LI_FEATURE_NAMES] for r in li_rows], dtype=np.float32)
 
-        # Every mode (including ruleid's ~1,013 rule-identifier columns) is returned
-        # dense: the reference gaur-sql-detect scales the whole feature frame with
-        # StandardScaler/MaxAbsScaler, which needs mean-centrable dense input.
+        # Dense for every mode: the reference impl's StandardScaler/MaxAbsScaler
+        # needs mean-centrable input, even for ruleid's ~1,013 columns.
         gaur_matrix = np.asarray([[r[name] for name in gaur_names] for r in gaur_rows], dtype=np.float32)
         return np.concatenate([gaur_matrix, li_matrix], axis=1)
 

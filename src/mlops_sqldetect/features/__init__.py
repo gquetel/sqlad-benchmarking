@@ -61,13 +61,10 @@ EXTRACTOR_LABELS: dict[str, str] = {
 
 
 def extractor_observes_insider(name: str) -> bool:
-    """Whether the named collector observes insider traffic (queries issued directly against
-    the DBMS, bypassing the application).
+    """Whether the named collector observes insider traffic (queries run directly against the DBMS).
 
-    Declared per collector via the extractor class' ``observes_insider`` attribute: GAUR
-    instruments the parser and sees every executed query, so it observes insider attacks;
-    external collectors sit above the DBMS and default to ``False``. Resolved off the
-    registered factory (unwrapping :func:`functools.partial`) so no extractor is built.
+    Declared per collector via its ``observes_insider`` class attribute; resolved off the
+    registered factory (unwrapping ``functools.partial``) so no extractor is built.
     """
     factory = EXTRACTORS.get(name)
     cls = getattr(factory, "func", factory)  # unwrap functools.partial(GaurExtractor, ...)

@@ -1,11 +1,7 @@
 """Unit tests for the GAUR feature extractor.
 
-Trace collection needs a live GAUR-instrumented MySQL server (via ``gaur_sqld``),
-so these tests exercise trace parsing, tag counting, and the extractor's output
-shape/order by monkeypatching ``_collect_one_trace`` (the per-query collection
-seam) and the keyword regex rather than talking to a real server or requiring
-``gaur_sqld`` to be installed. The checkpoint/resume and never-drop-a-row
-behavior of ``_collect_and_featurize`` itself is covered directly further down.
+Stubs out ``_collect_one_trace`` and the keyword regex so tests don't need a live
+GAUR-instrumented MySQL server or ``gaur_sqld`` installed.
 """
 
 from __future__ import annotations
@@ -102,11 +98,7 @@ def _stub_collect_one(query: str, sqlc, gtc) -> dict:
 
 @pytest.fixture(autouse=True)
 def _stub_gaur_sqld(monkeypatch, tmp_path):
-    """Avoid depending on gaur_sqld/a live server for extractor-level tests.
-
-    Redirects checkpointing to a per-test tmp_path too, so tests never write into
-    the real repo working directory.
-    """
+    """Avoid depending on gaur_sqld/a live server; checkpoints go to tmp_path instead of the repo."""
     monkeypatch.setattr(gaur, "_configure_trace_type", lambda trace_type: None)
     monkeypatch.setattr(gaur, "_ensure_server", lambda trace_type: None)
     monkeypatch.setattr(gaur, "_new_connector_and_collector", lambda: (None, None))
@@ -184,12 +176,7 @@ def test_non_ruleid_extractors_stay_dense():
 
 
 def test_collect_and_featurize_never_drops_a_failed_row(monkeypatch):
-    """A per-query collection failure must not shrink the output below len(query_df).
-
-    Mirrors what get_traces_from_query itself returns on failure (a row of NaNs)
-    for one query; _collect_and_featurize must still emit one feature row per
-    input row, not silently drop it the way get_traces_from_df does.
-    """
+    """A failed row (all-NaN, as get_traces_from_query returns on failure) still yields a feature row."""
 
     def fake_collect_one(query: str, sqlc, gtc) -> dict:
         if query == "select 2":
@@ -216,9 +203,7 @@ def test_collect_and_featurize_never_drops_a_failed_row(monkeypatch):
 
 
 def test_collect_and_featurize_checkpoints_and_resumes_after_failure(monkeypatch, tmp_path):
-    """A mid-collection failure checkpoints progress; a rerun resumes from it,
-    only re-collecting the rows not yet covered, and cleans up on success.
-    """
+    """A mid-collection failure checkpoints progress; a rerun resumes and cleans up on success."""
     monkeypatch.setattr(gaur, "_trace_checkpoint_dir", lambda: tmp_path)
     query_df = pd.DataFrame({"full_query": [f"select {i}" for i in range(20)]})
     calls: list[str] = []

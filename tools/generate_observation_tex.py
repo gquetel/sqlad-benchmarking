@@ -1,29 +1,19 @@
 r"""Generate every observation-chapter (Chapter 4) LaTeX artefact from MLflow in one call.
 
-One invocation writes ``--out-dir`` (default the chapter's ``data/`` dir) with only the
-``.tex`` the thesis observation chapter ``\input``s, all sourced from the ``Superviz25-SQL``
-experiment (the same grid the Chapter 3 tables draw from, so the baseline block of
-``perfs-vs-sota.tex`` reproduces ``tab:sup25-metrics`` exactly):
+Writes to ``--out-dir`` (default the chapter's ``data/`` dir), all sourced from the
+``Superviz25-SQL`` experiment:
 
-  * ``overhead-inference.tex`` (fig:overhead-inference): AUROC versus per-query
-    *inference-only* latency scatter -- AUROC and the benchmark latencies (codet5, loginov,
-    CountVectorizer) fetched live from MLflow, the IFIP-SEC raw totals hardcoded (RAW_INFERENCE);
-  * ``performance-nov.tex`` (tab:performance-nov): P/R/F1/FPR/AUPRC/AUROC of \gaur{}
-    across its seven semantic-model instantiations x OCSVM/LOF/AE; and
-  * ``perfs-vs-sota.tex`` (tab:perfs-vs-sota): the three best \gaur{}-based methods by F1
-    (auto-selected) above a double rule, over the full reference-baseline block of
-    Chapter 3; and
-  * ``perfs-recall.tex`` (tab:perfs-recall): the per-technique recall heatmap for the same
-    two blocks (\hc{}-shaded, mirroring tab:sup25-recall).
+  * ``overhead-inference.tex``: AUROC vs per-query inference-only latency scatter.
+  * ``performance-nov.tex``: P/R/F1/FPR/AUPRC/AUROC of \gaur{} across its 7 semantic
+    models x OCSVM/LOF/AE.
+  * ``perfs-vs-sota.tex``: the 3 best \gaur{}-based methods by F1, above the Chapter 3
+    reference baselines.
+  * ``perfs-recall.tex``: per-technique recall heatmap for the same two blocks.
 
-Both tables adopt the Chapter 3 ``tab:sup25-metrics`` theme (Model | Detector split via
-``\multirow``, siunitx S columns, best value per outcome column in bold, FPR never
-bolded). MLflow is the single source of truth: the latest finished full-run per
-``(feature_extractor, decision_engine)`` cell wins, and expected cells with no finished
-run yet render as ``--``.
+MLflow is the single source of truth: the latest finished full-run per cell wins;
+cells with no finished run render as ``--``.
 
-Run repo python via ``nix-shell --run '.venv/bin/python -m tools.generate_observation_tex ...'``
-(shell.nix sets the LD_LIBRARY_PATH the venv needs).
+Run via ``nix-shell --run '.venv/bin/python -m tools.generate_observation_tex ...'``.
 
 Usage:
     python -m tools.generate_observation_tex
@@ -74,8 +64,7 @@ def _num(x: object) -> float | None:
 def load_results() -> Results:
     """Latest finished full-run per (feature_extractor, decision_engine) cell.
 
-    Loads every cell of the grid (baselines and GAUR alike); each table below filters the
-    rows it needs. Legacy runs tag the decision head ``pipeline`` instead of
+    Loads every cell; each table filters what it needs. Legacy runs tag ``pipeline`` not
     ``decision_engine``.
     """
     runs = mlflow.search_runs(
@@ -129,11 +118,9 @@ METRIC_COLUMNS: list[tuple[str, str, str]] = [
 # target (~0.1% FPR), not an outcome to maximise, so it is deliberately never bolded.
 BOLD_KEYS: tuple[str, ...] = ("precision", "recall", "f1", "auprc", "auroc")
 
-# Per-technique recall columns of the heatmap (tab:perfs-recall): (MLflow metric suffix,
-# column header). The metric key is ``recall_<suffix>`` (see evaluate_suite._mlflow_key),
-# matching tab:sup25-recall so the two heatmaps share their columns exactly. Insider recall
-# is 0 for every method whose collector sits above the DBMS, but \gaur{}'s parser-level
-# integration makes it non-zero -- the point the column is there to expose.
+# Per-technique recall columns (MLflow metric suffix, header); key is recall_<suffix>.
+# Insider recall is 0 for collectors above the DBMS, non-zero only for \gaur{} -- that's
+# the point of keeping the column.
 TECHNIQUES: list[tuple[str, str]] = [
     ("union", "Union"),
     ("boolean", "Bool."),
@@ -148,9 +135,8 @@ TECHNIQUES: list[tuple[str, str]] = [
 DETECTOR_ORDER: list[str] = ["ae", "lof", "ocsvm"]
 DETECTOR_LABELS: dict[str, str] = {"ae": "AE", "lof": "LOF", "ocsvm": "OCSVM"}
 
-# GAUR semantic models in display order: (feature_extractor tag, header/label macro,
-# GAUR-prefixed row-label macro). The plain macro (\chatgpt[]) names the model as a
-# Chapter-4 grouping label; the g-prefixed one (\gchatgpt[]) reads "GAUR (ChatGPT)".
+# GAUR semantic models in display order: (extractor tag, plain label macro, g-prefixed
+# macro). \chatgpt[] names the model; \gchatgpt[] reads "GAUR (ChatGPT)".
 GAUR_MODELS: list[tuple[str, str, str]] = [
     ("gaur-expert", r"\expert[]", r"\gexpert[]"),
     ("gaur-chatgpt", r"\chatgpt[]", r"\gchatgpt[]"),
@@ -207,9 +193,8 @@ def _column_best(cells: list[Metrics], key: str) -> float | None:
 
 
 def _row_cells(cell: Metrics | None, best: dict[str, float | None]) -> str:
-    """The metric cells (siunitx S columns) for one row: value, best-in-bold, ``{--}`` for
-    a missing (expected but not-yet-available) cell. ``{--}`` is braced so siunitx treats
-    it as text rather than a malformed number."""
+    """Metric cells (siunitx S columns) for one row: value, best-in-bold, or braced ``{--}``
+    for a missing cell (braced so siunitx treats it as text, not a malformed number)."""
     out: list[str] = []
     for key, _, _ in METRIC_COLUMNS:
         v = None if cell is None else cell[key]
@@ -236,8 +221,6 @@ def _emit_block(groups: list[tuple[str, str, list[str]]], data: Results, best: d
     r"""Body lines for a block of ``(row_label, extractor_tag, [engine, ...])`` groups.
 
     One ``\multirow`` label per group, then one ``& Detector & metrics \\`` line per engine.
-    Groups are separated by ``\midrule``; the caller places the block's outer rules and, for
-    tab:perfs-vs-sota, the double rule between the two blocks.
     """
     lines: list[str] = []
     for gi, (label, extractor, engines) in enumerate(groups):
@@ -256,8 +239,7 @@ def _emit_block(groups: list[tuple[str, str, list[str]]], data: Results, best: d
 def render_performance_nov(data: Results) -> str:
     """P/R/F1/FPR/AUPRC/AUROC per GAUR semantic model x OCSVM/LOF/AE (tab:performance-nov).
 
-    The full 7x3 grid is always emitted; cells with no finished run render as ``--``. Best
-    value per outcome column (across the GAUR grid) is bolded, FPR excluded.
+    Full 7x3 grid always emitted; missing cells render as ``--``. Best value bolded, FPR excluded.
     """
     cells = [c for (ext, _), c in data.items() if ext in GAUR_GLABEL]
     best = {k: _column_best(cells, k) for k in BOLD_KEYS}
@@ -267,9 +249,7 @@ def render_performance_nov(data: Results) -> str:
         r"\begin{table}[!htb]",
         r"  \centering",
         r"  % Auto-generated by tools.generate_observation_tex -- do not edit by hand.",
-        r"  % Model | Detector split via \multirow, siunitx S columns aligned on the decimal.",
-        r"  % Bold marks the best value per outcome column; FPR (a controlled ~0.1\% protocol",
-        r"  % target) is never bolded. Expected cells with no finished run render as --.",
+        r"  % Bold = best value per outcome column (FPR excluded). Missing cells render as --.",
         rf"  \begin{{tabular}}{{{COLSPEC}}}",
         r"    \toprule",
         _header_row("Semantic model"),
@@ -290,9 +270,7 @@ def render_performance_nov(data: Results) -> str:
 def _top_gaur_by_f1(data: Results, k: int = 3) -> list[tuple[str, str, str]]:
     r"""The ``k`` GAUR ``(row_label, extractor, [engine])`` cells with the highest F1.
 
-    Cells are grouped by extractor while preserving F1-descending order (so two engines of
-    the same model share a ``\multirow`` label), then flattened to per-cell groups of one
-    engine each -- the ordering, not the grouping, is what the selection needs.
+    Consecutive same-extractor picks share one ``\multirow`` label.
     """
     scored = [(ext, eng, c["f1"]) for (ext, eng), c in data.items() if ext in GAUR_GLABEL and c.get("f1") is not None]
     scored.sort(key=lambda t: t[2], reverse=True)
@@ -313,10 +291,8 @@ def _top_gaur_by_f1(data: Results, k: int = 3) -> list[tuple[str, str, str]]:
 def render_perfs_vs_sota(data: Results) -> str:
     r"""Best GAUR methods (by F1) over the full Chapter-3 baseline block (tab:perfs-vs-sota).
 
-    Top block: the three GAUR cells with the highest F1 (auto-selected). A double rule
-    (``\hline\hline``, as in the manual table it replaces) separates them from the bottom
-    block, which reproduces every baseline row of tab:sup25-metrics. Best value per outcome
-    column is bolded across both blocks; missing baselines render as ``--``.
+    Top block: 3 best GAUR cells by F1, double rule, then every baseline row. Best value
+    bolded across both blocks; missing cells render as ``--``.
     """
     top_groups = _top_gaur_by_f1(data)
     base_groups = [(label, ext, list(DETECTOR_ORDER)) for ext, label in BASELINES]
@@ -331,9 +307,7 @@ def render_perfs_vs_sota(data: Results) -> str:
         r"\begin{table}[!htb]",
         r"  \centering",
         r"  % Auto-generated by tools.generate_observation_tex -- do not edit by hand.",
-        r"  % Top block: the 3 best GAUR methods by F1 (auto-selected). Double rule, then the",
-        r"  % Chapter-3 baseline block (tab:sup25-metrics). Bold = best per outcome column",
-        r"  % across both blocks (FPR excluded); missing cells render as --.",
+        r"  % Top: 3 best GAUR methods by F1, then Chapter-3 baselines. Bold = best per column.",
         rf"  \begin{{tabular}}{{{COLSPEC}}}",
         r"    \toprule",
         _header_row("Method"),
@@ -369,16 +343,13 @@ def _fmt_heat(v: float | None) -> str:
 
 
 def _heat_header_row() -> str:
-    r"""``\toprule`` header row for the heatmap: the two bold left labels then the bold
-    per-technique headers."""
+    r"""``\toprule`` header row for the heatmap: bold left labels then bold per-technique headers."""
     cols = " & ".join(rf"{{\bfseries {h}}}" for _, h in TECHNIQUES)
     return rf"    {{\bfseries Method}} & {{\bfseries Detector}} & {cols} \\"
 
 
 def _emit_heat_block(groups: list[tuple[str, str, list[str]]], data: Results) -> list[str]:
-    r"""Body lines for a block of ``(row_label, extractor_tag, [engine, ...])`` groups, each
-    cell a ``\hc{}``-shaded per-technique recall. Mirrors ``_emit_block`` but for the heatmap;
-    missing runs render as empty cells."""
+    r"""Like ``_emit_block`` but each cell is a ``\hc{}``-shaded per-technique recall."""
     lines: list[str] = []
     for gi, (label, extractor, engines) in enumerate(groups):
         if gi:
@@ -398,10 +369,8 @@ def _emit_heat_block(groups: list[tuple[str, str, list[str]]], data: Results) ->
 def render_perfs_recall(data: Results) -> str:
     r"""Per-technique recall heatmap: best GAUR methods over the Chapter-3 baselines (tab:perfs-recall).
 
-    Same two-block layout as tab:perfs-vs-sota (identical top-3 GAUR selection by F1, double
-    rule, then every baseline row) but each cell is a ``\hc{}``-shaded recall for one attack
-    technique instead of the aggregate metrics. The Insider column is kept to expose that only
-    \gaur{}'s parser-level observation reaches insider traffic.
+    Same two-block layout as tab:perfs-vs-sota, but each cell is a ``\hc{}``-shaded recall
+    for one attack technique instead of the aggregate metrics.
     """
     top_groups = _top_gaur_by_f1(data)
     base_groups = [(label, ext, list(DETECTOR_ORDER)) for ext, label in BASELINES]
@@ -410,10 +379,7 @@ def render_perfs_recall(data: Results) -> str:
         r"\begin{table}[!htb]",
         r"  \centering",
         r"  % Auto-generated by tools.generate_observation_tex -- do not edit by hand.",
-        r"  % Top block: the same 3 best GAUR methods by F1 as tab:perfs-vs-sota. Double rule,",
-        r"  % then the Chapter-3 baseline block. \hc{v} shades the cell by recall v (integer %,",
-        r"  % 0=white..100=green) and prints v (see \hc / heat in head/colors.tex); missing runs",
-        r"  % render as empty cells.",
+        r"  % \hc{v} shades the cell by recall v (0=white..100=green); missing runs are empty.",
         r"  \setlength{\tabcolsep}{5pt}",
         rf"  \begin{{tabular}}{{@{{}}l l *{{{len(TECHNIQUES)}}}{{c}}@{{}}}}",
         r"    \toprule",
@@ -437,9 +403,8 @@ def render_perfs_recall(data: Results) -> str:
 N_SAMPLES = 3353671
 
 # IFIP-SEC raw inference totals, inference-only, one per (engine, extractor):
-# "HH:MM:SS.micro" wall-clock to score the whole split (see the provenance note in the repo
-# memory). These reproduce the paper text (ruleid AE 1.41 ms, ruleid OCSVM 8.11 ms, sbert
-# AE 6.33 ms).
+# "HH:MM:SS.micro" wall-clock to score the whole split. Reproduces the paper text
+# (ruleid AE 1.41 ms, ruleid OCSVM 8.11 ms, sbert AE 6.33 ms).
 RAW_INFERENCE: list[tuple[str, str, str]] = [
     ("ae", "gaur-expert", "00:16:32.330907"),
     ("ocsvm", "gaur-expert", "01:16:00.408862"),
@@ -461,17 +426,12 @@ RAW_INFERENCE: list[tuple[str, str, str]] = [
     ("ocsvm", "sbert", "14:05:34.200465"),
 ]
 
-# Per-query inference-latency benchmark experiment: the single source of truth for the
-# cells the IFIP-SEC raw totals do not cover (codet5, loginov and CountVectorizer). Each run
-# logs infer_ms_per_query for one (feature_extractor, decision_engine) cell, inference-only
-# (no collection step), so it mixes cleanly with the raw totals above. Fetched live rather
-# than hardcoded so a newly benchmarked extractor is picked up on the next run.
+# Source of truth for cells the IFIP-SEC raw totals don't cover (codet5, loginov,
+# CountVectorizer). Fetched live so a newly benchmarked extractor is picked up automatically.
 LATENCY_EXPERIMENT = "Inference-Latency-Superviz25"
 
 # Feature extractors in figure-legend order: (extractor tag, legend label, colour macro).
-# Paper-facing labels, intentionally distinct from EXTRACTOR_LABELS. The colour macro is
-# one already \definecolor'd in thesis/head/colors.tex (loaded once in the thesis
-# preamble), so the figure only ever references it by name -- it never redefines it.
+# Colour macros are \definecolor'd once in thesis/head/colors.tex; referenced by name here.
 FIG_EXTRACTORS: list[tuple[str, str, str]] = [
     ("gaur-expert", "Expert", "expert"),
     ("gaur-chatgpt", "ChatGPT", "chatgpt"),
@@ -516,9 +476,7 @@ def _parse_hms(hms: str) -> float:
 def _bench_latencies() -> dict[tuple[str, str], float]:
     """infer_ms_per_query per (engine, extractor) from the latency-benchmark experiment.
 
-    Latest finished run per cell wins. Used only for cells absent from RAW_INFERENCE
-    (codet5, loginov, CountVectorizer); the IFIP-SEC raw totals stay authoritative for the
-    extractors they cover. Legacy runs tag the decision head ``pipeline`` not ``decision_engine``.
+    Latest finished run per cell wins; only used for cells absent from RAW_INFERENCE.
     """
     runs = mlflow.search_runs(
         experiment_names=[LATENCY_EXPERIMENT],
@@ -542,12 +500,8 @@ def _bench_latencies() -> dict[tuple[str, str], float]:
 
 
 def figure_points(data: Results) -> FigPoint:
-    """Join each cell's live AUROC with its inference-only latency.
-
-    Latency is the IFIP-SEC raw total (RAW_INFERENCE) for the extractors those totals cover,
-    and the per-query benchmark (LATENCY_EXPERIMENT) for the rest (codet5, loginov,
-    CountVectorizer). RAW totals take precedence where a cell has both.
-    """
+    """Join each cell's live AUROC with its inference-only latency (RAW_INFERENCE, falling
+    back to the per-query benchmark for cells it doesn't cover)."""
     latencies: dict[tuple[str, str], float] = {(e, x): _parse_hms(t) / N_SAMPLES * 1000.0 for e, x, t in RAW_INFERENCE}
     for key, ms in _bench_latencies().items():
         latencies.setdefault(key, ms)
@@ -609,9 +563,8 @@ def render_figure(points: FigPoint) -> str:
     )
     return (
         "% Auto-generated by tools.generate_observation_tex -- do not edit by hand.\n"
-        "% Requires \\usepackage{pgfplots} and \\pgfplotsset{compat=1.18} in the preamble, plus\n"
-        "% the colour macros \\definecolor'd in thesis/head/colors.tex (already loaded once in\n"
-        "% the thesis preamble, so they are not redefined here).\n"
+        "% Requires pgfplots (compat=1.18) and the colours \\definecolor'd in\n"
+        "% thesis/head/colors.tex.\n"
         "\\begin{figure}[htb]\n"
         "  \\centering\n"
         "  \\begin{tikzpicture}\n"

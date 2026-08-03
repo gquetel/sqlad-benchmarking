@@ -42,11 +42,8 @@ METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoenco
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    CountVectorizer counts are fed to OCSVM/LOF unscaled (an identity transform):
-    the matrix is sparse and StandardScaler's mean-centring does not support sparse
-    input. SecureBERT/CodeT5+ embeddings are also left unscaled (tanh-bounded /
-    L2-normalized; the references apply no scaler). Li dense features and every GAUR
-    mode (including ruleid, which is dense) use StandardScaler, matching gaur-sql-detect.
+    cv/sbert/codet5 stay unscaled (cv is sparse; the embeddings are already bounded).
+    Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
     """
     return FunctionTransformer() if extractor in ("cv", "sbert", "codet5") else StandardScaler()
 
@@ -496,10 +493,8 @@ def build_method(
     extractor_instance = build_extractor(extractor)
     cdir = resolve_cache_dir(cache, cache_dir)
     if name == "ocsvm":
-        # Raw word counts (cv) and the SecureBERT/CodeT5+ embeddings have a wider
-        # spread than Li features, so the QP solver needs a higher iteration budget
-        # to converge. Every GAUR mode (semantic and gaur-ruleid) uses max_iter=10000
-        # to match the reference gaur-sql-detect implementation; Li keeps the default.
+        # cv/sbert/codet5/gaur-* need a higher QP iteration budget to converge
+        # (wider spread than Li); Li keeps the default.
         config = (
             OCSVMConfig(max_iter=10000)
             if extractor in ("cv", "sbert", "codet5") or extractor.startswith("gaur-")
@@ -535,10 +530,8 @@ def build_method(
                 output_activation="tanh",
             )
         if extractor.startswith("gaur-"):
-            # Every GAUR mode (expert, five LLMs, ruleid): sigmoid output over the
-            # MaxAbsScaler-mapped [0, 1] features. Learning rate and batch size match
-            # the reference gaur-sql-detect AE (1e-3 / 4096) so the released code
-            # reproduces these numbers.
+            # Sigmoid output over MaxAbsScaler's [0, 1] features; lr/batch size match
+            # the reference gaur-sql-detect AE.
             return AEDetector(
                 config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=4096),
                 extractor=maybe_wrap(extractor_instance, cdir),
