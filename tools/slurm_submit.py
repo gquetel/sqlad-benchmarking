@@ -29,9 +29,9 @@ from typing import Annotated
 import typer
 import yaml
 
-from mlops_sqldetect.datasets import FAMILIES
-from mlops_sqldetect.evaluate_suite import Cell, enumerate_cells, parent_run_spec
-from mlops_sqldetect.tracking import ensure_parent_run, setup_mlflow
+from sqlad_benchmarking.datasets import FAMILIES
+from sqlad_benchmarking.evaluate_suite import Cell, enumerate_cells, parent_run_spec
+from sqlad_benchmarking.tracking import ensure_parent_run, setup_mlflow
 
 logger = logging.getLogger(__name__)
 

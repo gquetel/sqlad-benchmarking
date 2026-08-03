@@ -28,18 +28,18 @@ import typer
 from sklearn.metrics import average_precision_score
 from sklearn.model_selection import train_test_split
 
-from mlops_sqldetect.data import load_whole_sampled, split_normals
-from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
-from mlops_sqldetect.features import EXTRACTOR_LABELS, EXTRACTORS, extractor_observes_insider
-from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
-from mlops_sqldetect.model import METHOD_LABELS, AEDetector, MethodName, build_method
-from mlops_sqldetect.tracking import (
+from sqlad_benchmarking.data import load_whole_sampled, split_normals
+from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
+from sqlad_benchmarking.features import EXTRACTOR_LABELS, EXTRACTORS, extractor_observes_insider
+from sqlad_benchmarking.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
+from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, build_method
+from sqlad_benchmarking.tracking import (
     ensure_parent_run,
     log_and_register_detector,
     log_dataset_input,
     setup_mlflow,
 )
-from mlops_sqldetect.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
+from sqlad_benchmarking.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
 
 logger = logging.getLogger(__name__)
 # Dedicated to writing a failed cell's traceback into its own log file. propagate=False
@@ -510,12 +510,12 @@ def evaluate_suite(
     # Root/console stay INFO (quiet stdout, no third-party debug); only our package
     # emits DEBUG, which the per-cell file handler captures for the MLflow artifact.
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    logging.getLogger("mlops_sqldetect").setLevel(logging.DEBUG)
+    logging.getLogger("sqlad_benchmarking").setLevel(logging.DEBUG)
     if dataset in FAMILIES and FAMILIES[dataset].protocol != "suite":
         evaluator = {"drift": "evaluate_drift", "fsl": "evaluate_fsl"}.get(FAMILIES[dataset].protocol, "its evaluator")
         raise typer.BadParameter(
             f"{dataset!r} uses the {FAMILIES[dataset].protocol!r} protocol; "
-            f"run it through `python -m mlops_sqldetect.{evaluator}`."
+            f"run it through `python -m sqlad_benchmarking.{evaluator}`."
         )
     family, datasets, requested_methods, requested_extractors = _validate_grid(
         dataset, suite, methods, extractors, scenario

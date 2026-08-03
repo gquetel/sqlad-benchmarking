@@ -23,7 +23,7 @@ to `reports/{dataset}/cells/{method}_{extractor}_{scenario}.csv` — so the para
 never share a writer and a rerun simply overwrites its own file.
 
 Site settings (partitions, resources, `min_vram_gb`) live in
-[`configs/slurm.yaml`](https://github.com/gquetel/mlops-sqldetect/blob/main/configs/slurm.yaml);
+[`configs/slurm.yaml`](https://github.com/gquetel/sqlad-benchmarking/blob/main/configs/slurm.yaml);
 the full `#SBATCH` header is baked into each generated script. Each job `cd`s into the repo
 and activates the uv `.venv` with `source .venv/bin/activate` on the compute node. That
 `.venv` is built once on the login node (`uv sync --frozen`) and reused from the shared

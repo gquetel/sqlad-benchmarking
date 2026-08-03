@@ -1,6 +1,6 @@
 """Generate the SuperViz26 few-shot adaptation figure from MLflow.
 
-The few-shot experiment (:mod:`mlops_sqldetect.evaluate_fsl`) takes each LODO
+The few-shot experiment (:mod:`sqlad_benchmarking.evaluate_fsl`) takes each LODO
 autoencoder and adapts it to its held-out target domain with a small budget ``k``
 of benign samples, sweeping ``k`` over ``{0, 5, 10, 50, 100, 500, 1000, 10000}``
 and averaging over five seeds. ``k = 0`` is the unmodified LODO model. The runs
@@ -32,8 +32,8 @@ from typing import Annotated
 import mlflow
 import typer
 
-from mlops_sqldetect.features import EXTRACTOR_LABELS
-from mlops_sqldetect.tracking import setup_mlflow
+from sqlad_benchmarking.features import EXTRACTOR_LABELS
+from sqlad_benchmarking.tracking import setup_mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +245,7 @@ def render_figure(curves: dict[str, dict[int, float]], refs: dict[str, float]) -
     ymin = max(0.0, math.floor((min_auroc - 0.02) * 20) / 20)
 
     out: list[str] = [
-        "% Generated from MLflow by mlops-sqldetect/tools/generate_fsl_tex.py. Do not edit by hand.",
+        "% Generated from MLflow by sqlad-benchmarking/tools/generate_fsl_tex.py. Do not edit by hand.",
         r"\begin{figure}[!htb]",
         r"  \centering",
     ]

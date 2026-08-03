@@ -44,14 +44,14 @@ import pandas as pd
 import typer
 from sklearn.metrics import average_precision_score, f1_score, recall_score, roc_auc_score
 
-from mlops_sqldetect.data import split_normals
-from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
-from mlops_sqldetect.datasets.superviz26_fsl import Superviz26, Superviz26FSL, load_fsl, lodo_source
-from mlops_sqldetect.evaluate_suite import _model_filename, _validate_grid, parent_run_spec
-from mlops_sqldetect.features import EXTRACTOR_LABELS, extractor_observes_insider
-from mlops_sqldetect.metrics import threshold_for_fpr, wilson_ci
-from mlops_sqldetect.model import AEDetector
-from mlops_sqldetect.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
+from sqlad_benchmarking.data import split_normals
+from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
+from sqlad_benchmarking.datasets.superviz26_fsl import Superviz26, Superviz26FSL, load_fsl, lodo_source
+from sqlad_benchmarking.evaluate_suite import _model_filename, _validate_grid, parent_run_spec
+from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
+from sqlad_benchmarking.metrics import threshold_for_fpr, wilson_ci
+from sqlad_benchmarking.model import AEDetector
+from sqlad_benchmarking.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +253,7 @@ def _run_target(
     if not base_model_path.exists():
         raise FileNotFoundError(
             f"pretrained LODO model {base_model_path} not found. Train it first, e.g.:\n"
-            f"  python -m mlops_sqldetect.evaluate_suite --dataset {BASE_FAMILY} "
+            f"  python -m sqlad_benchmarking.evaluate_suite --dataset {BASE_FAMILY} "
             f"--scenario {lodo.value} --methods ae --extractors {extractor}"
         )
 

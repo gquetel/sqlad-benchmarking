@@ -5,7 +5,7 @@ model ``ehsanaghaei/SecureBERT`` (mirrors the reference ``U_Sentence_BERT.py``).
 The model is pretrained, so ``fit`` is a no-op; the tokenizer/model are lazy-loaded
 on first use to keep ``build_extractor`` cheap and avoid the ~500 MB download in
 tests that never touch this extractor. Embeddings are computed in batches; disk
-caching is layered on externally via :class:`~mlops_sqldetect.features.cache.CachingExtractor`.
+caching is layered on externally via :class:`~sqlad_benchmarking.features.cache.CachingExtractor`.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import pandas as pd
 import torch
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from mlops_sqldetect.determinism import enable_determinism
+from sqlad_benchmarking.determinism import enable_determinism
 
 DEFAULT_MODEL = "ehsanaghaei/SecureBERT"
 DEFAULT_BATCH_SIZE = 512
@@ -34,7 +34,7 @@ class SecureBertExtractor(BaseEstimator, TransformerMixin):
 
     ``transform`` returns a ``(n_samples, 768)`` float32 ndarray. Inference runs on
     GPU when available, in ``torch.no_grad`` eval mode.
-    :func:`~mlops_sqldetect.determinism.enable_determinism` pins the CUDA kernels so
+    :func:`~sqlad_benchmarking.determinism.enable_determinism` pins the CUDA kernels so
     runs are reproducible.
     """
 

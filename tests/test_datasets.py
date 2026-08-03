@@ -7,14 +7,14 @@ import hashlib
 import pandas as pd
 import pytest
 
-from mlops_sqldetect.datasets import FAMILIES
-from mlops_sqldetect.datasets.integrity import file_digest, verify_file
-from mlops_sqldetect.datasets.superviz25 import Superviz25, load_split
-from mlops_sqldetect.datasets.superviz26 import Superviz26
-from mlops_sqldetect.datasets.superviz26_drift import DOMAINS as DRIFT_DOMAINS
-from mlops_sqldetect.datasets.superviz26_drift import Superviz26Drift, load_drift
-from mlops_sqldetect.datasets.superviz26_fsl import DOMAINS as FSL_DOMAINS
-from mlops_sqldetect.datasets.superviz26_fsl import Superviz26FSL, load_fsl, lodo_source
+from sqlad_benchmarking.datasets import FAMILIES
+from sqlad_benchmarking.datasets.integrity import file_digest, verify_file
+from sqlad_benchmarking.datasets.superviz25 import Superviz25, load_split
+from sqlad_benchmarking.datasets.superviz26 import Superviz26
+from sqlad_benchmarking.datasets.superviz26_drift import DOMAINS as DRIFT_DOMAINS
+from sqlad_benchmarking.datasets.superviz26_drift import Superviz26Drift, load_drift
+from sqlad_benchmarking.datasets.superviz26_fsl import DOMAINS as FSL_DOMAINS
+from sqlad_benchmarking.datasets.superviz26_fsl import Superviz26FSL, load_fsl, lodo_source
 
 
 def _write_csv(path):
@@ -76,7 +76,7 @@ def test_load_drift_missing_file_hints_at_builder(tmp_path):
 
 def test_load_drift_auto_fetches_missing_default_root_file(tmp_path, monkeypatch):
     import tools.fetch_superviz26 as fetch_mod
-    from mlops_sqldetect.datasets import superviz26_drift
+    from sqlad_benchmarking.datasets import superviz26_drift
 
     monkeypatch.setattr(superviz26_drift, "default_root", lambda: tmp_path)
     # tmp_path stands in as the default root, so the synthetic CSV would trip the

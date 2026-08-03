@@ -9,8 +9,8 @@ from typing import Annotated
 import typer
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from mlops_sqldetect.data import load_dataset
-from mlops_sqldetect.model import MethodName, load_method
+from sqlad_benchmarking.data import load_dataset
+from sqlad_benchmarking.model import MethodName, load_method
 
 logger = logging.getLogger(__name__)
 

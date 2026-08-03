@@ -13,14 +13,14 @@ import pandas as pd
 import pytest
 from scipy.sparse import issparse
 
-from mlops_sqldetect.features import gaur
-from mlops_sqldetect.features.gaur import (
+from sqlad_benchmarking.features import gaur
+from sqlad_benchmarking.features.gaur import (
     GAUR_SYNT_NAMES,
     GaurExtractor,
     gaur_feature_names,
     parse_semantic_tree,
 )
-from mlops_sqldetect.features.li import FEATURE_NAMES as LI_FEATURE_NAMES
+from sqlad_benchmarking.features.li import FEATURE_NAMES as LI_FEATURE_NAMES
 
 # A trace with two nodes: one tagged CREATE/USER with a literal, one untagged.
 _SAMPLE_TRACE = "1:2979:100:CREATE:USER:admin|2:15:101::: ||-||edges"

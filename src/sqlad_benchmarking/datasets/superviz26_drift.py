@@ -5,7 +5,7 @@ query-template metadata: for one domain, the templates are split 50/50 per
 statement type into an origin set (S1) and a held-out shifted set (S2). A detector
 is trained on the benign S1 train rows and evaluated twice — on the S1 test set
 (reference) and on the never-seen S2 set (post-drift) — and drift robustness is the
-AUROC drop between the two. See :mod:`mlops_sqldetect.evaluate_drift`.
+AUROC drop between the two. See :mod:`sqlad_benchmarking.evaluate_drift`.
 
 The four per-domain CSVs (``a.csv`` … ``d.csv``) carry the standard Superviz26
 columns plus a ``drift_set`` column (``origin``/``shifted``) that, together with
@@ -28,9 +28,9 @@ from typing import Literal
 
 import pandas as pd
 
-from mlops_sqldetect.data import load_dataset, load_split_csv, stratified_subsample
-from mlops_sqldetect.datasets.integrity import verify_file
-from mlops_sqldetect.datasets.superviz26 import Split, manifest
+from sqlad_benchmarking.data import load_dataset, load_split_csv, stratified_subsample
+from sqlad_benchmarking.datasets.integrity import verify_file
+from sqlad_benchmarking.datasets.superviz26 import Split, manifest
 
 __all__ = [
     "DOMAINS",

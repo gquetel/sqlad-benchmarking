@@ -41,7 +41,7 @@ versions or regenerate the lock without explicit instruction.
   `superviz26-fsl` loaders also auto-download their group on first use when a file is missing
   from the default root.
   The train/eval/SLURM entry
-  points are Typer CLIs run directly via `python -m mlops_sqldetect.<module>` (e.g. `train`,
+  points are Typer CLIs run directly via `python -m sqlad_benchmarking.<module>` (e.g. `train`,
   `evaluate`, `evaluate_suite`, `evaluate_drift`) or `python -m tools.<module>` (e.g.
   `slurm_submit`); use `--help` on any of them to see options.
   * `evaluate_suite` runs the standard train-once/evaluate-once grid (in-domain + LODO).

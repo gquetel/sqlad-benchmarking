@@ -36,7 +36,7 @@ from typing import Annotated
 import mlflow
 import typer
 
-from mlops_sqldetect.tracking import setup_mlflow
+from sqlad_benchmarking.tracking import setup_mlflow
 
 logger = logging.getLogger(__name__)
 

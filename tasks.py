@@ -6,7 +6,7 @@ from invoke import Context, task
 # Disable pty when it is unavailable or unsupported: on Windows, and on Python
 # 3.14+ where invoke's pty handling is broken (this project requires 3.14+).
 NO_PTY = os.name == "nt" or sys.version_info >= (3, 14)
-PROJECT_NAME = "mlops_sqldetect"
+PROJECT_NAME = "sqlad_benchmarking"
 
 
 # Setup commands

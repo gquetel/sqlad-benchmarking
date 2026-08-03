@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from mlops_sqldetect.datasets import superviz25, superviz26, superviz26_big, superviz26_drift, superviz26_fsl
-from mlops_sqldetect.datasets.superviz25 import Superviz25
-from mlops_sqldetect.datasets.superviz26 import (
+from sqlad_benchmarking.datasets import superviz25, superviz26, superviz26_big, superviz26_drift, superviz26_fsl
+from sqlad_benchmarking.datasets.superviz25 import Superviz25
+from sqlad_benchmarking.datasets.superviz26 import (
     IN_DOMAIN,
     LODO,
     Split,
@@ -33,11 +33,11 @@ class DatasetFamily:
     """A registered dataset and its named evaluation suites.
 
     ``protocol`` selects the evaluator a family is run through: ``"suite"`` for the
-    standard train-once/evaluate-once grid (:mod:`mlops_sqldetect.evaluate_suite`),
+    standard train-once/evaluate-once grid (:mod:`sqlad_benchmarking.evaluate_suite`),
     ``"drift"`` for the train-once/evaluate-twice concept-drift protocol
-    (:mod:`mlops_sqldetect.evaluate_drift`), ``"fsl"`` for the few-shot
+    (:mod:`sqlad_benchmarking.evaluate_drift`), ``"fsl"`` for the few-shot
     domain-adaptation protocol that fine-tunes a pretrained LODO autoencoder
-    (:mod:`mlops_sqldetect.evaluate_fsl`). The SLURM runner dispatches on it.
+    (:mod:`sqlad_benchmarking.evaluate_fsl`). The SLURM runner dispatches on it.
     """
 
     name: str

@@ -54,7 +54,7 @@ The directory structure of the project looks like this:
 ├── npins/                    # Nix pin sources
 ├── reports/                  # Evaluation reports (CSV)
 ├── src/                      # Source code
-│   └── mlops_sqldetect/
+│   └── sqlad_benchmarking/
 │       ├── __init__.py
 │       ├── api.py
 │       ├── data.py            # CSV loading and split/subsample helpers

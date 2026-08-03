@@ -19,4 +19,4 @@ COPY src src/
 
 RUN uv pip install --system --no-cache --no-deps .
 
-ENTRYPOINT ["uvicorn", "src.mlops_sqldetect.api:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["uvicorn", "src.sqlad_benchmarking.api:app", "--host", "0.0.0.0", "--port", "8000"]

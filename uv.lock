@@ -713,7 +713,7 @@ http = [
 [[package]]
 name = "gaur-sql-detect"
 version = "0.1.0"
-source = { git = "https://github.com/gquetel/gaur-sql-detect?rev=40596e0cc45c6cf295790e264745bca4e21d0afc#40596e0cc45c6cf295790e264745bca4e21d0afc" }
+source = { git = "https://github.com/gquetel/gaur-sql-detect?rev=5c42db42d7e2882af5025b9bb77e1d8df3a6f0d6#5c42db42d7e2882af5025b9bb77e1d8df3a6f0d6" }
 dependencies = [
     { name = "accelerate" },
     { name = "evaluate" },
@@ -1272,61 +1272,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e8/4f/a054cd8860590e4e942aee1aab3c94307878159f945fa844acc9ea787721/mlflow_skinny-3.14.0.tar.gz", hash = "sha256:e50f4506422c7737157ae6643c165122af7898345f2e828fa93c4f10128653cf", size = 2901772, upload-time = "2026-06-17T07:57:44.252Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/58/e7/b80f76ce689b9d6f21cdb84abb2b02148a1149e63a6428dd2c629cefd061/mlflow_skinny-3.14.0-py3-none-any.whl", hash = "sha256:a4880e086365871ef9d78e727a34ea5fb1ce615689579998d48e8c65ee1665a9", size = 3462788, upload-time = "2026-06-17T07:57:42.583Z" },
-]
-
-[[package]]
-name = "mlops-sqldetect"
-version = "0.0.1"
-source = { editable = "." }
-dependencies = [
-    { name = "gaur-sql-detect" },
-    { name = "joblib" },
-    { name = "kaleido" },
-    { name = "mlflow-skinny" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "plotly" },
-    { name = "python-dotenv" },
-    { name = "scikit-learn" },
-    { name = "torch" },
-    { name = "transformers" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "coverage" },
-    { name = "invoke" },
-    { name = "mkdocs-material" },
-    { name = "mkdocstrings-python" },
-    { name = "mypy" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gaur-sql-detect", git = "https://github.com/gquetel/gaur-sql-detect?rev=40596e0cc45c6cf295790e264745bca4e21d0afc" },
-    { name = "joblib" },
-    { name = "kaleido" },
-    { name = "mlflow-skinny", specifier = "==3.14" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "plotly" },
-    { name = "python-dotenv" },
-    { name = "scikit-learn" },
-    { name = "torch", specifier = "==2.12.0" },
-    { name = "transformers", specifier = "==5.12.0" },
-    { name = "typer" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "coverage" },
-    { name = "invoke" },
-    { name = "mkdocs-material" },
-    { name = "mkdocstrings-python" },
-    { name = "mypy" },
-    { name = "pytest" },
 ]
 
 [[package]]
@@ -2370,6 +2315,61 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1f/ea/49c993d6dfdd7338c9b1000a0f36817ed7ec84577ae2e52f890d1a4ff909/smmap-5.0.3.tar.gz", hash = "sha256:4d9debb8b99007ae47165abc08670bd74cb74b5227dda7f643eccc4e9eb5642c", size = 22506, upload-time = "2026-03-09T03:43:26.1Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/d4/59e74daffcb57a07668852eeeb6035af9f32cbfd7a1d2511f17d2fe6a738/smmap-5.0.3-py3-none-any.whl", hash = "sha256:c106e05d5a61449cf6ba9a1e650227ecfb141590d2a98412103ff35d89fc7b2f", size = 24390, upload-time = "2026-03-09T03:43:24.361Z" },
+]
+
+[[package]]
+name = "sqlad-benchmarking"
+version = "0.0.1"
+source = { editable = "." }
+dependencies = [
+    { name = "gaur-sql-detect" },
+    { name = "joblib" },
+    { name = "kaleido" },
+    { name = "mlflow-skinny" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "plotly" },
+    { name = "python-dotenv" },
+    { name = "scikit-learn" },
+    { name = "torch" },
+    { name = "transformers" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage" },
+    { name = "invoke" },
+    { name = "mkdocs-material" },
+    { name = "mkdocstrings-python" },
+    { name = "mypy" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gaur-sql-detect", git = "https://github.com/gquetel/gaur-sql-detect?rev=5c42db42d7e2882af5025b9bb77e1d8df3a6f0d6" },
+    { name = "joblib" },
+    { name = "kaleido" },
+    { name = "mlflow-skinny", specifier = "==3.14" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "plotly" },
+    { name = "python-dotenv" },
+    { name = "scikit-learn" },
+    { name = "torch", specifier = "==2.12.0" },
+    { name = "transformers", specifier = "==5.12.0" },
+    { name = "typer" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "coverage" },
+    { name = "invoke" },
+    { name = "mkdocs-material" },
+    { name = "mkdocstrings-python" },
+    { name = "mypy" },
+    { name = "pytest" },
 ]
 
 [[package]]

@@ -10,10 +10,10 @@ import pytest
 from scipy.sparse import csr_matrix, issparse
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from mlops_sqldetect.features import EXTRACTORS, build_extractor
-from mlops_sqldetect.features.cache import CachingExtractor
-from mlops_sqldetect.features.countvect import CountVectorizerExtractor
-from mlops_sqldetect.features.loginov import FEATURE_NAMES, LoginovExtractor, extract_loginov_features
+from sqlad_benchmarking.features import EXTRACTORS, build_extractor
+from sqlad_benchmarking.features.cache import CachingExtractor
+from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
+from sqlad_benchmarking.features.loginov import FEATURE_NAMES, LoginovExtractor, extract_loginov_features
 
 
 def _frame() -> pd.DataFrame:

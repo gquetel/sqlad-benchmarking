@@ -38,7 +38,7 @@ def _experiment_name(dataset: str) -> str:
     return _EXPERIMENT_NAMES.get(dataset, "Superviz26-SQL")
 
 
-# Path to the importable mlops_sqldetect package, bundled into pyfunc models
+# Path to the importable sqlad_benchmarking package, bundled into pyfunc models
 # via ``code_paths`` so the detector can be unpickled and scored anywhere.
 # See https://mlflow.org/docs/latest/ml/model/models-from-code/#using-the-model
 _PACKAGE_ROOT = Path(__file__).resolve().parent

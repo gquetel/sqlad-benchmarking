@@ -9,7 +9,7 @@ One row per cell is appended to ``reports/superviz26-drift_results.csv`` (or a
 per-cell file under ``reports/superviz26-drift/cells/`` for single-scenario runs),
 and the per-domain rows are averaged downstream to obtain the per-method table.
 
-This mirrors :mod:`mlops_sqldetect.evaluate_suite` but evaluates two test sets per
+This mirrors :mod:`sqlad_benchmarking.evaluate_suite` but evaluates two test sets per
 fit instead of one; the SLURM runner dispatches here when the dataset family's
 ``protocol`` is ``"drift"``.
 """
@@ -31,21 +31,21 @@ import pandas as pd
 import typer
 from sklearn.model_selection import train_test_split
 
-from mlops_sqldetect.data import split_normals
-from mlops_sqldetect.datasets import FAMILIES, DatasetFamily
-from mlops_sqldetect.datasets.superviz26_drift import Superviz26Drift, load_drift
-from mlops_sqldetect.evaluate_suite import (
+from sqlad_benchmarking.data import split_normals
+from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
+from sqlad_benchmarking.datasets.superviz26_drift import Superviz26Drift, load_drift
+from sqlad_benchmarking.evaluate_suite import (
     VAL_FRACTION,
     _mlflow_key,
     _model_filename,
     _validate_grid,
     parent_run_spec,
 )
-from mlops_sqldetect.features import EXTRACTOR_LABELS, extractor_observes_insider
-from mlops_sqldetect.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
-from mlops_sqldetect.model import METHOD_LABELS, AEDetector, MethodName, build_method
-from mlops_sqldetect.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
-from mlops_sqldetect.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
+from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
+from sqlad_benchmarking.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
+from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, build_method
+from sqlad_benchmarking.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
+from sqlad_benchmarking.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
 
 logger = logging.getLogger(__name__)
 

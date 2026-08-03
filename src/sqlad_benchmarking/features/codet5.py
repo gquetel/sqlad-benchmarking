@@ -7,7 +7,7 @@ on first use to keep ``build_extractor`` cheap and avoid the download in tests t
 never touch this extractor. Like SecureBERT it is GPU-only in practice, and OOMs on a 16 GB
 V100, so the SLURM submitter pins it to GPUs with >16 GB VRAM (``min_vram_gb`` in
 ``configs/slurm.yaml``); disk caching is layered on externally via
-:class:`~mlops_sqldetect.features.cache.CachingExtractor`.
+:class:`~sqlad_benchmarking.features.cache.CachingExtractor`.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import pandas as pd
 import torch
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from mlops_sqldetect.determinism import enable_determinism
+from sqlad_benchmarking.determinism import enable_determinism
 
 DEFAULT_MODEL = "Salesforce/codet5p-110m-embedding"
 DEFAULT_BATCH_SIZE = 512
@@ -36,7 +36,7 @@ class CodeT5Extractor(BaseEstimator, TransformerMixin):
 
     ``transform`` returns a ``(n_samples, 256)`` float32 ndarray. Inference runs on
     GPU when available, in ``torch.no_grad`` eval mode.
-    :func:`~mlops_sqldetect.determinism.enable_determinism` pins the CUDA kernels so
+    :func:`~sqlad_benchmarking.determinism.enable_determinism` pins the CUDA kernels so
     runs are reproducible. The model returns L2-normalized embeddings directly, so
     no scaler is applied downstream (see ``_scaler_for``).
     """

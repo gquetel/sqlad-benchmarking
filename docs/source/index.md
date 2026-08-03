@@ -1,3 +1,3 @@
 ## Documentation
 
-Documentation for mlops_sqldetect
+Documentation for sqlad_benchmarking

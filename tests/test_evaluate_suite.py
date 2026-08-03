@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 import typer
 
-from mlops_sqldetect.datasets import FAMILIES
-from mlops_sqldetect.evaluate_drift import evaluate_drift
-from mlops_sqldetect.evaluate_suite import Cell, _validate_grid, enumerate_cells, evaluate_suite
+from sqlad_benchmarking.datasets import FAMILIES
+from sqlad_benchmarking.evaluate_drift import evaluate_drift
+from sqlad_benchmarking.evaluate_suite import Cell, _validate_grid, enumerate_cells, evaluate_suite
 from tools.slurm_submit import (
     _bucket,
     _check_venv,

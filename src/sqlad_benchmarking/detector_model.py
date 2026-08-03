@@ -21,7 +21,7 @@ class DetectorModel(mlflow.pyfunc.PythonModel):
     """
 
     def load_context(self, context) -> None:
-        from mlops_sqldetect.model import load_method
+        from sqlad_benchmarking.model import load_method
 
         path = Path(context.artifacts["detector"])
         # Infer the decision engine from the file suffix. ``.pt`` is the

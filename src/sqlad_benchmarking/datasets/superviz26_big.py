@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from mlops_sqldetect.data import load_split_csv
-from mlops_sqldetect.datasets.superviz26 import (
+from sqlad_benchmarking.data import load_split_csv
+from sqlad_benchmarking.datasets.superviz26 import (
     IN_DOMAIN,
     LODO,
     Split,

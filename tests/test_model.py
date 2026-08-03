@@ -8,9 +8,9 @@ import pytest
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import FunctionTransformer, MaxAbsScaler, StandardScaler
 
-import mlops_sqldetect.model as model_mod
-from mlops_sqldetect.features import build_extractor
-from mlops_sqldetect.model import (
+import sqlad_benchmarking.model as model_mod
+from sqlad_benchmarking.features import build_extractor
+from sqlad_benchmarking.model import (
     AEConfig,
     AEDetector,
     _parallel_decision_function,

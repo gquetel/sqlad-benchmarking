@@ -3,7 +3,7 @@
 Uses :mod:`gaur_sqld` to run a GAUR-instrumented MySQL server and collect one
 trace per query. 7 modes: ``expert`` (hand-tagged), 5 LLM-tagged sets, and
 ``ruleid`` (raw grammar-rule ids, no semantics). Every mode is concatenated
-with Li et al.'s features (:mod:`mlops_sqldetect.features.li`).
+with Li et al.'s features (:mod:`sqlad_benchmarking.features.li`).
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from mlops_sqldetect.features.li import FEATURE_NAMES as LI_FEATURE_NAMES
-from mlops_sqldetect.features.li import extract_li_features
+from sqlad_benchmarking.features.li import FEATURE_NAMES as LI_FEATURE_NAMES
+from sqlad_benchmarking.features.li import extract_li_features
 
 logger = logging.getLogger(__name__)
 

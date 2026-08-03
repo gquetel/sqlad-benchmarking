@@ -30,12 +30,12 @@ import typer
 import yaml
 from sklearn.model_selection import train_test_split
 
-from mlops_sqldetect.data import split_normals
-from mlops_sqldetect.datasets import FAMILIES
-from mlops_sqldetect.evaluate_suite import VAL_FRACTION, Cell, _model_filename, enumerate_cells
-from mlops_sqldetect.features.cache import CachingExtractor
-from mlops_sqldetect.model import AEDetector, Detector, MethodName, build_method, load_method
-from mlops_sqldetect.tracking import setup_mlflow
+from sqlad_benchmarking.data import split_normals
+from sqlad_benchmarking.datasets import FAMILIES
+from sqlad_benchmarking.evaluate_suite import VAL_FRACTION, Cell, _model_filename, enumerate_cells
+from sqlad_benchmarking.features.cache import CachingExtractor
+from sqlad_benchmarking.model import AEDetector, Detector, MethodName, build_method, load_method
+from sqlad_benchmarking.tracking import setup_mlflow
 from tools.slurm_submit import (
     ENV_SETUP,
     REPO_ROOT,

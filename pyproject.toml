@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mlops_sqldetect"
+name = "sqlad_benchmarking"
 version = "0.0.1"
 description = "Unsupervized SQL attack detection with MLflow tracking."
 authors = [
@@ -72,8 +72,8 @@ select = [
 quote-style = "double"
 
 [tool.coverage.run]
-source = ["src/mlops_sqldetect"]
+source = ["src/sqlad_benchmarking"]
 omit = ["tests/*"]
 
 [tool.uv.sources]
-gaur-sql-detect = { git = "https://github.com/gquetel/gaur-sql-detect", rev = "40596e0cc45c6cf295790e264745bca4e21d0afc" }
+gaur-sql-detect = { git = "https://github.com/gquetel/gaur-sql-detect", rev = "5c42db42d7e2882af5025b9bb77e1d8df3a6f0d6" }

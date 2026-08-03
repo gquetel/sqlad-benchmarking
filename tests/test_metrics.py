@@ -1,4 +1,4 @@
-"""Unit tests for the metric helpers in mlops_sqldetect.metrics."""
+"""Unit tests for the metric helpers in sqlad_benchmarking.metrics."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mlops_sqldetect.metrics import (
+from sqlad_benchmarking.metrics import (
     compute_metrics,
     recall_per_attack,
     threshold_for_fpr,

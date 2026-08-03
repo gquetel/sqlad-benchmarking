@@ -13,7 +13,7 @@ queries suffice to recover in-domain detection performance. For one target domai
 
 The in-domain ``x-x`` CSVs ship as their own ``fsl`` group (``~/datasets/superviz26-fsl/``)
 and are auto-fetched on demand; the LODO ``(others)-x`` pretrained checkpoint comes from
-training the base superviz26 family. See :mod:`mlops_sqldetect.evaluate_fsl`. ``manifest``
+training the base superviz26 family. See :mod:`sqlad_benchmarking.evaluate_fsl`. ``manifest``
 is reused verbatim from :mod:`superviz26`.
 """
 
@@ -24,9 +24,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from mlops_sqldetect.datasets import superviz26
-from mlops_sqldetect.datasets.integrity import verify_file
-from mlops_sqldetect.datasets.superviz26 import Split, Superviz26, manifest
+from sqlad_benchmarking.datasets import superviz26
+from sqlad_benchmarking.datasets.integrity import verify_file
+from sqlad_benchmarking.datasets.superviz26 import Split, Superviz26, manifest
 
 __all__ = [
     "DOMAINS",

@@ -15,8 +15,8 @@ from typing import Literal
 
 import pandas as pd
 
-from mlops_sqldetect.data import load_split_csv
-from mlops_sqldetect.datasets.integrity import verify_file
+from sqlad_benchmarking.data import load_split_csv
+from sqlad_benchmarking.datasets.integrity import verify_file
 
 Split = Literal["train", "test"]
 

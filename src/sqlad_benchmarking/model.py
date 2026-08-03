@@ -27,9 +27,9 @@ from sklearn.preprocessing import FunctionTransformer, MaxAbsScaler, StandardSca
 from sklearn.svm import OneClassSVM
 from torch import nn
 
-from mlops_sqldetect.determinism import enable_determinism
-from mlops_sqldetect.features import DEFAULT_EXTRACTOR, build_extractor
-from mlops_sqldetect.features.cache import maybe_wrap, resolve_cache_dir
+from sqlad_benchmarking.determinism import enable_determinism
+from sqlad_benchmarking.features import DEFAULT_EXTRACTOR, build_extractor
+from sqlad_benchmarking.features.cache import maybe_wrap, resolve_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -485,7 +485,7 @@ def build_method(
         name: Decision head, ``"ocsvm"``, ``"lof"`` or ``"ae"``.
         extractor: Feature extractor short name (see :data:`EXTRACTORS`).
         cache: Memoise the extractor's transform output to disk (see
-            :func:`~mlops_sqldetect.features.cache.resolve_cache_dir`).
+            :func:`~sqlad_benchmarking.features.cache.resolve_cache_dir`).
         cache_dir: Override the cache directory; ignored when ``cache`` is False.
     """
     # Build the raw extractor first so the cv-AE branch can set_params on it,

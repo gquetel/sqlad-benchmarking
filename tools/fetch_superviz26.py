@@ -30,7 +30,7 @@ from urllib.request import Request, urlopen
 
 import typer
 
-from mlops_sqldetect.datasets import superviz26, superviz26_drift, superviz26_fsl
+from sqlad_benchmarking.datasets import superviz26, superviz26_drift, superviz26_fsl
 
 logger = logging.getLogger(__name__)
 

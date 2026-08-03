@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mlops_sqldetect.features.cache import CACHE_DIR_ENV
+from sqlad_benchmarking.features.cache import CACHE_DIR_ENV
 
 
 def pytest_addoption(parser):

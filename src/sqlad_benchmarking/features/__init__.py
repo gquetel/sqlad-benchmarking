@@ -15,13 +15,13 @@ from collections.abc import Callable
 
 from sklearn.base import TransformerMixin
 
-from mlops_sqldetect.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
-from mlops_sqldetect.features.codet5 import CodeT5Extractor
-from mlops_sqldetect.features.countvect import CountVectorizerExtractor
-from mlops_sqldetect.features.gaur import GaurExtractor
-from mlops_sqldetect.features.li import LiExtractor, extract_li_features
-from mlops_sqldetect.features.loginov import LoginovExtractor, extract_loginov_features
-from mlops_sqldetect.features.securebert import SecureBertExtractor
+from sqlad_benchmarking.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
+from sqlad_benchmarking.features.codet5 import CodeT5Extractor
+from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
+from sqlad_benchmarking.features.gaur import GaurExtractor
+from sqlad_benchmarking.features.li import LiExtractor, extract_li_features
+from sqlad_benchmarking.features.loginov import LoginovExtractor, extract_loginov_features
+from sqlad_benchmarking.features.securebert import SecureBertExtractor
 
 # Short name -> zero-arg factory returning a fresh, unfitted extractor.
 EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
@@ -75,7 +75,7 @@ def build_extractor(name: str = DEFAULT_EXTRACTOR, cache_dir: str | os.PathLike 
     """Instantiate a feature extractor by short name (see :data:`EXTRACTORS`).
 
     When ``cache_dir`` is set the extractor is wrapped in a
-    :class:`~mlops_sqldetect.features.cache.CachingExtractor` that memoises its
+    :class:`~sqlad_benchmarking.features.cache.CachingExtractor` that memoises its
     ``transform`` output to disk (see :func:`resolve_cache_dir`).
     """
     try:

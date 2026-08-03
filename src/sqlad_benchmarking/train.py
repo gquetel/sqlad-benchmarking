@@ -1,7 +1,7 @@
 """CLI to fit a SQL injection detection method (OCSVM or AutoEncoder).
 
 Trains on normal samples only (one-class novelty detection) and persists the
-fitted method. Run via ``python -m mlops_sqldetect.train`` or ``invoke train``.
+fitted method. Run via ``python -m sqlad_benchmarking.train`` or ``invoke train``.
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from typing import Annotated
 
 import typer
 
-from mlops_sqldetect.data import load_dataset, split_normals
-from mlops_sqldetect.features import DEFAULT_EXTRACTOR, EXTRACTOR_LABELS
-from mlops_sqldetect.model import METHOD_LABELS, MethodName, build_method
+from sqlad_benchmarking.data import load_dataset, split_normals
+from sqlad_benchmarking.features import DEFAULT_EXTRACTOR, EXTRACTOR_LABELS
+from sqlad_benchmarking.model import METHOD_LABELS, MethodName, build_method
 
 logger = logging.getLogger(__name__)
 

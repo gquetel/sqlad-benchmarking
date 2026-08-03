@@ -38,11 +38,11 @@ import mlflow
 import pandas as pd
 import typer
 
-from mlops_sqldetect.datasets import FAMILIES
-from mlops_sqldetect.evaluate_suite import ALL_METHODS, _all_scenarios
-from mlops_sqldetect.features import EXTRACTORS
-from mlops_sqldetect.tracking import setup_mlflow
-from mlops_sqldetect.visualize import (
+from sqlad_benchmarking.datasets import FAMILIES
+from sqlad_benchmarking.evaluate_suite import ALL_METHODS, _all_scenarios
+from sqlad_benchmarking.features import EXTRACTORS
+from sqlad_benchmarking.tracking import setup_mlflow
+from sqlad_benchmarking.visualize import (
     Curve,
     plot_combined_curves_tikz,
     plot_combined_pr,

@@ -19,4 +19,4 @@ COPY src src/
 
 RUN uv pip install --system --no-cache --no-deps .
 
-ENTRYPOINT ["python", "-u", "src/mlops_sqldetect/train.py"]
+ENTRYPOINT ["python", "-u", "src/sqlad_benchmarking/train.py"]

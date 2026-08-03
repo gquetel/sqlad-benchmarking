@@ -18,10 +18,10 @@ from typing import Annotated
 
 import typer
 
-from mlops_sqldetect.datasets import FAMILIES
-from mlops_sqldetect.evaluate_drift import evaluate_drift
-from mlops_sqldetect.evaluate_fsl import evaluate_fsl
-from mlops_sqldetect.evaluate_suite import evaluate_suite
+from sqlad_benchmarking.datasets import FAMILIES
+from sqlad_benchmarking.evaluate_drift import evaluate_drift
+from sqlad_benchmarking.evaluate_fsl import evaluate_fsl
+from sqlad_benchmarking.evaluate_suite import evaluate_suite
 
 logger = logging.getLogger(__name__)
 

@@ -45,14 +45,14 @@ python experiments/generate_splits.py --full
 A missing file raises a `FileNotFoundError` pointing back at both options (the `main`
 loader does not auto-download). The shared column/scenario metadata and the archive
 checksums come from the vendored
-[`MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/superviz26/MANIFEST.json).
+[`MANIFEST.json`](https://github.com/gquetel/sqlad-benchmarking/blob/main/data/raw/superviz26/MANIFEST.json).
 
 ## Loading
 
 Use the typed loader rather than constructing paths by hand:
 
 ```python
-from mlops_sqldetect.datasets import Superviz26, load_split
+from sqlad_benchmarking.datasets import Superviz26, load_split
 
 df_train = load_split(Superviz26.A_A, "train")
 df_test  = load_split(Superviz26.A_A, "test")
@@ -91,7 +91,7 @@ download the pre-built copies (see *Heavy supplementary datasets* below). Load t
 with the three-way loader:
 
 ```python
-from mlops_sqldetect.datasets.superviz26_drift import Superviz26Drift, load_drift
+from sqlad_benchmarking.datasets.superviz26_drift import Superviz26Drift, load_drift
 
 origin_train, origin_test, shifted_test = load_drift(Superviz26Drift.A)
 ```
@@ -100,7 +100,7 @@ Run the whole grid (15 methods × 4 domains) with the dedicated evaluator, which
 trains once per cell and scores both test sets:
 
 ```bash
-python -m mlops_sqldetect.evaluate_drift --methods ocsvm,lof,ae --extractors li,loginov,cv,sbert,codet5
+python -m sqlad_benchmarking.evaluate_drift --methods ocsvm,lof,ae --extractors li,loginov,cv,sbert,codet5
 ```
 
 Each cell appends one row — `auroc_s1`, `auroc_s2`, `delta_auroc`, … — to
@@ -119,7 +119,7 @@ They live in the same `superviz26.zip` archive on Zenodo
 as the main dataset. The helper downloads that archive once (MD5-verified, resumable),
 extracts the requested group(s) into their loader default roots, and verifies each CSV's
 size and SHA-256 against
-[`data/raw/superviz26/MANIFEST.json`](https://github.com/gquetel/mlops-sqldetect/blob/main/data/raw/superviz26/MANIFEST.json).
+[`data/raw/superviz26/MANIFEST.json`](https://github.com/gquetel/sqlad-benchmarking/blob/main/data/raw/superviz26/MANIFEST.json).
 
 ```bash
 # Download the zip and extract the drift + few-shot CSVs
