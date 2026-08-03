@@ -39,18 +39,10 @@ The directory structure of the project looks like this:
 │       └── tests.yaml
 ├── data/                     # Data directory
 │   └── raw/
-├── dockerfiles/              # Dockerfiles
-│   ├── api.dockerfile
-│   └── train.dockerfile
-├── docs/                     # Documentation
-│   ├── mkdocs.yaml
-│   └── source/
-│       ├── datasets.md
-│       └── index.md
 ├── models/                   # Trained models
 ├── nix/                      # Shared Nix environments
 │   ├── ci-env.nix            # CI environment (Python + system libs for native extensions)
-│   └── python-env.nix        # Pinned Python interpreter (used by Docker and CI)
+│   └── python-env.nix        # Pinned Python interpreter (used by CI)
 ├── npins/                    # Nix pin sources
 ├── reports/                  # Evaluation reports (CSV)
 ├── src/                      # Source code
