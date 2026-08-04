@@ -558,7 +558,7 @@ def render_figure(points: FigPoint) -> str:
         "        tick label style={font=\\scriptsize},\n"
         "        grid=both, grid style={dotted},\n"
         "        legend cell align=left,\n"
-        "        legend style={font=\\scriptsize, at={(0.98,0.02)}, anchor=south east,\n"
+        "        legend style={font=\\scriptsize, at={(0.02,0.02)}, anchor=south west,\n"
         "          draw=black, fill=white, fill opacity=0.85, text opacity=1, legend columns=2},"
     )
     return (
