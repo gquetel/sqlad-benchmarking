@@ -16,20 +16,33 @@ from collections.abc import Callable
 from sklearn.base import TransformerMixin
 
 from sqlad_benchmarking.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
+from sqlad_benchmarking.features.codebert import CodeBertExtractor
 from sqlad_benchmarking.features.codet5 import CodeT5Extractor
 from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
+from sqlad_benchmarking.features.flan_t5 import FlanT5Extractor
 from sqlad_benchmarking.features.gaur import GaurExtractor
 from sqlad_benchmarking.features.li import LiExtractor, extract_li_features
 from sqlad_benchmarking.features.loginov import LoginovExtractor, extract_loginov_features
-from sqlad_benchmarking.features.securebert import SecureBertExtractor
+from sqlad_benchmarking.features.modernbert import ModernBertExtractor
+from sqlad_benchmarking.features.qwen3_emb import Qwen3EmbExtractor
+from sqlad_benchmarking.features.roberta import RobertaExtractor
+from sqlad_benchmarking.features.securebert import SecureBert2Extractor, SecureBertExtractor
+from sqlad_benchmarking.features.sentbert import SentBertExtractor
 
 # Short name -> zero-arg factory returning a fresh, unfitted extractor.
 EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "li": LiExtractor,
     "cv": CountVectorizerExtractor,
     "sbert": SecureBertExtractor,
+    "sbert2": SecureBert2Extractor,
     "loginov": LoginovExtractor,
     "codet5": CodeT5Extractor,
+    "roberta": RobertaExtractor,
+    "modernbert": ModernBertExtractor,
+    "codebert": CodeBertExtractor,
+    "flan-t5": FlanT5Extractor,
+    "sentbert": SentBertExtractor,
+    "qwen3-emb": Qwen3EmbExtractor,
     "gaur-expert": functools.partial(GaurExtractor, mode="expert"),
     "gaur-chatgpt": functools.partial(GaurExtractor, mode="chatgpt"),
     "gaur-claude": functools.partial(GaurExtractor, mode="claude"),
@@ -48,8 +61,15 @@ EXTRACTOR_LABELS: dict[str, str] = {
     "li": "Li",
     "cv": "CountVectorizer",
     "sbert": "SecureBERT",
+    "sbert2": "SecureBERT2",
     "loginov": "Loginov",
     "codet5": "CodeT5+",
+    "roberta": "RoBERTa-base",
+    "modernbert": "ModernBERT-base",
+    "codebert": "CodeBERT",
+    "flan-t5": "Flan-T5-Small",
+    "sentbert": "SentenceBERT-mpnet",
+    "qwen3-emb": "Qwen3-Emb-0.6B",
     "gaur-expert": "GAUR (Expert)",
     "gaur-chatgpt": "GAUR (ChatGPT)",
     "gaur-claude": "GAUR (Claude)",
@@ -90,12 +110,19 @@ __all__ = [
     "EXTRACTORS",
     "EXTRACTOR_LABELS",
     "CachingExtractor",
+    "CodeBertExtractor",
     "CodeT5Extractor",
     "CountVectorizerExtractor",
+    "FlanT5Extractor",
     "GaurExtractor",
     "LiExtractor",
     "LoginovExtractor",
+    "ModernBertExtractor",
+    "Qwen3EmbExtractor",
+    "RobertaExtractor",
+    "SecureBert2Extractor",
     "SecureBertExtractor",
+    "SentBertExtractor",
     "build_extractor",
     "extractor_observes_insider",
     "extract_li_features",

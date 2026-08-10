@@ -1,11 +1,12 @@
-"""SecureBERT embedding feature extractor.
+"""SecureBERT embedding feature extractors.
 
-Maps SQL queries to 768-d dense embeddings using the cybersecurity-domain RoBERTa
-model ``ehsanaghaei/SecureBERT`` (mirrors the reference ``U_Sentence_BERT.py``).
-The model is pretrained, so ``fit`` is a no-op; the tokenizer/model are lazy-loaded
-on first use to keep ``build_extractor`` cheap and avoid the ~500 MB download in
-tests that never touch this extractor. Embeddings are computed in batches; disk
-caching is layered on externally via :class:`~sqlad_benchmarking.features.cache.CachingExtractor`.
+Maps SQL queries to dense embeddings using the cybersecurity-domain models
+``ehsanaghaei/SecureBERT`` (mirrors the reference ``U_Sentence_BERT.py``) and its
+ModernBERT-based successor ``cisco-ai/SecureBERT2.0-base``. Both are pretrained,
+so ``fit`` is a no-op; the tokenizer/model are lazy-loaded on first use to keep
+``build_extractor`` cheap and avoid the download in tests that never touch these
+extractors. Embeddings are computed in batches; disk caching is layered on
+externally via :class:`~sqlad_benchmarking.features.cache.CachingExtractor`.
 """
 
 from __future__ import annotations
@@ -21,6 +22,10 @@ DEFAULT_MODEL = "ehsanaghaei/SecureBERT"
 DEFAULT_BATCH_SIZE = 512
 MAX_LENGTH = 512
 EMBED_DIM = 768
+
+SECUREBERT2_DEFAULT_MODEL = "cisco-ai/SecureBERT2.0-base"
+SECUREBERT2_MAX_LENGTH = 1024
+SECUREBERT2_EMBED_DIM = 768
 
 
 def _as_queries(X) -> list[str]:  # noqa: N803
@@ -82,4 +87,61 @@ class SecureBertExtractor(BaseEstimator, TransformerMixin):
             out.append(pooled.cpu().numpy())
         if not out:
             return np.empty((0, EMBED_DIM), dtype=np.float32)
+        return np.concatenate(out, axis=0).astype(np.float32)
+
+
+class SecureBert2Extractor(BaseEstimator, TransformerMixin):
+    """Sklearn transformer producing SecureBERT 2.0 CLS-token embeddings.
+
+    SecureBERT 2.0 is ModernBERT-based and has no pooler head, so the CLS token
+    (first token of ``last_hidden_state``) is used as the sentence embedding.
+    ``transform`` returns a ``(n_samples, 768)`` float32 ndarray. Inference runs on
+    GPU when available, in ``torch.no_grad`` eval mode.
+    :func:`~sqlad_benchmarking.determinism.enable_determinism` pins the CUDA kernels so
+    runs are reproducible.
+    """
+
+    def __init__(
+        self,
+        model_name: str = SECUREBERT2_DEFAULT_MODEL,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        device: torch.device | None = None,
+    ) -> None:
+        self.model_name = model_name
+        self.batch_size = batch_size
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def _ensure_model(self) -> None:
+        """Lazy-load tokenizer + model on first use (heavy import + download)."""
+        if getattr(self, "model_", None) is not None:
+            return
+        # Imported lazily so the transformers dependency is only needed when
+        # sbert2 is actually used.
+        from transformers import AutoModel, AutoTokenizer
+
+        enable_determinism()
+        torch.manual_seed(2)
+        self.tokenizer_ = AutoTokenizer.from_pretrained(self.model_name)
+        self.model_ = AutoModel.from_pretrained(self.model_name).to(self.device)
+        self.model_.eval()
+
+    def fit(self, X, y=None) -> "SecureBert2Extractor":  # noqa: N803
+        return self
+
+    @torch.no_grad()
+    def transform(self, X) -> np.ndarray:  # noqa: N803
+        self._ensure_model()
+        model_device = next(self.model_.parameters()).device
+        queries = _as_queries(X)
+        out: list[np.ndarray] = []
+        for start in range(0, len(queries), self.batch_size):
+            batch = queries[start : start + self.batch_size]
+            inputs = self.tokenizer_(
+                batch, return_tensors="pt", truncation=True, padding=True, max_length=SECUREBERT2_MAX_LENGTH
+            )
+            inputs = {k: v.to(model_device) for k, v in inputs.items()}
+            cls_embeddings = self.model_(**inputs).last_hidden_state[:, 0, :]
+            out.append(cls_embeddings.cpu().numpy())
+        if not out:
+            return np.empty((0, SECUREBERT2_EMBED_DIM), dtype=np.float32)
         return np.concatenate(out, axis=0).astype(np.float32)
