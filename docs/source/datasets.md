@@ -29,7 +29,7 @@ split drawn from the full per-domain pools (see [Acquisition](#acquisition) belo
 ## Acquisition
 
 The default `superviz26` family is the **Superviz26-SQL-LODO** dataset (MLflow experiment
-`Superviz26-SQL`). Its **full-split** CSVs are read from `~/datasets/superviz26-lodo/`.
+`FE-study-LODO`). Its **full-split** CSVs are read from `~/datasets/superviz26-lodo/`.
 They are either downloaded from the Zenodo archive (the `main` group) or generated locally
 by the dataset generator's full-split mode — every scenario is drawn from the full
 per-domain pools and downsampled to the smallest domain so all stay equal-sized:

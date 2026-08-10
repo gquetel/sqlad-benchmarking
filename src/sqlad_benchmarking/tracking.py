@@ -23,19 +23,24 @@ logger = logging.getLogger(__name__)
 _EXPERIMENT_NAMES = {
     "superviz25": "Superviz25-SQL",
     "superviz26-big": "Superviz26-SQL-Big",
-    "superviz26-drift": "Drift-Superviz26-SQL",
-    "superviz26-fsl": "FSL-Superviz26-SQL",
+    "superviz26-drift": "FE-study-CD",
+    "superviz26-fsl": "FE-study-FSL",
 }
 
 
 def _experiment_name(dataset: str) -> str:
     """Map a dataset family to its MLflow experiment name.
 
-    The default superviz26 (the full LODO/in-domain dataset) → "Superviz26-SQL"; the
-    larger-train variant superviz26-big → "Superviz26-SQL-Big"; concept-drift →
-    "Drift-Superviz26-SQL"; few-shot → "FSL-Superviz26-SQL"; Superviz25 → "Superviz25-SQL".
+    The feature-extractor study owns three experiments: the default superviz26 (the
+    full LODO/in-domain dataset) → "FE-study-LODO"; concept-drift → "FE-study-CD";
+    few-shot → "FE-study-FSL". The older families keep their own experiments: the
+    larger-train variant superviz26-big → "Superviz26-SQL-Big"; Superviz25 →
+    "Superviz25-SQL".
+
+    The previous SuperViz26 experiments ("Superviz26-SQL", "Drift-Superviz26-SQL",
+    "FSL-Superviz26-SQL") still hold the earlier runs; new runs no longer land there.
     """
-    return _EXPERIMENT_NAMES.get(dataset, "Superviz26-SQL")
+    return _EXPERIMENT_NAMES.get(dataset, "FE-study-LODO")
 
 
 # Path to the importable sqlad_benchmarking package, bundled into pyfunc models
@@ -70,8 +75,9 @@ class _UrlRewriteStream:
 def setup_mlflow(dataset: str) -> bool:
     """Configure MLflow from the environment.
 
-    The experiment is derived from ``dataset``: Superviz25 runs go to the
-    "Superviz25-SQL" experiment, every other family to "Superviz26-SQL".
+    The experiment is derived from ``dataset`` via :func:`_experiment_name`: the
+    SuperViz26 families go to the "FE-study-*" experiments, Superviz25 to
+    "Superviz25-SQL".
 
     Returns:
         True if a tracking server is configured and tracking should proceed
