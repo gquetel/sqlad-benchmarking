@@ -42,10 +42,10 @@ METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoenco
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    cv/sbert/codet5 stay unscaled (cv is sparse; the embeddings are already bounded).
-    Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
+    cv/tfidf/sbert/codet5 stay unscaled (cv and tfidf are sparse; the embeddings are
+    already bounded). Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
     """
-    return FunctionTransformer() if extractor in ("cv", "sbert", "codet5") else StandardScaler()
+    return FunctionTransformer() if extractor in ("cv", "tfidf", "sbert", "codet5") else StandardScaler()
 
 
 # ----- OCSVM -----------------------------------------------------------------

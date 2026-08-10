@@ -3,7 +3,7 @@
 A *feature extractor* is any sklearn-compatible transformer mapping a column of
 raw SQL queries to a numeric matrix (dense or sparse). They are registered in
 :data:`EXTRACTORS` so decision models and the evaluation suite can request one
-by name (``"li"``, ``"cv"``, ``"sbert"``) and stay agnostic to which extractor is
+by name (``"li"``, ``"cv"``, ``"tfidf"``, ``"sbert"``) and stay agnostic to which extractor is
 in use. To add a new extractor: implement the transformer, then register it here.
 """
 
@@ -28,11 +28,13 @@ from sqlad_benchmarking.features.qwen3_emb import Qwen3EmbExtractor
 from sqlad_benchmarking.features.roberta import RobertaExtractor
 from sqlad_benchmarking.features.securebert import SecureBert2Extractor, SecureBertExtractor
 from sqlad_benchmarking.features.sentbert import SentBertExtractor
+from sqlad_benchmarking.features.tfidf import TfidfExtractor
 
 # Short name -> zero-arg factory returning a fresh, unfitted extractor.
 EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "li": LiExtractor,
     "cv": CountVectorizerExtractor,
+    "tfidf": TfidfExtractor,
     "sbert": SecureBertExtractor,
     "sbert2": SecureBert2Extractor,
     "loginov": LoginovExtractor,
@@ -60,6 +62,7 @@ DEFAULT_EXTRACTOR = "li"
 EXTRACTOR_LABELS: dict[str, str] = {
     "li": "Li",
     "cv": "CountVectorizer",
+    "tfidf": "TF-IDF",
     "sbert": "SecureBERT",
     "sbert2": "SecureBERT2",
     "loginov": "Loginov",
@@ -123,6 +126,7 @@ __all__ = [
     "SecureBert2Extractor",
     "SecureBertExtractor",
     "SentBertExtractor",
+    "TfidfExtractor",
     "build_extractor",
     "extractor_observes_insider",
     "extract_li_features",

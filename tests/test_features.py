@@ -14,6 +14,7 @@ from sqlad_benchmarking.features import EXTRACTORS, build_extractor
 from sqlad_benchmarking.features.cache import CachingExtractor
 from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
 from sqlad_benchmarking.features.loginov import FEATURE_NAMES, LoginovExtractor, extract_loginov_features
+from sqlad_benchmarking.features.tfidf import TfidfExtractor
 
 
 def _frame() -> pd.DataFrame:
@@ -32,6 +33,7 @@ def test_registry_exposes_all_extractors():
     assert set(EXTRACTORS) == {
         "li",
         "cv",
+        "tfidf",
         "sbert",
         "sbert2",
         "loginov",
@@ -73,6 +75,27 @@ def test_countvect_is_stateful_and_sparse():
 def test_countvect_accepts_list_of_strings():
     ext = CountVectorizerExtractor().fit(["select 1", "select 2"])
     assert ext.transform(["select 1"]).shape == (1, ext.transform(["select 1"]).shape[1])
+
+
+def test_tfidf_is_stateful_and_sparse():
+    df = _frame()
+    ext = TfidfExtractor(max_features=50)
+    # transform before fit must fail: the vocabulary is learned at fit time.
+    with pytest.raises(Exception):  # noqa: B017 - sklearn raises NotFittedError
+        ext.transform(df)
+    ext.fit(df)
+    matrix = ext.transform(df)
+    assert issparse(matrix)
+    assert matrix.shape[0] == len(df)
+    assert matrix.shape[1] == len(ext.get_feature_names_out())
+
+
+def test_tfidf_caps_vocabulary_at_200_by_default():
+    ext = TfidfExtractor()
+    assert ext.max_features == 200
+    queries = [f"select col{i} from t{i}" for i in range(300)]
+    ext.fit(queries)
+    assert ext.transform(queries).shape[1] == 200
 
 
 def test_li_extractor_is_dense_fixed_width():
