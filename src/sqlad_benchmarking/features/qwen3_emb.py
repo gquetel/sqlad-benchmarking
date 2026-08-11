@@ -60,7 +60,7 @@ class Qwen3EmbExtractor(BaseEstimator, TransformerMixin):
         self.model_ = SentenceTransformer(
             self.model_name,
             device=str(self.device),
-            model_kwargs={"torch_dtype": torch.bfloat16},
+            model_kwargs={"torch_dtype": torch.bfloat16, "use_cache": False},
         )
 
     def fit(self, X, y=None) -> "Qwen3EmbExtractor":  # noqa: N803

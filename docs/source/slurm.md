@@ -12,8 +12,9 @@ class**. Cells are bucketed by their needs:
 
 - **CPU** — cells that need no GPU (e.g. `ocsvm/li`) → the `cpu` partition.
 - **GPU** — cells that train an autoencoder (`method == "ae"`) or use an embedding
-  extractor (`extractor in {"sbert", "codet5"}`) → a GPU array whose partition list is the
-  GPU partitions with **enough VRAM** for that cell. Each cell's minimum comes from
+  extractor (`sbert`, `sbert2`, `codet5`, `roberta`, `modernbert`, `codebert`,
+  `flan-t5`, `sentbert`, or `qwen3-emb`) → a GPU array whose partition list is the GPU
+  partitions with **enough VRAM** for that cell. Each cell's minimum comes from
   `min_vram_gb` (keyed by `extractor` or `engine:extractor`, else `default`); partitions
   are tried largest-VRAM first so cells prefer the fastest GPU. A hungry model like CodeT5+
   (`codet5: 24`) is thus never scheduled on the 16 GB V100.

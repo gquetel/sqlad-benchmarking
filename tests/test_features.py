@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import pickle
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 from scipy.sparse import csr_matrix, issparse
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from sqlad_benchmarking.features import EXTRACTORS, build_extractor
+from sqlad_benchmarking.features import EXTRACTORS, GPU_EXTRACTORS, build_extractor
 from sqlad_benchmarking.features.cache import CachingExtractor
 from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
 from sqlad_benchmarking.features.loginov import FEATURE_NAMES, LoginovExtractor, extract_loginov_features
+from sqlad_benchmarking.features.qwen3_emb import Qwen3EmbExtractor
 from sqlad_benchmarking.features.tfidf import TfidfExtractor
 
 
@@ -54,9 +57,38 @@ def test_registry_exposes_all_extractors():
     }
 
 
+def test_gpu_extractors_are_registered():
+    assert GPU_EXTRACTORS == {
+        "sbert",
+        "sbert2",
+        "codet5",
+        "roberta",
+        "modernbert",
+        "codebert",
+        "flan-t5",
+        "sentbert",
+        "qwen3-emb",
+    }
+    assert GPU_EXTRACTORS <= EXTRACTORS.keys()
+
+
 def test_build_extractor_unknown_name_raises():
     with pytest.raises(ValueError, match="Unknown feature extractor"):
         build_extractor("does-not-exist")
+
+
+def test_qwen_disables_generation_cache(monkeypatch):
+    constructor = Mock()
+    monkeypatch.setattr("sentence_transformers.SentenceTransformer", constructor)
+
+    extractor = Qwen3EmbExtractor(device=torch.device("cpu"))
+    extractor._ensure_model()
+
+    assert extractor.batch_size == 16
+    assert constructor.call_args.kwargs["model_kwargs"] == {
+        "torch_dtype": torch.bfloat16,
+        "use_cache": False,
+    }
 
 
 def test_countvect_is_stateful_and_sparse():

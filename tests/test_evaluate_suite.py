@@ -8,6 +8,7 @@ import typer
 from sqlad_benchmarking.datasets import FAMILIES
 from sqlad_benchmarking.evaluate_drift import evaluate_drift
 from sqlad_benchmarking.evaluate_suite import Cell, _validate_grid, enumerate_cells, evaluate_suite
+from sqlad_benchmarking.features import GPU_EXTRACTORS
 from tools.slurm_submit import (
     _bucket,
     _check_venv,
@@ -91,8 +92,7 @@ def test_validate_grid_rejects_unknown_scenario():
 
 def test_needs_gpu_rule():
     assert _needs_gpu(Cell("a-a", "ae", "li")) is True
-    assert _needs_gpu(Cell("a-a", "ocsvm", "sbert")) is True
-    assert _needs_gpu(Cell("a-a", "ocsvm", "codet5")) is True
+    assert all(_needs_gpu(Cell("a-a", "ocsvm", extractor)) for extractor in GPU_EXTRACTORS)
     assert _needs_gpu(Cell("a-a", "ocsvm", "li")) is False
 
 

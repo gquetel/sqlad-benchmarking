@@ -54,6 +54,20 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "gaur-ruleid": functools.partial(GaurExtractor, mode="ruleid"),
 }
 
+GPU_EXTRACTORS = frozenset(
+    {
+        "sbert",
+        "sbert2",
+        "codet5",
+        "roberta",
+        "modernbert",
+        "codebert",
+        "flan-t5",
+        "sentbert",
+        "qwen3-emb",
+    }
+)
+
 # Default extractor used when a caller does not specify one.
 DEFAULT_EXTRACTOR = "li"
 
@@ -112,6 +126,7 @@ __all__ = [
     "DEFAULT_EXTRACTOR",
     "EXTRACTORS",
     "EXTRACTOR_LABELS",
+    "GPU_EXTRACTORS",
     "CachingExtractor",
     "CodeBertExtractor",
     "CodeT5Extractor",

@@ -9,8 +9,9 @@ lame25; everything else fans out to SLURM as array jobs.
 Both load-or-train the model, time scoring with the feature cache off (a warm
 cache would time a cache hit, not real inference), and log
 ``infer_ms_per_query`` to the ``Inference-Latency-Superviz25`` experiment.
-Device policy matches the paper: only SecureBERT/CodeT5+ time on GPU, everything
-else on CPU. The figure itself is rendered by :mod:`tools.generate_observation_tex`.
+Device policy matches the paper: neural embedding extractors time on GPU and the
+remaining extractors run on CPU. The figure itself is rendered by
+:mod:`tools.generate_observation_tex`.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from sklearn.model_selection import train_test_split
 from sqlad_benchmarking.data import split_normals
 from sqlad_benchmarking.datasets import FAMILIES
 from sqlad_benchmarking.evaluate_suite import VAL_FRACTION, Cell, _model_filename, enumerate_cells
+from sqlad_benchmarking.features import GPU_EXTRACTORS
 from sqlad_benchmarking.features.cache import CachingExtractor
 from sqlad_benchmarking.model import AEDetector, Detector, MethodName, build_method, load_method
 from sqlad_benchmarking.tracking import setup_mlflow
@@ -235,7 +237,7 @@ def _benchmark_cell(
 
 def _needs_gpu(cell: Cell) -> bool:
     """Paper device policy: only embedding extractors time on GPU; AEs stay on CPU."""
-    return cell.extractor in ("sbert", "codet5")
+    return cell.extractor in GPU_EXTRACTORS
 
 
 def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:

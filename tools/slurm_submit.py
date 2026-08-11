@@ -3,8 +3,8 @@
 Each cell ``(scenario, method, extractor)`` becomes one array task that runs through
 :func:`evaluate_suite` and writes its own per-cell CSV under ``reports/{dataset}/cells/``
 (no shared writer, no merge step). Cells needing a GPU (``method == "ae"`` or an
-embedding extractor — ``sbert``/``codet5``) go to a GPU array whose partition list is the
-GPU partitions with enough VRAM for that cell (per-cell minimum from ``min_vram_gb``, so a
+extractor in :data:`sqlad_benchmarking.features.GPU_EXTRACTORS`) go to a GPU array whose partition list is
+the GPU partitions with enough VRAM for that cell (per-cell minimum from ``min_vram_gb``, so a
 hungry model like CodeT5+ skips the 16 GB V100); the rest go to a CPU array. Cells listed in
 ``long_running`` (config, keyed like ``min_vram_gb``) run on the 24h ``gpu-long`` block instead
 of the default 12h ``gpu`` block. Resources and the environment setup come from ``configs/slurm.yaml``.
@@ -31,6 +31,7 @@ import yaml
 
 from sqlad_benchmarking.datasets import FAMILIES
 from sqlad_benchmarking.evaluate_suite import Cell, enumerate_cells, parent_run_spec
+from sqlad_benchmarking.features import GPU_EXTRACTORS
 from sqlad_benchmarking.tracking import ensure_parent_run, setup_mlflow
 
 logger = logging.getLogger(__name__)
@@ -49,8 +50,8 @@ VENV_ACTIVATE = REPO_ROOT / ".venv" / "bin" / "activate"
 
 
 def _needs_gpu(cell: Cell) -> bool:
-    """A cell needs a GPU when it trains an autoencoder or uses an embedding extractor (SecureBERT, CodeT5+)."""
-    return cell.method == "ae" or cell.extractor in ("sbert", "codet5")
+    """A cell needs a GPU when it trains an autoencoder or uses a GPU embedding extractor."""
+    return cell.method == "ae" or cell.extractor in GPU_EXTRACTORS
 
 
 def _min_vram(cell: Cell, cfg: dict) -> int:
@@ -218,9 +219,7 @@ def submit(
     dataset: Annotated[str, typer.Option(help="Dataset family: superviz26 or superviz25.")] = "superviz26",
     suite: Annotated[str, typer.Option(help="Suite name (e.g. in_domain, lodo, all).")] = "all",
     methods: Annotated[str, typer.Option(help="Comma-separated decision-head names (ocsvm, lof, ae).")] = "ocsvm,ae",
-    extractors: Annotated[
-        str, typer.Option(help="Comma-separated feature-extractor names (li, loginov, cv, sbert, codet5).")
-    ] = "li",
+    extractors: Annotated[str, typer.Option(help="Comma-separated registered feature-extractor names.")] = "li",
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     gpu_section: Annotated[
         str,
