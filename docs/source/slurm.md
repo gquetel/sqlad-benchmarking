@@ -86,6 +86,12 @@ splits the grid into **units** — one `(method, extractor)` over all scenarios,
 
 Kill it, lose the VPN, start it twice: it never resubmits finished work.
 
+**Preemptible GPU jobs.** The queue submits GPU cells under `--gpu-qos runfill` by default —
+a preemptible QoS, so many more GPU jobs are allowed to run, but SLURM kills them when
+someone else needs the GPU. A killed cell writes no CSV, so the next tick sees it as pending
+and resubmits it. Pass `--gpu-qos ""` for the default (non-preemptible) QoS. `slurm_submit`
+has the same flag, off by default.
+
 **Counting mode.** `--max-jobs` counts **array tasks** by default (`squeue -r`) — correct when
 the cap is on *submitted* jobs. If your cap is on *concurrently running* jobs, pass
 `--no-count-array-tasks`, or drop the queue entirely and throttle natively with `--array=0-N%24`.

@@ -14,6 +14,10 @@ the filesystem, so it is safe to kill, resume, or run twice.
   ``squeue`` (queued or running).
 - **pending** -- everything else; submitted oldest-first while headroom remains.
 
+GPU cells go out under the preemptible ``runfill`` QoS by default (``--gpu-qos``), which lets
+many more of them run; SLURM kills them when someone else claims the GPU, and since a killed
+cell writes no CSV the next tick simply resubmits it.
+
 Run it on the submit node under ``tmux``/``nohup`` so a dropped VPN does not kill it:
 
     nohup uv run python -m tools.slurm_queue \\
@@ -96,7 +100,9 @@ def _squeue(user: str, count_array_tasks: bool, dry_run: bool = False) -> list[s
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def _tick(units: list[Unit], *, dataset: str, max_jobs: int, user: str, count_array_tasks: bool, **submit_kwargs) -> int:
+def _tick(
+    units: list[Unit], *, dataset: str, max_jobs: int, user: str, count_array_tasks: bool, **submit_kwargs
+) -> int:
     """Submit as many pending units as fit under ``max_jobs``. Returns the number of units left to do."""
     running = _squeue(user, count_array_tasks, dry_run=submit_kwargs.get("dry_run", False))
     in_flight_names = set(running)
@@ -137,6 +143,10 @@ def run_queue(
         bool, typer.Option(help="Count each array task against the cap (off: count whole arrays as one job).")
     ] = True,
     gpu_section: Annotated[str, typer.Option(help="GPU resource block in configs/slurm.yaml (gpu, gpu-long).")] = "gpu",
+    gpu_qos: Annotated[
+        str,
+        typer.Option(help="QoS for GPU jobs; 'runfill' is preemptible, so many more can run. Empty for the default."),
+    ] = "runfill",
     target_fpr: Annotated[float, typer.Option(help="Target false-positive rate for the calibrated threshold.")] = 0.001,
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,
     register: Annotated[bool, typer.Option(help="Register each fitted model in the MLflow Model Registry.")] = False,
@@ -154,6 +164,7 @@ def run_queue(
     submit_kwargs = dict(
         suite=suite,
         gpu_section=gpu_section,
+        gpu_qos=gpu_qos or None,
         target_fpr=target_fpr,
         seed=seed,
         register=register,
