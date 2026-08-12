@@ -49,6 +49,9 @@ _cell_failure_logger.propagate = False
 
 ALL_METHODS: tuple[MethodName, ...] = ("ocsvm", "lof", "ae")
 
+# OCSVM/LOF artifacts embed their training features: big, and nothing reloads them.
+DEFAULT_SAVE_METHODS = "ae"
+
 # MLflow metric keys allow alnum and ``_-./`` plus space; anything else is replaced.
 _MLFLOW_KEY_RE = re.compile(r"[^0-9A-Za-z_\-./ ]+")
 
@@ -161,6 +164,20 @@ class ResultRow:
     model_path: str
 
 
+def parse_save_methods(save_models: str) -> frozenset[str]:
+    """Resolve --save-models ("all", "none", or comma-separated methods) to a method set."""
+    value = save_models.strip().lower()
+    if value in {"", "none"}:
+        return frozenset()
+    if value == "all":
+        return frozenset(ALL_METHODS)
+    methods = frozenset(m.strip() for m in value.split(",") if m.strip())
+    unknown = methods - set(ALL_METHODS)
+    if unknown:
+        raise typer.BadParameter(f"Unknown method(s) in --save-models: {sorted(unknown)}")
+    return methods
+
+
 def _model_filename(family: str, method: MethodName, extractor: str, scenario: StrEnum) -> str:
     # AE saves a torch checkpoint. OCSVM/LOF saves a joblib sklearn pipeline.
     suffix = "pt" if method == "ae" else "joblib"
@@ -188,6 +205,7 @@ def _run_one(
     register: bool = False,
     cache: bool = True,
     cache_dir: Path | None = None,
+    save_methods: frozenset[str] = frozenset({"ae"}),
 ) -> ResultRow:
     """Train + evaluate one (scenario, method, extractor) cell, optionally logging to MLflow."""
     # Tee this cell's log output to its own file under reports/ and (when tracking)
@@ -222,6 +240,7 @@ def _run_one(
             register=register,
             cache=cache,
             cache_dir=cache_dir,
+            save_methods=save_methods,
         )
     finally:
         logging.getLogger().removeHandler(log_handler)
@@ -248,6 +267,7 @@ def _run_one_tracked(
     register: bool,
     cache: bool,
     cache_dir: Path | None,
+    save_methods: frozenset[str],
 ) -> ResultRow:
     """Body of :func:`_run_one`, run with a file handler already capturing this cell's log."""
     logger.info(
@@ -379,8 +399,12 @@ def _run_one_tracked(
             preds = (scores > threshold).astype(int)
             rpa = recall_per_attack(df_test["label"], preds, df_test["attack_technique"])
 
-            model_path = model_dir / _model_filename(family.name, method, extractor, scenario)
-            model.save(model_path)
+            if method in save_methods:
+                model_path = model_dir / _model_filename(family.name, method, extractor, scenario)
+                model.save(model_path)
+            else:
+                model_path = None
+                logger.info(f"  not saving {method} model (--save-models)")
 
             # One ROC and one AUPRC curve per cell, written under models/curves/.
             labels = df_test["label"].to_numpy()
@@ -413,7 +437,7 @@ def _run_one_tracked(
                 recall_per_attack=json.dumps(rpa),
                 fit_seconds=round(fit_s, 3),
                 score_seconds=round(score_s, 3),
-                model_path=str(model_path),
+                model_path=str(model_path) if model_path else "",
             )
 
             if track:
@@ -447,9 +471,11 @@ def _run_one_tracked(
                 mlflow.log_artifact(str(pr_path), artifact_path="pr_curves")
                 mlflow.log_artifact(str(roc_csv), artifact_path="curve_data")
                 mlflow.log_artifact(str(pr_csv), artifact_path="curve_data")
-                if register:
+                if register and model_path is not None:
                     registered_name = f"sqldetect-{method}-{extractor}-{family.name}-{scenario.value}"
                     log_and_register_detector(model_path, registered_name, df_test[["full_query"]].head(3))
+                elif register:
+                    logger.warning(f"  skipping registration for {method}: model not saved")
 
             return row
         except Exception:
@@ -479,6 +505,10 @@ def evaluate_suite(
         Path | None, typer.Option(help="Directory holding the CSVs (default: the family's data dir).")
     ] = None,
     model_dir: Annotated[Path, typer.Option(help="Where to save fitted models.")] = Path("models"),
+    save_models: Annotated[
+        str,
+        typer.Option(help="Which fitted heads to write to disk: comma-separated names, 'all' or 'none'."),
+    ] = DEFAULT_SAVE_METHODS,
     report: Annotated[
         Path | None, typer.Option(help="Output CSV for results (default: reports/{dataset}_results.csv).")
     ] = None,
@@ -520,6 +550,7 @@ def evaluate_suite(
     family, datasets, requested_methods, requested_extractors = _validate_grid(
         dataset, suite, methods, extractors, scenario
     )
+    save_methods = parse_save_methods(save_models)
 
     data_root = data_root or family.default_root()
     if report is None:
@@ -570,6 +601,7 @@ def evaluate_suite(
                         register=register,
                         cache=cache,
                         cache_dir=cache_dir,
+                        save_methods=save_methods,
                     )
                     rows.append(row)
                     pd.DataFrame([asdict(row)]).to_csv(report, mode="a", header=write_header, index=False)

@@ -35,11 +35,13 @@ from sqlad_benchmarking.data import split_normals
 from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
 from sqlad_benchmarking.datasets.superviz26_drift import Superviz26Drift, load_drift
 from sqlad_benchmarking.evaluate_suite import (
+    DEFAULT_SAVE_METHODS,
     VAL_FRACTION,
     _mlflow_key,
     _model_filename,
     _validate_grid,
     parent_run_spec,
+    parse_save_methods,
 )
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
 from sqlad_benchmarking.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
@@ -132,6 +134,7 @@ def _run_one(
     track: bool = False,
     cache: bool = True,
     cache_dir: Path | None = None,
+    save_methods: frozenset[str] = frozenset({"ae"}),
 ) -> DriftResultRow:
     """Train one cell on the origin (S1) normals and evaluate it on S1 and the shifted (S2) test set."""
     logger.info(
@@ -226,8 +229,12 @@ def _run_one(
             model_dir=model_dir,
         )
 
-        model_path = model_dir / _model_filename(family.name, method, extractor, domain)
-        model.save(model_path)
+        if method in save_methods:
+            model_path = model_dir / _model_filename(family.name, method, extractor, domain)
+            model.save(model_path)
+        else:
+            model_path = None
+            logger.info(f"  not saving {method} model (--save-models)")
 
         row = DriftResultRow(
             dataset=family.name,
@@ -253,7 +260,7 @@ def _run_one(
             threshold=float(threshold),
             fit_seconds=round(fit_s, 3),
             score_seconds=round(score_s, 3),
-            model_path=str(model_path),
+            model_path=str(model_path) if model_path else "",
         )
 
         if track:
@@ -306,6 +313,10 @@ def evaluate_drift(
         typer.Option(help="Directory holding the per-domain drift CSVs (default: ~/datasets/superviz26-cd)."),
     ] = None,
     model_dir: Annotated[Path, typer.Option(help="Where to save fitted models.")] = Path("models"),
+    save_models: Annotated[
+        str,
+        typer.Option(help="Which fitted heads to write to disk: comma-separated names, 'all' or 'none'."),
+    ] = DEFAULT_SAVE_METHODS,
     report: Annotated[
         Path | None, typer.Option(help="Output CSV (default: reports/superviz26-drift_results.csv).")
     ] = None,
@@ -332,6 +343,7 @@ def evaluate_drift(
     family, domains, requested_methods, requested_extractors = _validate_grid(
         dataset, suite, methods, extractors, scenario
     )
+    save_methods = parse_save_methods(save_models)
 
     data_root = data_root or family.default_root()
     if report is None:
@@ -374,6 +386,7 @@ def evaluate_drift(
                         track=track_enabled,
                         cache=cache,
                         cache_dir=cache_dir,
+                        save_methods=save_methods,
                     )
                     rows.append(row)
                     pd.DataFrame([asdict(row)]).to_csv(report, mode="a", header=write_header, index=False)
