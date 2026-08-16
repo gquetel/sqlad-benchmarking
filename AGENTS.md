@@ -59,11 +59,13 @@ versions or regenerate the lock without explicit instruction.
   MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run`.
     * Submit: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li`.
-* For a grid too big for the cluster's in-flight job cap (~24), use `tools.slurm_queue` instead of
-  calling `slurm_submit` directly. It submits one unit per `(method, extractor)` whenever `squeue`
-  shows headroom, re-checking every `--interval` seconds. No state file: each tick derives *done*
-  from the per-cell CSVs and *in flight* from job names in `squeue`, so it is safe to kill and
-  resume. Run it detached on the submit node — see `docs/source/slurm.md`.
+* The cluster caps in-flight jobs (~24), so `slurm_submit` drip-feeds by default: one unit per
+  `(method, extractor)` whenever `squeue` shows headroom, re-checking every `--interval` seconds.
+  No state file: each tick derives *done* from the cells having a FINISHED MLflow run and *in
+  flight* from job names in `squeue`, so it is safe to kill and resume, and it resubmits cells
+  whose job crashed or was preempted. Units submit only their outstanding cells. `--no-queue`
+  submits everything at once and `--no-check-mlflow` ignores what already ran. Run it detached on
+  the submit node — see `docs/source/slurm.md`.
 
 # Code style
 * DO NOT ADD EXCEPTIONS TO RUFF BY YOURSELF. ASK ME FIRST. 

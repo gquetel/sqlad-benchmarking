@@ -39,12 +39,17 @@ race on the shared `.venv`).
 
 ## Submitting
 
+Submission is drip-fed by default (see below), so these run until the whole grid is out:
+
 ```bash
-# Preview the plan (manifests + sbatch commands) without submitting:
-python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors li --dry-run
+# Preview the plan (what is missing + the sbatch commands) without submitting:
+python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors li --dry-run --once
 
 # Submit for real:
 python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li
+
+# Everything at once, ignoring the job cap and what already ran:
+python -m tools.slurm_submit --dataset superviz26 --methods ae --extractors li --no-queue --no-check-mlflow
 
 # Smoke run: cap each cell to a label-stratified subset (passed through to evaluate_suite):
 python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors sbert --limit 50000
@@ -53,12 +58,12 @@ python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --ext
 Manifests, generated job scripts, and `.out` logs are written under
 `reports/slurm/<run-id>/` (git-ignored).
 
-### Queueing a grid larger than the job cap
+### Drip-feeding under the job cap
 
-Run this on the submit node, detached, when the grid is too big to submit in one go:
+Run it on the submit node, detached, so a dropped VPN does not kill it:
 
 ```bash
-nohup uv run python -m tools.slurm_queue \
+nohup uv run python -m tools.slurm_submit \
   --dataset superviz26 --suite all --methods ae \
   --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb \
   --max-jobs 24 --interval 300 > reports/slurm/queue.log 2>&1 &
@@ -67,24 +72,31 @@ nohup uv run python -m tools.slurm_queue \
 Preview it anywhere first (off the submit node it assumes an empty queue):
 
 ```bash
-python -m tools.slurm_queue --methods ae --extractors li,cv,sbert --dry-run --once
+python -m tools.slurm_submit --methods ae --extractors li,cv,sbert --dry-run --once
 ```
 
 **Why.** The cluster caps in-flight jobs per user (~24). The full grid (every extractor ×
-method × 8 scenarios) is hundreds of jobs, so `slurm_submit` alone gets rejected.
+method × 8 scenarios) is hundreds of jobs, which SLURM would reject in one go.
 
-**What it does.**
-[`tools.slurm_queue`](https://github.com/gquetel/sqlad-benchmarking/blob/main/tools/slurm_queue.py)
-splits the grid into **units** — one `(method, extractor)` over all scenarios, i.e. one
-`slurm_submit` call — and every `--interval` seconds submits as many as the headroom allows.
+**What it does.** It splits the grid into **units** — one `(method, extractor)` — and every
+`--interval` seconds submits as many outstanding cells as the headroom allows. A unit submits
+only the cells that still need running, so a partly finished one costs a partial array.
+`--no-queue` submits everything at once instead.
 
-**No state file.** Each tick it rebuilds the picture from `squeue` and from disk:
+**No state file.** Each tick it rebuilds the picture from MLflow and `squeue`:
 
-- *done* — every `reports/{dataset}/cells/*.csv` for the unit exists
+- *done* — the cell has a FINISHED run on the tracking server
 - *in flight* — a job with the unit's job name is in `squeue`
 - *pending* — everything else
 
+Because *done* means FINISHED, a cell that crashed, was preempted, or hung (leaving its run
+FAILED or stuck RUNNING) is picked up and resubmitted. That also makes this the way to
+recover a broken batch: point it at the same grid and it fills in only the holes.
+
 Kill it, lose the VPN, start it twice: it never resubmits finished work.
+
+`--no-check-mlflow` skips the lookup and submits every cell once — for a fresh grid, or when
+the tracking server is unreachable.
 
 **Preemptible GPU jobs.** The queue submits GPU cells under `--gpu-qos runfill` by default —
 a preemptible QoS, so many more GPU jobs are allowed to run, but SLURM kills them when
