@@ -244,6 +244,10 @@ def submit(
     run_id: Annotated[
         str | None, typer.Option(help="Submission id; names the dir under submit_dir (default: date-<first job id>).")
     ] = None,
+    cells_file: Annotated[
+        Path | None,
+        typer.Option(help="JSONL of cells to submit instead of the full grid (e.g. from tools.mlflow_missing)."),
+    ] = None,
     dry_run: Annotated[bool, typer.Option(help="Print the manifests and sbatch commands without submitting.")] = False,
 ) -> None:
     """Enumerate the grid, pre-create MLflow parents, and submit one job array per resource class."""
@@ -257,7 +261,12 @@ def submit(
     if not dry_run:
         _check_venv()
 
-    cells = enumerate_cells(dataset, suite, methods, extractors)
+    if cells_file is not None:
+        cells = [Cell(**json.loads(line)) for line in cells_file.read_text().splitlines() if line.strip()]
+        if not cells:
+            raise typer.BadParameter(f"{cells_file} contains no cells.")
+    else:
+        cells = enumerate_cells(dataset, suite, methods, extractors)
     # An explicit run_id is honoured as-is; an auto-generated one starts as a timestamp so we
     # have a directory to stage manifests/scripts in, then gets renamed to date-<jobid> once
     # sbatch hands back the first array's id (the id doesn't exist until after submission).

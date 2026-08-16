@@ -28,7 +28,7 @@ _EXPERIMENT_NAMES = {
 }
 
 
-def _experiment_name(dataset: str) -> str:
+def experiment_name(dataset: str) -> str:
     """Map a dataset family to its MLflow experiment name.
 
     The feature-extractor study owns three experiments: the default superviz26 (the
@@ -75,7 +75,7 @@ class _UrlRewriteStream:
 def setup_mlflow(dataset: str) -> bool:
     """Configure MLflow from the environment.
 
-    The experiment is derived from ``dataset`` via :func:`_experiment_name`: the
+    The experiment is derived from ``dataset`` via :func:`experiment_name`: the
     SuperViz26 families go to the "FE-study-*" experiments, Superviz25 to
     "Superviz25-SQL".
 
@@ -98,7 +98,7 @@ def setup_mlflow(dataset: str) -> bool:
 
     mlflow.set_tracking_uri(tracking_uri)
     try:
-        mlflow.set_experiment(_experiment_name(dataset))
+        mlflow.set_experiment(experiment_name(dataset))
     except Exception as exc:
         logger.warning(f"MLflow tracking disabled: could not reach {tracking_uri} ({exc})")
         return False
