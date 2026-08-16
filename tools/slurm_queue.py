@@ -9,7 +9,9 @@ submits as many pending units as the current headroom allows.
 There is no state file: on each tick the driver rebuilds the picture from the cluster and
 the filesystem, so it is safe to kill, resume, or run twice.
 
-- **done** -- every per-cell CSV under ``reports/{dataset}/cells/`` already exists.
+- **done** -- every per-cell CSV under ``reports/{dataset}/cells/`` already exists. With
+  ``--cells-file`` the CSVs are ignored: the manifest already decides what is missing, so a
+  unit counts as done once this session has submitted it.
 - **in flight** -- a job named like the unit's :func:`tools.slurm_submit._job_name` is in
   ``squeue`` (queued or running).
 - **pending** -- everything else; submitted oldest-first while headroom remains.
@@ -34,17 +36,19 @@ Usage:
 from __future__ import annotations
 
 import getpass
+import json
 import logging
 import shutil
 import subprocess
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, NamedTuple
 
 import typer
 
 from sqlad_benchmarking.evaluate_suite import Cell, enumerate_cells
-from tools.slurm_submit import REPO_ROOT, _job_name, submit
+from tools.slurm_submit import REPO_ROOT, SUBMIT_DIR, _job_name, submit
 
 logger = logging.getLogger(__name__)
 
@@ -68,13 +72,45 @@ def _build_units(dataset: str, suite: str, methods: str, extractors: str) -> lis
     return units
 
 
+def _units_from_cells(dataset: str, suite: str, cells_file: Path) -> list[Unit]:
+    """Group a JSONL manifest (e.g. from tools.mlflow_missing) into one unit per ``(method, extractor)``.
+
+    Units hold only the manifest's cells, so a unit can cover a subset of the scenarios.
+    """
+    grouped: dict[tuple[str, str], list[Cell]] = defaultdict(list)
+    for line in cells_file.read_text().splitlines():
+        if line.strip():
+            cell = Cell(**json.loads(line))
+            grouped[(cell.method, cell.extractor)].append(cell)
+    if not grouped:
+        raise typer.BadParameter(f"{cells_file} contains no cells.")
+    return [
+        Unit(method, extractor, tuple(cells), _job_name(dataset, suite, cells))
+        for (method, extractor), cells in grouped.items()
+    ]
+
+
+def _write_unit_manifest(run_id: str, unit: Unit) -> Path:
+    """Stage a unit's cells so slurm_submit takes exactly them rather than re-expanding the grid."""
+    path = REPO_ROOT / SUBMIT_DIR / run_id / "unit_cells.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(cell._asdict()) + "\n" for cell in unit.cells))
+    return path
+
+
 def _cell_csv(dataset: str, cell: Cell) -> Path:
     """Path of the per-cell CSV an array task writes; its existence is our 'done' marker."""
     return REPO_ROOT / "reports" / dataset / "cells" / f"{cell.method}_{cell.extractor}_{cell.scenario}.csv"
 
 
-def _is_done(dataset: str, unit: Unit) -> bool:
-    """A unit is done once every one of its cells has written its CSV."""
+def _is_done(dataset: str, unit: Unit, submitted: set[str], from_cells_file: bool) -> bool:
+    """A unit is done once every one of its cells has written its CSV.
+
+    A manifest-driven queue ignores the CSVs: the manifest lists cells whose CSV may exist
+    from a run that then died, so being resubmitted once in this session is the only marker.
+    """
+    if from_cells_file:
+        return unit.job_name in submitted
     return all(_cell_csv(dataset, cell).exists() for cell in unit.cells)
 
 
@@ -101,14 +137,24 @@ def _squeue(user: str, count_array_tasks: bool, dry_run: bool = False) -> list[s
 
 
 def _tick(
-    units: list[Unit], *, dataset: str, max_jobs: int, user: str, count_array_tasks: bool, **submit_kwargs
+    units: list[Unit],
+    *,
+    dataset: str,
+    max_jobs: int,
+    user: str,
+    count_array_tasks: bool,
+    submitted: set[str],
+    from_cells_file: bool,
+    **submit_kwargs,
 ) -> int:
     """Submit as many pending units as fit under ``max_jobs``. Returns the number of units left to do."""
     running = _squeue(user, count_array_tasks, dry_run=submit_kwargs.get("dry_run", False))
     in_flight_names = set(running)
     headroom = max_jobs - len(running)
 
-    pending = [u for u in units if u.job_name not in in_flight_names and not _is_done(dataset, u)]
+    pending = [
+        u for u in units if u.job_name not in in_flight_names and not _is_done(dataset, u, submitted, from_cells_file)
+    ]
     logger.info(f"{len(running)} job(s) in flight, headroom {headroom}, {len(pending)} unit(s) pending")
 
     for unit in pending:
@@ -123,10 +169,11 @@ def _tick(
         # auto-generated id is a whole-second timestamp they would collide on.
         run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{unit.method}-{unit.extractor}"
         try:
-            submit(dataset=dataset, methods=unit.method, extractors=unit.extractor, run_id=run_id, **submit_kwargs)
+            submit(dataset=dataset, cells_file=_write_unit_manifest(run_id, unit), run_id=run_id, **submit_kwargs)
         except Exception as exc:  # a rejected unit must not take the whole queue down
             logger.error(f"submit failed for {unit.job_name}: {exc}")
             continue
+        submitted.add(unit.job_name)
         headroom -= n
     return len(pending)
 
@@ -136,6 +183,10 @@ def run_queue(
     suite: Annotated[str, typer.Option(help="Suite name (e.g. in_domain, lodo, all).")] = "all",
     methods: Annotated[str, typer.Option(help="Comma-separated decision-head names (ocsvm, lof, ae).")] = "ae",
     extractors: Annotated[str, typer.Option(help="Comma-separated feature-extractor names.")] = "li",
+    cells_file: Annotated[
+        Path | None,
+        typer.Option(help="JSONL of cells to drip-feed instead of the full grid (e.g. from tools.mlflow_missing)."),
+    ] = None,
     max_jobs: Annotated[int, typer.Option(help="Cap on jobs in flight (queued + running) at any time.")] = 24,
     interval: Annotated[int, typer.Option(help="Seconds between checks.")] = 300,
     once: Annotated[bool, typer.Option(help="Do a single pass and exit instead of looping.")] = False,
@@ -157,7 +208,13 @@ def run_queue(
     """Submit the grid unit by unit, keeping at most ``--max-jobs`` jobs in flight."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     user = getpass.getuser()
-    units = _build_units(dataset, suite, methods, extractors)
+    from_cells_file = cells_file is not None
+    units = (
+        _units_from_cells(dataset, suite, cells_file)
+        if cells_file is not None
+        else _build_units(dataset, suite, methods, extractors)
+    )
+    submitted: set[str] = set()
     total_cells = sum(len(u.cells) for u in units)
     logger.info(f"{len(units)} units / {total_cells} cells; cap {max_jobs} jobs, checking every {interval}s")
 
@@ -179,6 +236,8 @@ def run_queue(
             max_jobs=max_jobs,
             user=user,
             count_array_tasks=count_array_tasks,
+            submitted=submitted,
+            from_cells_file=from_cells_file,
             **submit_kwargs,
         )
         if remaining == 0:

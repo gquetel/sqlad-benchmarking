@@ -4,8 +4,8 @@ A SLURM array task that crashed, was preempted, or hung leaves either no run at 
 run stuck in ``RUNNING``/``FAILED`` on the tracking server. This tool rebuilds the expected
 grid with :func:`enumerate_cells`, asks MLflow which cells have a **FINISHED** child run,
 and reports the difference. The missing cells are written to a JSONL manifest that
-``tools.slurm_submit --cells-file`` submits verbatim (no need to re-run whole
-method x extractor blocks).
+``tools.slurm_queue --cells-file`` drip-feeds back to SLURM under the in-flight cap
+(no need to re-run whole method x extractor blocks).
 
 Matching is by tags, per protocol:
 - suite (LODO / in-domain): ``decision_engine`` + ``feature_extractor`` + ``scenario``
@@ -17,7 +17,7 @@ Usage:
     # Just look:
     python -m tools.mlflow_missing --dataset superviz26 --suite all \\
       --methods ocsvm,lof,ae --extractors li,cv,sbert,codet5
-    # Write the manifest and submit it:
+    # Write the manifest and drip-feed it to the cluster:
     python -m tools.mlflow_missing ... --submit
 """
 
@@ -37,7 +37,8 @@ from sqlad_benchmarking.datasets import FAMILIES
 from sqlad_benchmarking.evaluate_fsl import DEFAULT_KS
 from sqlad_benchmarking.evaluate_suite import Cell, enumerate_cells
 from sqlad_benchmarking.tracking import experiment_name, setup_mlflow
-from tools.slurm_submit import REPO_ROOT, SUBMIT_DIR, submit
+from tools.slurm_queue import run_queue
+from tools.slurm_submit import REPO_ROOT, SUBMIT_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +106,12 @@ def check(
         Path | None, typer.Option(help="Where to write the missing-cells manifest (default: reports/slurm/missing-*).")
     ] = None,
     submit_missing: Annotated[
-        bool, typer.Option("--submit", help="Submit the missing cells with tools.slurm_submit.")
+        bool, typer.Option("--submit", help="Drip-feed the missing cells to SLURM via tools.slurm_queue.")
     ] = False,
-    gpu_qos: Annotated[str | None, typer.Option(help="QoS for the resubmitted GPU jobs, e.g. 'runfill'.")] = "runfill",
+    max_jobs: Annotated[int, typer.Option(help="Cap on jobs in flight (queued + running) at any time.")] = 24,
+    interval: Annotated[int, typer.Option(help="Seconds between queue checks.")] = 300,
+    once: Annotated[bool, typer.Option(help="Single queue pass then exit, instead of looping.")] = False,
+    gpu_qos: Annotated[str, typer.Option(help="QoS for the resubmitted GPU jobs. Empty for the default.")] = "runfill",
     dry_run: Annotated[bool, typer.Option(help="With --submit, print the sbatch commands without submitting.")] = False,
 ) -> None:
     """Report the grid cells missing a finished MLflow run; optionally resubmit them."""
@@ -138,9 +142,18 @@ def check(
     logger.info(f"{len(missing)} missing cells -> {manifest}")
 
     if not submit_missing:
-        logger.info(f"Resubmit with:\n  python -m tools.slurm_submit --dataset {dataset} --cells-file {manifest}")
+        logger.info(f"Resubmit with:\n  python -m tools.slurm_queue --dataset {dataset} --cells-file {manifest}")
         return
-    submit(dataset=dataset, suite=suite, cells_file=manifest, gpu_qos=gpu_qos, dry_run=dry_run)
+    run_queue(
+        dataset=dataset,
+        suite=suite,
+        cells_file=manifest,
+        max_jobs=max_jobs,
+        interval=interval,
+        once=once,
+        gpu_qos=gpu_qos,
+        dry_run=dry_run,
+    )
 
 
 if __name__ == "__main__":
