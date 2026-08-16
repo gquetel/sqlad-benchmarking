@@ -25,6 +25,7 @@ EMBED_DIM = 768
 
 SECUREBERT2_DEFAULT_MODEL = "cisco-ai/SecureBERT2.0-base"
 SECUREBERT2_MAX_LENGTH = 1024
+SECUREBERT2_BATCH_SIZE = 128
 SECUREBERT2_EMBED_DIM = 768
 
 
@@ -104,7 +105,7 @@ class SecureBert2Extractor(BaseEstimator, TransformerMixin):
     def __init__(
         self,
         model_name: str = SECUREBERT2_DEFAULT_MODEL,
-        batch_size: int = DEFAULT_BATCH_SIZE,
+        batch_size: int = SECUREBERT2_BATCH_SIZE,
         device: torch.device | None = None,
     ) -> None:
         self.model_name = model_name

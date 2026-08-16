@@ -116,8 +116,11 @@ def _job_name(dataset: str, suite: str, cells: list[Cell]) -> str:
     return f"{_experiment_tag(dataset, suite)}-{extractors}-{methods}-{dataset}"
 
 
-def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu") -> dict:
-    """SBATCH resource block for a cell: the cpu block, or ``gpu_section`` with a VRAM-filtered partition list."""
+def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu", gpu_qos: str | None = None) -> dict:
+    """SBATCH resource block for a cell: the cpu block, or ``gpu_section`` with a VRAM-filtered partition list.
+
+    ``gpu_qos`` (opt-in, GPU cells only) overrides the QoS, e.g. the preemptible ``runfill``.
+    """
     if not _needs_gpu(cell):
         return dict(cfg["cpu"])
     if gpu_section not in cfg:
@@ -125,6 +128,8 @@ def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu") -> dict:
     gpu_cfg = cfg[gpu_section]
     res = {k: v for k, v in gpu_cfg.items() if k != "partitions"}
     res["partition"] = ",".join(_eligible_partitions(gpu_cfg, _min_vram(cell, cfg)))
+    if gpu_qos:
+        res["qos"] = gpu_qos
     return res
 
 
@@ -164,6 +169,8 @@ def _write_job_script(
     ]
     if res.get("gres"):
         directives.append(f"#SBATCH --gres={res['gres']}")
+    if res.get("qos"):
+        directives.append(f"#SBATCH --qos={res['qos']}")
     directives += [
         f"#SBATCH --cpus-per-task={res['cpus_per_task']}",
         f"#SBATCH --mem={res['mem']}",
@@ -225,6 +232,10 @@ def submit(
         str,
         typer.Option(help="GPU resource block in the config to use (e.g. 'gpu', 'gpu-long' for a 24h reservation)."),
     ] = "gpu",
+    gpu_qos: Annotated[
+        str | None,
+        typer.Option(help="QoS for GPU jobs, e.g. 'runfill' (preemptible: more jobs allowed, killed on demand)."),
+    ] = None,
     target_fpr: Annotated[float, typer.Option(help="Target false-positive rate for the calibrated threshold.")] = 0.001,
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,
     register: Annotated[bool, typer.Option(help="Register each fitted model in the MLflow Model Registry.")] = False,
@@ -232,6 +243,10 @@ def submit(
     limit: Annotated[int | None, typer.Option(help="Label-stratified subset size per cell for smoke runs.")] = None,
     run_id: Annotated[
         str | None, typer.Option(help="Submission id; names the dir under submit_dir (default: date-<first job id>).")
+    ] = None,
+    cells_file: Annotated[
+        Path | None,
+        typer.Option(help="JSONL of cells to submit instead of the full grid (e.g. from tools.mlflow_missing)."),
     ] = None,
     dry_run: Annotated[bool, typer.Option(help="Print the manifests and sbatch commands without submitting.")] = False,
 ) -> None:
@@ -246,7 +261,12 @@ def submit(
     if not dry_run:
         _check_venv()
 
-    cells = enumerate_cells(dataset, suite, methods, extractors)
+    if cells_file is not None:
+        cells = [Cell(**json.loads(line)) for line in cells_file.read_text().splitlines() if line.strip()]
+        if not cells:
+            raise typer.BadParameter(f"{cells_file} contains no cells.")
+    else:
+        cells = enumerate_cells(dataset, suite, methods, extractors)
     # An explicit run_id is honoured as-is; an auto-generated one starts as a timestamp so we
     # have a directory to stage manifests/scripts in, then gets renamed to date-<jobid> once
     # sbatch hands back the first array's id (the id doesn't exist until after submission).
@@ -268,7 +288,7 @@ def submit(
         buckets.setdefault(_bucket(cell, cfg, gpu_section), []).append(cell)
     job_ids: list[str] = []
     for bucket, group_cells in sorted(buckets.items()):
-        res = _resolve_resources(cfg, group_cells[0], _gpu_section(group_cells[0], cfg, gpu_section))
+        res = _resolve_resources(cfg, group_cells[0], _gpu_section(group_cells[0], cfg, gpu_section), gpu_qos)
         manifest = submit_dir / f"cells_{bucket}.jsonl"
         script = submit_dir / f"eval_cell_{bucket}.sbatch"
         _write_manifest(manifest, group_cells)

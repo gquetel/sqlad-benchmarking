@@ -18,7 +18,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sqlad_benchmarking.determinism import enable_determinism
 
 DEFAULT_MODEL = "sentence-transformers/all-mpnet-base-v2"
-DEFAULT_BATCH_SIZE = 512
+DEFAULT_BATCH_SIZE = 128
 EMBED_DIM = 768
 
 

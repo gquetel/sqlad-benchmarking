@@ -53,6 +53,50 @@ python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --ext
 Manifests, generated job scripts, and `.out` logs are written under
 `reports/slurm/<run-id>/` (git-ignored).
 
+### Queueing a grid larger than the job cap
+
+Run this on the submit node, detached, when the grid is too big to submit in one go:
+
+```bash
+nohup uv run python -m tools.slurm_queue \
+  --dataset superviz26 --suite all --methods ae \
+  --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb \
+  --max-jobs 24 --interval 300 > reports/slurm/queue.log 2>&1 &
+```
+
+Preview it anywhere first (off the submit node it assumes an empty queue):
+
+```bash
+python -m tools.slurm_queue --methods ae --extractors li,cv,sbert --dry-run --once
+```
+
+**Why.** The cluster caps in-flight jobs per user (~24). The full grid (every extractor ×
+method × 8 scenarios) is hundreds of jobs, so `slurm_submit` alone gets rejected.
+
+**What it does.**
+[`tools.slurm_queue`](https://github.com/gquetel/sqlad-benchmarking/blob/main/tools/slurm_queue.py)
+splits the grid into **units** — one `(method, extractor)` over all scenarios, i.e. one
+`slurm_submit` call — and every `--interval` seconds submits as many as the headroom allows.
+
+**No state file.** Each tick it rebuilds the picture from `squeue` and from disk:
+
+- *done* — every `reports/{dataset}/cells/*.csv` for the unit exists
+- *in flight* — a job with the unit's job name is in `squeue`
+- *pending* — everything else
+
+Kill it, lose the VPN, start it twice: it never resubmits finished work.
+
+**Preemptible GPU jobs.** The queue submits GPU cells under `--gpu-qos runfill` by default —
+a preemptible QoS, so many more GPU jobs are allowed to run, but SLURM kills them when
+someone else needs the GPU. A killed cell writes no CSV, so the next tick sees it as pending
+and resubmits it. Pass `--gpu-qos ""` for the default (non-preemptible) QoS. `slurm_submit`
+has the same flag, off by default.
+
+**Counting mode.** `--max-jobs` counts **array tasks** by default (`squeue -r`) — correct when
+the cap is on *submitted* jobs. If your cap is on *concurrently running* jobs, pass
+`--no-count-array-tasks`, or drop the queue entirely and throttle natively with `--array=0-N%24`.
+Check which you have: `sacctmgr show assoc user=$USER format=maxsubmit,maxjobs`.
+
 ### Concept drift
 
 The concept-drift family (`superviz26-drift`) fans out the same way — its four domains
