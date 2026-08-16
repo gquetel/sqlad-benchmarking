@@ -77,7 +77,7 @@ def test_build_extractor_unknown_name_raises():
         build_extractor("does-not-exist")
 
 
-def test_qwen_loads_in_bfloat16_without_generation_cache(monkeypatch):
+def test_qwen_loads_in_bfloat16(monkeypatch):
     constructor = Mock()
     monkeypatch.setattr("sentence_transformers.SentenceTransformer", constructor)
 
@@ -85,8 +85,9 @@ def test_qwen_loads_in_bfloat16_without_generation_cache(monkeypatch):
     extractor._ensure_model()
 
     assert extractor.batch_size == 16
-    assert constructor.call_args.kwargs["model_kwargs"] == {"torch_dtype": torch.bfloat16}
-    assert constructor.call_args.kwargs["config_kwargs"] == {"use_cache": False}
+    assert constructor.call_args.kwargs["model_kwargs"] == {
+        "torch_dtype": torch.bfloat16,
+    }
 
 
 def test_countvect_is_stateful_and_sparse():
