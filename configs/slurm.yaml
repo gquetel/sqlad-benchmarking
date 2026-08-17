@@ -35,6 +35,7 @@ gpu-long:
 min_vram_gb:
   default: 0
   codet5: 24
+  qwen3-emb: 24
 
 # Cells that need the longer wall-time reservation (the `gpu-long` block instead of `gpu`),
 # keyed by extractor or engine:extractor. The heavier full-split data pushes these past 12h.
