@@ -51,7 +51,7 @@ from sqlad_benchmarking.evaluate_suite import _model_filename, _validate_grid, p
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
 from sqlad_benchmarking.metrics import threshold_for_fpr, wilson_ci
 from sqlad_benchmarking.model import AEDetector
-from sqlad_benchmarking.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
+from sqlad_benchmarking.tracking import delete_running_cell_runs, ensure_parent_run, log_dataset_input, setup_mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +255,15 @@ def _run_target(
             f"pretrained LODO model {base_model_path} not found. Train it first, e.g.:\n"
             f"  python -m sqlad_benchmarking.evaluate_suite --dataset {BASE_FAMILY} "
             f"--scenario {lodo.value} --methods ae --extractors {extractor}"
+        )
+
+    if track:
+        delete_running_cell_runs(
+            {
+                "decision_engine": "ae",
+                "feature_extractor": extractor,
+                "target": target.value,
+            }
         )
 
     # One fixed test set per cell (down-sampled once), shared by the whole sweep so

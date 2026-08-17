@@ -16,6 +16,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from mlflow.data.http_dataset_source import HTTPDatasetSource
 from mlflow.data.meta_dataset import MetaDataset
+from mlflow.tracking import MlflowClient
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,37 @@ def ensure_parent_run(tags: dict[str, str], name: str) -> str:
         return run_id
     with mlflow.start_run(run_name=name, tags=tags) as run:
         return run.info.run_id
+
+
+def delete_running_cell_runs(tags: dict[str, str]) -> int:
+    """Soft-delete running child runs in the active parent that match ``tags``.
+
+    Args:
+        tags: Tags identifying one evaluation cell.
+
+    Returns:
+        Number of runs deleted.
+    """
+    parent = mlflow.active_run()
+    if parent is None:
+        raise RuntimeError("an active parent run is required to replace a running cell")
+
+    filters = ["attributes.status = 'RUNNING'", f"tags.`mlflow.parentRunId` = '{parent.info.run_id}'"]
+    filters.extend(f"tags.`{key}` = '{value}'" for key, value in tags.items())
+    client = MlflowClient()
+    runs = client.search_runs(
+        experiment_ids=[parent.info.experiment_id],
+        filter_string=" and ".join(filters),
+    )
+
+    deleted = 0
+    for run in runs:
+        if client.get_run(run.info.run_id).info.status != "RUNNING":
+            continue
+        client.delete_run(run.info.run_id)
+        deleted += 1
+        logger.info(f"Deleted stale RUNNING MLflow run {run.info.run_id}")
+    return deleted
 
 
 def log_dataset_input(*, url: str, name: str, digest: str, context: str) -> None:

@@ -88,3 +88,5 @@ Each cell writes one row per `(target, k, seed)` (`auroc`, `auprc`, `n_finetune`
 ## Results
 
 MLflow is the canonical store: each cell logs an independent run, nested under a parent that `slurm_submit` pre-creates once (so concurrent jobs don't spawn duplicate parents). Each cell also writes its row to `reports/{dataset}/cells/*.csv` on disk; read that directory directly if you need a flat table.
+
+When a cell is retried, any `RUNNING` run for the same cell is soft-deleted before the new run starts. Runs with any other status and runs for other cells are preserved.

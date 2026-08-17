@@ -46,7 +46,7 @@ from sqlad_benchmarking.evaluate_suite import (
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
 from sqlad_benchmarking.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
 from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, build_method
-from sqlad_benchmarking.tracking import ensure_parent_run, log_dataset_input, setup_mlflow
+from sqlad_benchmarking.tracking import delete_running_cell_runs, ensure_parent_run, log_dataset_input, setup_mlflow
 from sqlad_benchmarking.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
 
 logger = logging.getLogger(__name__)
@@ -155,6 +155,14 @@ def _run_one(
     run_type = "smoke-run" if limit is not None else "full-run"
     model = build_method(method, extractor, cache=cache, cache_dir=cache_dir)
     run_name = f"{domain.value}#{time.strftime('%Y%m%d-%H%M%S')}"
+    if track:
+        delete_running_cell_runs(
+            {
+                "decision_engine": method,
+                "feature_extractor": extractor,
+                "domain": domain.value,
+            }
+        )
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
         if track:

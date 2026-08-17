@@ -34,6 +34,7 @@ from sqlad_benchmarking.features import EXTRACTOR_LABELS, EXTRACTORS, extractor_
 from sqlad_benchmarking.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
 from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, build_method
 from sqlad_benchmarking.tracking import (
+    delete_running_cell_runs,
     ensure_parent_run,
     log_and_register_detector,
     log_dataset_input,
@@ -322,6 +323,14 @@ def _run_one_tracked(
     # (full-run/smoke-run) lives in its own tag; the method/extractor context is
     # carried by the parent it nests under.
     run_name = f"{scenario.value}#{time.strftime('%Y%m%d-%H%M%S')}"
+    if track:
+        delete_running_cell_runs(
+            {
+                "decision_engine": method,
+                "feature_extractor": extractor,
+                "scenario": scenario.value,
+            }
+        )
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
         try:
