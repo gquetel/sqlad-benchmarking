@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import signal
 from pathlib import Path
 from typing import Annotated
 
@@ -26,6 +27,18 @@ from sqlad_benchmarking.evaluate_suite import evaluate_suite
 logger = logging.getLogger(__name__)
 
 
+class SlurmPreempted(RuntimeError):
+    """Raised when SLURM sends SIGTERM (preemption under a QoS like ``runfill``, or a
+    time-limit kill) so the in-flight cell's ``with mlflow.start_run()`` block sees an
+    exception and runs its cleanup, instead of the process dying mid-run and leaving
+    the MLflow run stuck at RUNNING with no artifacts.
+    """
+
+
+def _handle_sigterm(signum, frame) -> None:  # noqa: ARG001
+    raise SlurmPreempted("received SIGTERM (SLURM preemption or time limit)")
+
+
 def run_cell(
     manifest: Annotated[Path, typer.Option(help="JSONL manifest of cells, one per line.")],
     index: Annotated[int, typer.Option(help="0-based line index into the manifest (the SLURM array task id).")],
@@ -37,6 +50,7 @@ def run_cell(
     limit: Annotated[int | None, typer.Option(help="Label-stratified subset size for smoke runs.")] = None,
 ) -> None:
     """Run the manifest cell at ``index`` through the evaluation suite."""
+    signal.signal(signal.SIGTERM, _handle_sigterm)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     lines = [line for line in manifest.read_text().splitlines() if line.strip()]
     if not 0 <= index < len(lines):
