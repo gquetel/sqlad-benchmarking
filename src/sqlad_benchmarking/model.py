@@ -9,6 +9,7 @@ can swap them without branching.
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,8 +29,8 @@ from sklearn.svm import OneClassSVM
 from torch import nn
 
 from sqlad_benchmarking.determinism import enable_determinism
-from sqlad_benchmarking.features import DEFAULT_EXTRACTOR, build_extractor
-from sqlad_benchmarking.features.cache import maybe_wrap, resolve_cache_dir
+from sqlad_benchmarking.features import DEFAULT_EXTRACTOR, GPU_EXTRACTORS, build_extractor
+from sqlad_benchmarking.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -280,12 +281,39 @@ class _AutoEncoderNet(nn.Module):
         return self.decoder(self.encoder(x))
 
 
+# Attribute names the HF/sentence-transformers extractors (SecureBERT, CodeT5+,
+# Qwen3-Emb, ...) lazy-load their pretrained weights into on first use.
+_HEAVY_MODEL_ATTRS = ("model_", "tokenizer_")
+
+
+def _extractor_without_loaded_weights(extractor: TransformerMixin) -> TransformerMixin:
+    """Shallow-copy ``extractor`` with any loaded pretrained weights dropped.
+
+    Embedding extractors hold their multi-hundred-MB-to-GB model in memory once
+    used; pickling that into every AE checkpoint blows up disk usage for no
+    benefit, since ``_ensure_model`` just reloads it from the local HF cache on
+    next use. Copies (rather than mutates) so the live extractor still used for
+    scoring in this process keeps its loaded model.
+    """
+    copied = copy.copy(extractor)
+    target = copied
+    if isinstance(copied, CachingExtractor):
+        copied.base = target = copy.copy(copied.base)
+    for attr in _HEAVY_MODEL_ATTRS:
+        if hasattr(target, attr):
+            delattr(target, attr)
+    return copied
+
+
 class AEDetector:
     """features → StandardScaler → MLP autoencoder; score = reconstruction MSE.
 
     The feature extractor is injected and persisted in the checkpoint alongside
-    the scaler and weights, so :meth:`load` restores the exact extractor that was
-    used at training time regardless of which one it was.
+    the scaler and weights, so :meth:`load` restores the extractor that was used
+    at training time regardless of which one it was. Any pretrained model weights
+    it had loaded (SecureBERT, CodeT5+, Qwen3-Emb, ...) are stripped before saving
+    -- they're multi-hundred-MB-to-GB and get lazy-reloaded from the local HF
+    cache on next use instead (see :func:`_extractor_without_loaded_weights`).
     """
 
     def __init__(
@@ -442,7 +470,7 @@ class AEDetector:
                 "output_activation": self.net.output_activation,
                 "config": self.config,
                 "scaler": self.scaler,
-                "extractor": self.extractor,
+                "extractor": _extractor_without_loaded_weights(self.extractor),
             },
             path,
         )
@@ -487,11 +515,19 @@ def build_method(
         cache: Memoise the extractor's transform output to disk (see
             :func:`~sqlad_benchmarking.features.cache.resolve_cache_dir`).
         cache_dir: Override the cache directory; ignored when ``cache`` is False.
+            Also the only way to cache a :data:`GPU_EXTRACTORS` extractor, since
+            those are otherwise never cached to disk (see the note in the body).
     """
     # Build the raw extractor first so the cv-AE branch can set_params on it,
     # then wrap with the cache once any extractor-specific tuning is applied.
     extractor_instance = build_extractor(extractor)
-    cdir = resolve_cache_dir(cache, cache_dir)
+    if extractor in GPU_EXTRACTORS and cache_dir is None:
+        # Dense pretrained embeddings are near-random floats -- gzip barely
+        # shrinks them, and a single split's cache runs 100s of MB to several GB.
+        # Don't cache these to disk by default; pass --cache-dir explicitly to opt in.
+        cdir = None
+    else:
+        cdir = resolve_cache_dir(cache, cache_dir)
     if name == "ocsvm":
         # cv/sbert/codet5/gaur-* need a higher QP iteration budget to converge
         # (wider spread than Li); Li keeps the default.
