@@ -41,3 +41,5 @@ min_vram_gb:
 # keyed by extractor or engine:extractor. The heavier full-split data pushes these past 12h.
 long_running:
   - ocsvm:sbert
+  - sbert2
+  - qwen3-emb
