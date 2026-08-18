@@ -49,6 +49,7 @@ from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
 from sqlad_benchmarking.datasets.superviz26_fsl import Superviz26, Superviz26FSL, load_fsl, lodo_source
 from sqlad_benchmarking.evaluate_suite import _model_filename, _validate_grid, parent_run_spec
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
+from sqlad_benchmarking.features.cache import memory_only
 from sqlad_benchmarking.metrics import threshold_for_fpr, wilson_ci
 from sqlad_benchmarking.model import AEDetector
 from sqlad_benchmarking.tracking import delete_running_cell_runs, ensure_parent_run, log_dataset_input, setup_mlflow
@@ -145,10 +146,13 @@ def _run_repetition(
         n_finetune = len(df_k)
         ft_lr = model.config.learning_rate * lr_scale
         t0 = time.perf_counter()
-        model.fine_tune(df_k, learning_rate=ft_lr, seed=seed)
-        ft_seconds = time.perf_counter() - t0
-        # Recompute the operating point from the same k benign samples.
-        threshold = threshold_for_fpr(model.score_samples(df_k), target_fpr)
+        # The k samples are unique to this (k, seed), so their features are memoised in
+        # memory only: writing them would leave one cache file per repetition.
+        with memory_only(model.extractor):
+            model.fine_tune(df_k, learning_rate=ft_lr, seed=seed)
+            ft_seconds = time.perf_counter() - t0
+            # Recompute the operating point from the same k benign samples.
+            threshold = threshold_for_fpr(model.score_samples(df_k), target_fpr)
 
     t0 = time.perf_counter()
     scores = _score_with_insider_mask(model, target_test, capture_insider)

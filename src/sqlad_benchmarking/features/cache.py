@@ -15,6 +15,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -73,12 +75,20 @@ class CachingExtractor(BaseEstimator, TransformerMixin):
     def transform(self, X):  # noqa: N803
         if self.cache_dir is None:
             return self.base.transform(X)
-        path = Path(self.cache_dir) / f"{self._key(X)}.npz"
+        key = self._key(X)
+        memo = getattr(self, "_memo", None)
+        if memo is not None and key in memo:
+            logger.info("Feature memo hit: %s", key)
+            return memo[key]
+        path = Path(self.cache_dir) / f"{key}.npz"
         cached = self._load(path)
         if cached is not None:
             logger.info("Feature cache hit: %s (%d samples)", path.name, cached.shape[0])
             return cached
         result = self.base.transform(X)
+        if memo is not None:
+            memo[key] = result
+            return result
         self._save(path, result)
         logger.info("Feature cache saved: %s", path.name)
         return self._load(path)
@@ -138,6 +148,24 @@ class CachingExtractor(BaseEstimator, TransformerMixin):
             else:
                 np.savez_compressed(f, kind="dense", data=np.asarray(result).astype(STORE_DTYPE))
         os.replace(tmp, path)
+
+
+@contextmanager
+def memory_only(extractor: TransformerMixin) -> Iterator[None]:
+    """Keep new transform results in memory instead of writing them to disk, inside the block.
+
+    Existing cache files are still read. Meant for one-off inputs that are never seen
+    again (the per-(k, seed) few-shot adaptation samples), which would otherwise leave
+    one ``.npz`` behind each. A no-op on extractors that are not cached.
+    """
+    if not isinstance(extractor, CachingExtractor):
+        yield
+        return
+    extractor._memo = {}
+    try:
+        yield
+    finally:
+        extractor._memo = None
 
 
 def maybe_wrap(extractor: TransformerMixin, cache_dir: str | os.PathLike | None) -> TransformerMixin:
