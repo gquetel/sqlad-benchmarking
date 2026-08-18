@@ -21,6 +21,7 @@ from sqlad_benchmarking.features.codet5 import CodeT5Extractor
 from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
 from sqlad_benchmarking.features.flan_t5 import FlanT5Extractor
 from sqlad_benchmarking.features.gaur import GaurExtractor
+from sqlad_benchmarking.features.kakisim import KakisimExtractor
 from sqlad_benchmarking.features.li import LiExtractor, extract_li_features
 from sqlad_benchmarking.features.loginov import LoginovExtractor, extract_loginov_features
 from sqlad_benchmarking.features.modernbert import ModernBertExtractor
@@ -38,6 +39,7 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "sbert": SecureBertExtractor,
     "sbert2": SecureBert2Extractor,
     "loginov": LoginovExtractor,
+    "kakisim": KakisimExtractor,
     "codet5": CodeT5Extractor,
     "roberta": RobertaExtractor,
     "modernbert": ModernBertExtractor,
@@ -80,6 +82,7 @@ EXTRACTOR_LABELS: dict[str, str] = {
     "sbert": "SecureBERT",
     "sbert2": "SecureBERT2",
     "loginov": "Loginov",
+    "kakisim": "Kakisim",
     "codet5": "CodeT5+",
     "roberta": "RoBERTa-base",
     "modernbert": "ModernBERT-base",
@@ -133,6 +136,7 @@ __all__ = [
     "CountVectorizerExtractor",
     "FlanT5Extractor",
     "GaurExtractor",
+    "KakisimExtractor",
     "LiExtractor",
     "LoginovExtractor",
     "ModernBertExtractor",

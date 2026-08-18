@@ -15,6 +15,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sqlad_benchmarking.features import EXTRACTORS, GPU_EXTRACTORS, build_extractor
 from sqlad_benchmarking.features.cache import CachingExtractor
 from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
+from sqlad_benchmarking.features.kakisim import KakisimExtractor
 from sqlad_benchmarking.features.loginov import FEATURE_NAMES, LoginovExtractor, extract_loginov_features
 from sqlad_benchmarking.features.qwen3_emb import Qwen3EmbExtractor
 from sqlad_benchmarking.features.tfidf import TfidfExtractor
@@ -40,6 +41,7 @@ def test_registry_exposes_all_extractors():
         "sbert",
         "sbert2",
         "loginov",
+        "kakisim",
         "codet5",
         "roberta",
         "modernbert",
@@ -178,6 +180,22 @@ def test_loginov_cache_key_tracks_learned_state():
     b = LoginovExtractor().fit(pd.DataFrame({"full_query": ["select a from t where id like '%x%'"]}))
     # Different training punctuation -> different state -> different cache key.
     assert a.cache_key_state() != b.cache_key_state()
+
+
+# ----- Kakisim -----------------------------------------------------------------
+
+
+def test_kakisim_is_stateful_and_sparse():
+    df = _frame()
+    ext = KakisimExtractor()
+    # transform before fit must fail: per-view vocabularies are learned at fit time.
+    with pytest.raises(Exception):  # noqa: B017 - AttributeError, no vectorizers_ yet
+        ext.transform(df)
+    ext.fit(df)
+    matrix = ext.transform(df)
+    assert issparse(matrix)
+    assert matrix.shape[0] == len(df)
+    assert matrix.shape[1] == len(ext.get_feature_names_out())
 
 
 # ----- CachingExtractor ------------------------------------------------------

@@ -31,6 +31,7 @@ dependencies = [
   "plotly",
   "kaleido",
   "gaur-sql-detect",
+  "sqlparse",
 ]
 
 [dependency-groups]
