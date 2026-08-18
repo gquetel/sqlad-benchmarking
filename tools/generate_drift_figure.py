@@ -35,8 +35,8 @@ from sqlad_benchmarking.tracking import setup_mlflow
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_FIGURE_OUT = Path(
-    "/home/gquetel/repos/quetel_phd_latex/thesis/chapters/05-generalization/data/concept-drift-dumbbell.tex"
+DEFAULT_FIGURE_OUT = (
+    Path.home() / "repos/quetel_phd_latex/thesis/chapters/05-generalization/data/concept-drift-dumbbell.tex"
 )
 
 # The MLflow experiment holding the concept-drift grid (see tracking._EXPERIMENT_NAMES).

@@ -9,9 +9,9 @@ one nested run per ``(feature_extractor, target, k)`` cell tagged ``setting=few_
 
 This emits the AUROC-vs-``k`` figure: one curve per feature extractor (AE head),
 averaging the per-target AUROC over the four target domains at each budget. A
-black-bordered marker identifies the smallest ``k`` that recovers in-domain performance (within
-``0.01`` AUROC). The in-domain reference is the AE in-domain AUROC averaged over the
-four in-domain scenarios, read from the ``FE-study-LODO`` experiment.
+black-bordered marker identifies the smallest ``k`` whose AUROC is no more than ``0.01``
+below, or exceeds, the in-domain reference. That reference is the AE in-domain AUROC
+averaged over the four in-domain scenarios, read from the ``FE-study-LODO`` experiment.
 
 MLflow is the single source of truth: the latest finished run per
 ``(extractor, target, k)`` cell wins, so re-running this refreshes the figure.
@@ -37,8 +37,8 @@ from sqlad_benchmarking.tracking import setup_mlflow
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_FIGURE_OUT = Path(
-    "/home/gquetel/repos/quetel_phd_latex/thesis/chapters/05-generalization/data/few-shot-adaptation.tex"
+DEFAULT_FIGURE_OUT = (
+    Path.home() / "repos/quetel_phd_latex/thesis/chapters/05-generalization/data/few-shot-adaptation.tex"
 )
 
 # MLflow experiments: the few-shot sweep and the standard grid holding the in-domain
@@ -111,13 +111,14 @@ INDOMAIN = ["a-a", "b-b", "c-c", "d-d"]
 
 # k = 0 is the unadapted LODO model; the log x-axis cannot show 0, so it is placed at x = 1.
 ZERO_X = 1.0
-# An adapted model "recovers" once its AUROC is within this margin of the in-domain reference.
+# Recovery is one-sided: AUROC may exceed the reference or fall at most this far below it.
 RECOVERY_MARGIN = 0.01
 
 CAPTION = (
     r"Few-shot adaptation of LODO autoencoders: AUROC vs.\ adaptation budget~$k$, averaged over "
     r"the four target domains and five seeds ($k{=}0$ is the LODO model). A black-bordered marker "
-    r"indicates the smallest~$k$ recovering in-domain performance (within $0.01$ AUROC)."
+    r"indicates the smallest~$k$ whose mean AUROC is no more than $0.01$ below, or exceeding, "
+    r"the corresponding in-domain mean."
 )
 
 
@@ -266,7 +267,7 @@ def _klabel(k: int) -> str:
 
 
 def _recovery(curve: dict[int, float], ref: float | None) -> int | None:
-    """Smallest budget ``k`` whose AUROC is within ``RECOVERY_MARGIN`` of the in-domain ``ref``."""
+    """Smallest ``k`` whose AUROC is at least ``ref - RECOVERY_MARGIN``."""
     if ref is None:
         return None
     for k in sorted(curve):
