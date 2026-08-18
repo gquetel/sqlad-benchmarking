@@ -49,6 +49,7 @@ def test_registry_exposes_all_extractors():
         "flan-t5",
         "sentbert",
         "qwen3-emb",
+        "llm2vec",
         "gaur-expert",
         "gaur-chatgpt",
         "gaur-claude",
@@ -70,6 +71,7 @@ def test_gpu_extractors_are_registered():
         "flan-t5",
         "sentbert",
         "qwen3-emb",
+        "llm2vec",
     }
     assert GPU_EXTRACTORS <= EXTRACTORS.keys()
 

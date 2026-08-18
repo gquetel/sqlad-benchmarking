@@ -3,7 +3,9 @@
 accelerate==1.14.0 \
     --hash=sha256:41b9c4377a54e0b460a959b0defa1b736e4ca0a2373252d9a539964c2afe3c8d \
     --hash=sha256:e94390c2863b873be18f623f9df48a0d8fe5eff13ea7f1a00092b0a7904888c6
-    # via gaur-sql-detect
+    # via
+    #   gaur-sql-detect
+    #   peft
 aiohappyeyeballs==2.7.1 \
     --hash=sha256:065665c041c42a5938ed220bdcd7230f22527fbec085e1853d2402c8a3615d9d \
     --hash=sha256:9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472
@@ -404,6 +406,7 @@ huggingface-hub==1.16.1 \
     #   accelerate
     #   datasets
     #   evaluate
+    #   peft
     #   sentence-transformers
     #   tokenizers
     #   transformers
@@ -635,6 +638,7 @@ numpy==2.4.6 \
     #   gaur-sql-detect
     #   matplotlib
     #   pandas
+    #   peft
     #   scikit-learn
     #   scipy
     #   sentence-transformers
@@ -771,6 +775,7 @@ packaging==26.2 \
     #   kaleido
     #   matplotlib
     #   mlflow-skinny
+    #   peft
     #   plotly
     #   transformers
 pandas==3.0.3 \
@@ -796,6 +801,10 @@ pandas==3.0.3 \
     #   evaluate
     #   gaur-sql-detect
     #   sqlad-benchmarking
+peft==0.20.0 \
+    --hash=sha256:0fbba16ffebfad3de96e06f2da6860fd860292324b85b6141909fa1e26ea9233 \
+    --hash=sha256:4769c8093a4ca145fd6fb3fd4dd50449675f5fe46434ad1e98b285a132d4b1d0
+    # via sqlad-benchmarking
 pillow==12.3.0 \
     --hash=sha256:0740a512dc522224c77d9aa5a8d70d8b7d73fb91f2c21125d8d025d3b8990e45 \
     --hash=sha256:164b31cd1a0490ab6efae01aa5df49da7061be0af1b30e035b6e9a1bfe34ee6e \
@@ -899,7 +908,9 @@ psutil==7.2.2 \
     --hash=sha256:ed0cace939114f62738d808fdcecd4c869222507e266e574799e9c0faa17d486 \
     --hash=sha256:eed63d3b4d62449571547b60578c5b2c4bcccc5387148db46e0c2313dad0ee00 \
     --hash=sha256:fd04ef36b4a6d599bbdb225dd1d3f51e00105f6d48a28f006da7f9822f2606d8
-    # via accelerate
+    # via
+    #   accelerate
+    #   peft
 pyarrow==25.0.0 \
     --hash=sha256:0490a7f8b38ffe11cc26526b50c65d111cb54ddac3717cec781806793f1244dc \
     --hash=sha256:13240f0d3dc5932ccd0bfa90cd76d835680b9d94a7661c635df4b703d40ce849 \
@@ -1013,6 +1024,7 @@ pyyaml==6.0.3 \
     #   datasets
     #   huggingface-hub
     #   mlflow-skinny
+    #   peft
     #   transformers
 regex==2026.5.9 \
     --hash=sha256:002205cafd2a9e78c6290c7d1df277bf3277b3b7a30e0b4bb0dac2e2e3f7cb2d \
@@ -1081,6 +1093,7 @@ safetensors==0.8.0 \
     --hash=sha256:fd6f3f93c9a0a7cc2788ee63fb763353d4bd2e89b0751bc78fcf7dda00bea774
     # via
     #   accelerate
+    #   peft
     #   transformers
 scikit-learn==1.9.0 \
     --hash=sha256:051075bda8b7aab87b1906ab3d4740a1e1224a19d7b3781a576736edc94e76aa \
@@ -1226,6 +1239,7 @@ torch==2.12.0+cu126 \
     # via
     #   accelerate
     #   gaur-sql-detect
+    #   peft
     #   sentence-transformers
     #   sqlad-benchmarking
 tqdm==4.68.3 \
@@ -1236,6 +1250,7 @@ tqdm==4.68.3 \
     #   evaluate
     #   gaur-sql-detect
     #   huggingface-hub
+    #   peft
     #   sentence-transformers
     #   transformers
 transformers==5.12.0 \
@@ -1243,6 +1258,7 @@ transformers==5.12.0 \
     --hash=sha256:f0cf42ae1464c2eb41e7e0e66d7fd4b66145f48af17093b4cc0b2e9781faa7f4
     # via
     #   gaur-sql-detect
+    #   peft
     #   sentence-transformers
     #   sqlad-benchmarking
 triton==3.7.0 ; sys_platform == 'linux' \

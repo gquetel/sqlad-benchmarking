@@ -23,6 +23,7 @@ from sqlad_benchmarking.features.flan_t5 import FlanT5Extractor
 from sqlad_benchmarking.features.gaur import GaurExtractor
 from sqlad_benchmarking.features.kakisim import KakisimExtractor
 from sqlad_benchmarking.features.li import LiExtractor, extract_li_features
+from sqlad_benchmarking.features.llm2vec import LLM2VecExtractor
 from sqlad_benchmarking.features.loginov import LoginovExtractor, extract_loginov_features
 from sqlad_benchmarking.features.modernbert import ModernBertExtractor
 from sqlad_benchmarking.features.qwen3_emb import Qwen3EmbExtractor
@@ -47,6 +48,7 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "flan-t5": FlanT5Extractor,
     "sentbert": SentBertExtractor,
     "qwen3-emb": Qwen3EmbExtractor,
+    "llm2vec": LLM2VecExtractor,
     "gaur-expert": functools.partial(GaurExtractor, mode="expert"),
     "gaur-chatgpt": functools.partial(GaurExtractor, mode="chatgpt"),
     "gaur-claude": functools.partial(GaurExtractor, mode="claude"),
@@ -67,6 +69,7 @@ GPU_EXTRACTORS = frozenset(
         "flan-t5",
         "sentbert",
         "qwen3-emb",
+        "llm2vec",
     }
 )
 
@@ -90,6 +93,7 @@ EXTRACTOR_LABELS: dict[str, str] = {
     "flan-t5": "Flan-T5-Small",
     "sentbert": "SentenceBERT-mpnet",
     "qwen3-emb": "Qwen3-Emb-0.6B",
+    "llm2vec": "LLM2Vec-Mistral-7B",
     "gaur-expert": "GAUR (Expert)",
     "gaur-chatgpt": "GAUR (ChatGPT)",
     "gaur-claude": "GAUR (Claude)",
@@ -137,6 +141,7 @@ __all__ = [
     "FlanT5Extractor",
     "GaurExtractor",
     "KakisimExtractor",
+    "LLM2VecExtractor",
     "LiExtractor",
     "LoginovExtractor",
     "ModernBertExtractor",

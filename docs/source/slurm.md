@@ -41,7 +41,7 @@ Run it on the submit node, detached, so a dropped VPN does not kill it:
 ```bash
 nohup uv run python -m tools.slurm_submit \
   --dataset superviz26 --suite all --methods ae \
-  --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb \
+  --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb,llm2vec \
   --max-jobs 24 --interval 300 > reports/slurm/queue.log 2>&1 &
 ```
 
