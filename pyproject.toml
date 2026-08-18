@@ -79,3 +79,10 @@ omit = ["tests/*"]
 
 [tool.uv.sources]
 gaur-sql-detect = { git = "https://github.com/gquetel/gaur-sql-detect", rev = "5c42db42d7e2882af5025b9bb77e1d8df3a6f0d6" }
+# More recent CUDA version dropped V100 support, we use an old one.
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
