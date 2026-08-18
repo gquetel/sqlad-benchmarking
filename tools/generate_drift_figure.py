@@ -1,8 +1,8 @@
-"""Generate the SuperViz26 concept-drift dumbbell figure from MLflow.
+"""Generate the feature-extractor study concept-drift dumbbell figure from MLflow.
 
-Loads every finished full-run cell of the ``Drift-Superviz26-SQL`` experiment and
+Loads every finished full-run cell of the ``FE-study-CD`` experiment and
 emits the reference vs. post-drift dumbbell figure (one AUROC panel and one AUPRC
-panel) for the benchmark paper. Each method is trained once on a benign origin
+panel) for the thesis. Each method is trained once on a benign origin
 (S1) and scored on the origin test set (reference) and the held-out shifted test
 set (S2, post-drift); the figure visualises the per-method performance drop
 $\\Delta = \\text{S2} - \\text{S1}$ averaged over the four Superviz26 domains.
@@ -17,7 +17,7 @@ runs refreshes the figure. Methods missing any of the four domains are dropped.
 
 Usage:
     python -m tools.generate_drift_figure \
-        --figure-out ~/repos/quetel_phd_latex/papers/superviz26/sections/superviz26-drift-dumbbell.tex
+        --figure-out ~/repos/quetel_phd_latex/thesis/chapters/05-generalization/data/concept-drift-dumbbell.tex
 """
 
 from __future__ import annotations
@@ -30,33 +30,48 @@ from typing import Annotated
 import mlflow
 import typer
 
+from sqlad_benchmarking.features import EXTRACTOR_LABELS
 from sqlad_benchmarking.tracking import setup_mlflow
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_FIGURE_OUT = Path(
+    "/home/gquetel/repos/quetel_phd_latex/thesis/chapters/05-generalization/data/concept-drift-dumbbell.tex"
+)
 
 # The MLflow experiment holding the concept-drift grid (see tracking._EXPERIMENT_NAMES).
-EXPERIMENT = "Drift-Superviz26-SQL"
+EXPERIMENT = "FE-study-CD"
 
-# Methods in display order: (feature_extractor, engine, paper label, figure short label).
-# Mirrors tools.generate_baselines_tex so labels stay consistent across figures.
+# Stable thesis display order. Missing runs are omitted, so the same script can be rerun
+# while the grid is still filling.
+EXTRACTOR_ORDER = [
+    "cv",
+    "tfidf",
+    "li",
+    "loginov",
+    "kakisim",
+    "gaur-expert",
+    "gaur-chatgpt",
+    "gaur-claude",
+    "gaur-llama",
+    "gaur-mistral",
+    "gaur-gpt-oss",
+    "gaur-ruleid",
+    "sbert",
+    "sbert2",
+    "roberta",
+    "modernbert",
+    "sentbert",
+    "codebert",
+    "codet5",
+    "flan-t5",
+    "qwen3-emb",
+]
+DRIFT_ENGINES = [("ae", "AE"), ("ocsvm", "OCSVM"), ("lof", "LOF")]
 METHODS: list[tuple[str, str, str, str]] = [
-    ("cv", "ae", "CountVectorizer + AE", "CV+AE"),
-    ("cv", "lof", "CountVectorizer + LOF", "CV+LOF"),
-    ("cv", "ocsvm", "CountVectorizer + OCSVM", "CV+OCSVM"),
-    ("li", "ae", "Li + AE", "Li+AE"),
-    ("li", "lof", "Li + LOF", "Li+LOF"),
-    ("li", "ocsvm", "Li + OCSVM", "Li+OCSVM"),
-    ("loginov", "ae", "Loginov + AE", "Loginov+AE"),
-    ("loginov", "lof", "Loginov + LOF", "Loginov+LOF"),
-    ("loginov", "ocsvm", "Loginov + OCSVM", "Loginov+OCSVM"),
-    ("sbert", "ae", "SecureBERT + AE", "SecureBERT+AE"),
-    ("sbert", "lof", "SecureBERT + LOF", "SecureBERT+LOF"),
-    ("sbert", "ocsvm", "SecureBERT + OCSVM", "SecureBERT+OCSVM"),
-    ("codet5", "ae", "CodeT5+ + AE", "CodeT5+AE"),
-    ("codet5", "lof", "CodeT5+ + LOF", "CodeT5+LOF"),
-    ("codet5", "ocsvm", "CodeT5+ + OCSVM", "CodeT5+OCSVM"),
+    (extractor, engine, f"{EXTRACTOR_LABELS[extractor]} + {engine_label}", f"{extractor}+{engine}")
+    for extractor in EXTRACTOR_ORDER
+    for engine, engine_label in DRIFT_ENGINES
 ]
 
 # The four Superviz26 domains, each evaluated as its own concept-drift cell.
@@ -149,15 +164,9 @@ DUMBDELTA_MACRO = r"""  % \dumbdelta{leftx}{rightx}{ycoord}{value}: place the de
 ENGINE_ORDER = {"lof": 0, "ocsvm": 1, "ae": 2}
 ENGINE_BTT = sorted(ENGINE_ORDER, key=lambda e: ENGINE_ORDER[e], reverse=True)  # ae, ocsvm, lof
 
-# Paper-facing short labels: feature extractor names title each mini-plot, decision engines
+# Thesis-facing short labels: feature extractor names title each mini-plot, decision engines
 # label the (shared) y ticks.
-EXTRACTOR_SHORT = {
-    "cv": "CountVectorizer",
-    "li": "Li",
-    "loginov": "Loginov",
-    "sbert": "SecureBERT",
-    "codet5": "CodeT5+",
-}
+EXTRACTOR_SHORT = {extractor: EXTRACTOR_LABELS[extractor] for extractor in EXTRACTOR_ORDER}
 ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
 SHORT_BY_CELL = {(extractor, engine): short for extractor, engine, _, short in METHODS}
 # A "method" is one (feature extractor, decision engine) cell -- one dumbbell row in the figure.
@@ -209,19 +218,22 @@ def _averages(data: Results) -> dict[str, Metrics]:
     return out
 
 
-def _pgfplotsset(auroc_xmin: float, bottom_title: str) -> str:
+def _pgfplotsset(auroc_xmin: float, bottom_title: str, n_plots: int) -> str:
     """The shared ``dumbstack``/``dumbstackp`` mini-plot styles (one x scale per panel).
 
     ``symbolic y coords``/``yticklabels`` are set per mini-plot instead of here, because a
     feature extractor renders only the decision methods whose averages are complete, so the
-    engine rows differ from plot to plot.
+    engine rows differ from plot to plot. Mini-plots shrink only when the complete study would
+    otherwise exceed the usable thesis-page height.
     """
+    plot_height = min(2.4, 22.0 / n_plots)
     return (
         "  % shared style for the per-feature-extractor AUROC mini-plots: identical x scale,\n"
         f"  % x ticks/label hidden by default and re-enabled only on the bottom ({bottom_title}) plot.\n"
         "  \\pgfplotsset{\n"
         "    dumbstack/.style={\n"
-        "      width=\\linewidth, height=2.4cm,\n"
+        f"      width=0.80\\linewidth, height={plot_height:.2f}cm,\n"
+        "      scale only axis,\n"
         f"      xmin={auroc_xmin:.2f}, xmax=1.00,\n"
         f"      xtick={{{_xticks(auroc_xmin)}}},\n"
         "      ytick=data,\n"
@@ -372,7 +384,7 @@ def render_figure(data: Results) -> str:
     )
     auroc_xmin = max(0.0, math.floor(auroc_min * 20 - 1) / 20)
 
-    pgfset = _pgfplotsset(auroc_xmin, EXTRACTOR_SHORT[plots[-1][0]])
+    pgfset = _pgfplotsset(auroc_xmin, EXTRACTOR_SHORT[plots[-1][0]], len(plots))
 
     panels = "\n  \\hfill\n".join(
         [
@@ -411,7 +423,7 @@ def render_figure(data: Results) -> str:
         f"{pgfset}\n"
         f"{panels}\n"
         f"  \\caption{{{FIGURE_CAPTION}}}\n"
-        "  \\label{fig:superviz26-drift-dumbbell}\n"
+        "  \\label{fig:concept-drift}\n"
         "\\end{figure}"
     )
 
@@ -430,12 +442,11 @@ def _write(text: str, path: Path) -> None:
 
 @app.command()
 def main(
-    figure_out: Annotated[Path, typer.Option(help="Path of the concept-drift dumbbell figure (.tex).")] = REPO_ROOT
-    / "reports"
-    / "superviz26"
-    / "superviz26-drift-dumbbell.tex",
+    figure_out: Annotated[
+        Path, typer.Option(help="Path of the concept-drift dumbbell figure (.tex).")
+    ] = DEFAULT_FIGURE_OUT,
 ) -> None:
-    """Load the SuperViz26 concept-drift results from MLflow and write the dumbbell figure."""
+    """Load the feature-study concept-drift results from MLflow and write the dumbbell figure."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if not setup_mlflow("superviz26-drift"):
         raise typer.Exit(code=1)

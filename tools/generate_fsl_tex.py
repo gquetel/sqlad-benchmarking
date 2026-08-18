@@ -1,17 +1,17 @@
-"""Generate the SuperViz26 few-shot adaptation figure from MLflow.
+"""Generate the feature-extractor study few-shot adaptation figure from MLflow.
 
 The few-shot experiment (:mod:`sqlad_benchmarking.evaluate_fsl`) takes each LODO
 autoencoder and adapts it to its held-out target domain with a small budget ``k``
 of benign samples, sweeping ``k`` over ``{0, 5, 10, 50, 100, 500, 1000, 10000}``
 and averaging over five seeds. ``k = 0`` is the unmodified LODO model. The runs
-live in the ``FSL-Superviz26-SQL`` experiment (see tracking._EXPERIMENT_NAMES),
-one nested run per ``(feature_extractor, target, k)`` cell tagged ``kind=few_shot``.
+live in the ``FE-study-FSL`` experiment (see tracking._EXPERIMENT_NAMES),
+one nested run per ``(feature_extractor, target, k)`` cell tagged ``setting=few_shot``.
 
 This emits the AUROC-vs-``k`` figure: one curve per feature extractor (AE head),
 averaging the per-target AUROC over the four target domains at each budget. A
-vertical tick marks the smallest ``k`` that recovers in-domain performance (within
+black-bordered marker identifies the smallest ``k`` that recovers in-domain performance (within
 ``0.01`` AUROC). The in-domain reference is the AE in-domain AUROC averaged over the
-four in-domain scenarios, read from the standard ``Superviz26-SQL`` experiment.
+four in-domain scenarios, read from the ``FE-study-LODO`` experiment.
 
 MLflow is the single source of truth: the latest finished run per
 ``(extractor, target, k)`` cell wins, so re-running this refreshes the figure.
@@ -19,7 +19,7 @@ Extractors with no few-shot data are dropped.
 
 Usage:
     python -m tools.generate_fsl_tex \
-        --figure-out ~/repos/quetel_phd_latex/papers/superviz26/data/superviz26-fsl.tex
+        --figure-out ~/repos/quetel_phd_latex/thesis/chapters/05-generalization/data/few-shot-adaptation.tex
 """
 
 from __future__ import annotations
@@ -37,31 +37,71 @@ from sqlad_benchmarking.tracking import setup_mlflow
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_FIGURE_OUT = Path(
+    "/home/gquetel/repos/quetel_phd_latex/thesis/chapters/05-generalization/data/few-shot-adaptation.tex"
+)
 
 # MLflow experiments: the few-shot sweep and the standard grid holding the in-domain
 # reference (see tracking._EXPERIMENT_NAMES).
-EXPERIMENT_FSL = "FSL-Superviz26-SQL"
-EXPERIMENT_BASE = "Superviz26-SQL"
+EXPERIMENT_FSL = "FE-study-FSL"
+EXPERIMENT_BASE = "FE-study-LODO"
 
 # The set of feature extractors is discovered from the experiment, not hard-coded; these
-# only fix the *appearance* of each curve. Colours are the IFIPSEC/DIMVA palette
-# (papers/IFIPSEC/colors.tex): ``li`` and ``securebert`` are taken verbatim; the other
-# extractors reuse hues from the same file (codet5 keeps the ossgpt green). Any extractor
-# not listed here falls back to the remaining palette colours. Values are HTML hex.
+# only fix the appearance and stable order of each curve. The original five retain their
+# Superviz26 styles, while the wider study uses distinct colour/marker combinations.
 EXTRACTOR_STYLES: dict[str, tuple[str, str]] = {
     "li": ("FFD54F", "*"),  # IFIPSEC \definecolor{li}
     "sbert": ("7E57C2", "square*"),  # IFIPSEC \definecolor{securebert}
     "codet5": ("66BB6A", "triangle*"),  # IFIPSEC ossgpt (green)
     "cv": ("4FC3F7", "diamond*"),  # IFIPSEC chatgpt (blue)
     "loginov": ("E57373", "pentagon*"),  # IFIPSEC claude (red)
+    "tfidf": ("0D47A1", "triangle*"),
+    "kakisim": ("8B7E74", "square*"),
+    "gaur-expert": ("9FA8DA", "*"),
+    "gaur-chatgpt": ("4FC3F7", "square*"),
+    "gaur-claude": ("E57373", "triangle*"),
+    "gaur-llama": ("DCE775", "diamond*"),
+    "gaur-mistral": ("8B7E74", "pentagon*"),
+    "gaur-gpt-oss": ("66BB6A", "square*"),
+    "gaur-ruleid": ("0D47A1", "diamond*"),
+    "sbert2": ("7E57C2", "triangle*"),
+    "roberta": ("9FA8DA", "pentagon*"),
+    "modernbert": ("0D47A1", "star"),
+    "sentbert": ("DCE775", "square*"),
+    "codebert": ("66BB6A", "diamond*"),
+    "flan-t5": ("E57373", "square*"),
+    "qwen3-emb": ("FFD54F", "triangle*"),
 }
-# Remaining IFIPSEC colours.tex hues, for any other extractor discovered in the experiment.
 FALLBACK_HEX = ["0D47A1", "8b7e74", "9fa8da", "DCE775", "4FC3F7"]
 FALLBACK_MARKS = ["oplus*", "otimes*", "halfcircle*", "star", "x"]
+FALLBACK_STYLES = [
+    (rgb, mark) for mark in FALLBACK_MARKS for rgb in FALLBACK_HEX if (rgb, mark) not in set(EXTRACTOR_STYLES.values())
+]
 
-# Display order for known extractors; any extractor not listed here is appended, sorted by name.
-EXTRACTOR_ORDER = ["cv", "li", "loginov", "sbert", "codet5"]
+# Display order shared with the concept-drift study; unknown extractors follow alphabetically.
+EXTRACTOR_ORDER = [
+    "cv",
+    "tfidf",
+    "li",
+    "loginov",
+    "kakisim",
+    "gaur-expert",
+    "gaur-chatgpt",
+    "gaur-claude",
+    "gaur-llama",
+    "gaur-mistral",
+    "gaur-gpt-oss",
+    "gaur-ruleid",
+    "sbert",
+    "sbert2",
+    "roberta",
+    "modernbert",
+    "sentbert",
+    "codebert",
+    "codet5",
+    "flan-t5",
+    "qwen3-emb",
+]
 
 # Target domains the LODO models adapt to (tags.target values).
 TARGETS = ["a", "b", "c", "d"]
@@ -102,7 +142,7 @@ def _style(extractor: str, index: int) -> tuple[str, str, str, str]:
     color = "col" + "".join(ch for ch in extractor.title() if ch.isalnum())
     rgb, mark = EXTRACTOR_STYLES.get(
         extractor,
-        (FALLBACK_HEX[index % len(FALLBACK_HEX)], FALLBACK_MARKS[index % len(FALLBACK_MARKS)]),
+        FALLBACK_STYLES[index % len(FALLBACK_STYLES)],
     )
     return label, color, rgb, mark
 
@@ -296,7 +336,7 @@ def render_figure(curves: dict[str, dict[int, float]], refs: dict[str, float]) -
         r"    \end{semilogxaxis}",
         r"  \end{tikzpicture}",
         rf"  \caption{{{CAPTION}}}",
-        r"  \label{fig:superviz26-fsl}",
+        r"  \label{fig:fine-tune}",
         r"\end{figure}",
     ]
     return "\n".join(out)
@@ -307,10 +347,9 @@ app = typer.Typer(add_completion=False, help=__doc__)
 
 @app.command()
 def main(
-    figure_out: Annotated[Path, typer.Option(help="Path of the few-shot adaptation figure (.tex).")] = REPO_ROOT
-    / "reports"
-    / "superviz26"
-    / "superviz26-fsl.tex",
+    figure_out: Annotated[
+        Path, typer.Option(help="Path of the few-shot adaptation figure (.tex).")
+    ] = DEFAULT_FIGURE_OUT,
 ) -> None:
     """Load the few-shot results from MLflow and write the AUROC-vs-k adaptation figure."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
