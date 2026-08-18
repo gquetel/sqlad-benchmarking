@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import socket
 import time
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
@@ -357,6 +358,7 @@ def _run_one_tracked(
                         "setting": kind,
                         "run_type": run_type,
                         "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
+                        "node": socket.gethostname(),
                     }
                 )
                 # Sets the "Dataset" column for each child run. Skipped for locally-generated
