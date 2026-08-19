@@ -17,7 +17,7 @@ nix-shell
 Without Nix, the Python packages can be installed with [uv](https://docs.astral.sh/uv/) when a compatible Python interpreter is already available:
 
 ```sh
-uv sync --frozen
+uv sync --frozen --extra cu126
 source .venv/bin/activate
 ```
 

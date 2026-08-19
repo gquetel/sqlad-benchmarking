@@ -75,7 +75,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Manifests, generated job scripts and .out logs (git-ignored), relative to REPO_ROOT.
 SUBMIT_DIR = "reports/slurm"
 # Run on the compute node (after cd-ing into the repo) before each cell. The uv .venv is
-# built once on the login node (`uv sync --frozen`) and reused from the shared filesystem;
+# built once on the login node (`uv sync --frozen --extra cu126`) and reused from the shared filesystem;
 # array tasks only activate it (no concurrent `uv sync`, which would race).
 ENV_SETUP = "source .venv/bin/activate"
 # The activate script every array task sources on the compute node. Checked on the submit
@@ -171,7 +171,7 @@ def _check_venv(activate: Path = VENV_ACTIVATE) -> None:
     """Fail fast if the shared .venv is missing; every array task sources it on the compute node."""
     if not activate.exists():
         raise typer.BadParameter(
-            f"{activate} not found; build it on the login node with `uv sync --frozen` before submitting."
+            f"{activate} not found; build it on the login node with `uv sync --frozen --extra cu126` before submitting."
         )
 
 

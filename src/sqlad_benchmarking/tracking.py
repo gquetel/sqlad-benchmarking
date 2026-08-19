@@ -92,10 +92,13 @@ def setup_mlflow(dataset: str) -> bool:
         logger.info("MLFLOW_TRACKING_URI not set. Experiment tracking disabled.")
         return False
 
-    # Making sure that home-relative path in .env still resolves
+    # Making sure that home-relative paths in .env still resolve
     cert_path = os.environ.get("MLFLOW_TRACKING_CLIENT_CERT_PATH")
     if cert_path:
         os.environ["MLFLOW_TRACKING_CLIENT_CERT_PATH"] = os.path.expanduser(cert_path)
+    server_cert_path = os.environ.get("MLFLOW_TRACKING_SERVER_CERT_PATH")
+    if server_cert_path:
+        os.environ["MLFLOW_TRACKING_SERVER_CERT_PATH"] = os.path.expanduser(server_cert_path)
 
     mlflow.set_tracking_uri(tracking_uri)
     try:

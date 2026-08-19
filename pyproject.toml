@@ -24,7 +24,6 @@ dependencies = [
   "numpy",
   "pandas",
   "scikit-learn",
-  "torch==2.12.0",
   "transformers==5.12.0",
   "sentence-transformers",
   "typer",
@@ -34,6 +33,12 @@ dependencies = [
   "sqlparse",
   "peft>=0.20.0",
 ]
+
+[project.optional-dependencies]
+# Select one: "cu126" for GPU machines, "cpu" for CI where no GPU is available
+# and the CUDA toolkit would otherwise fill up the runner's disk.
+cu126 = ["torch==2.12.0"]
+cpu = ["torch==2.12.0"]
 
 [dependency-groups]
 dev = [
@@ -78,12 +83,23 @@ quote-style = "double"
 source = ["src/sqlad_benchmarking"]
 omit = ["tests/*"]
 
+[tool.uv]
+conflicts = [[{ extra = "cu126" }, { extra = "cpu" }]]
+
 [tool.uv.sources]
 gaur-sql-detect = { git = "https://github.com/gquetel/gaur-sql-detect", rev = "5c42db42d7e2882af5025b9bb77e1d8df3a6f0d6" }
 # More recent CUDA version dropped V100 support, we use an old one.
-torch = { index = "pytorch-cu126" }
+torch = [
+  { index = "pytorch-cu126", extra = "cu126" },
+  { index = "pytorch-cpu", extra = "cpu" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
 explicit = true

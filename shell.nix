@@ -52,7 +52,7 @@ pkgs.mkShell {
     export UV_PYTHON_PREFERENCE=only-system
 
     # Build/refresh .venv from uv.lock
-    uv sync --frozen
+    uv sync --frozen --extra cu126
 
     # Activate the venv via PATH so it survives into the interactive shell,
     # whatever it is (bash, or a fish that the user's .bashrc exec-s).

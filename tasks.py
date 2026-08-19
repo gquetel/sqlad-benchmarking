@@ -13,14 +13,14 @@ PROJECT_NAME = "sqlad_benchmarking"
 @task
 def sync(ctx: Context) -> None:
     """Create/refresh the .venv from uv.lock (deps + dev group + project)."""
-    ctx.run("uv sync --frozen", echo=True, pty=not NO_PTY)
+    ctx.run("uv sync --frozen --extra cu126", echo=True, pty=not NO_PTY)
 
 
 @task
 def lock(ctx: Context) -> None:
     """Regenerate uv.lock and the pip-compatible requirements.txt export."""
     ctx.run("uv lock", echo=True, pty=not NO_PTY)
-    ctx.run("uv export --no-dev --no-emit-project -o requirements.txt", echo=True, pty=not NO_PTY)
+    ctx.run("uv export --no-dev --no-emit-project --extra cu126 -o requirements.txt", echo=True, pty=not NO_PTY)
 
 
 # Project commands

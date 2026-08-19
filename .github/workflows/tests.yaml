@@ -22,7 +22,7 @@ jobs:
           nix-shell nix/ci-env.nix --run "
             set -euo pipefail
             uv lock --check
-            uv sync --frozen
+            uv sync --frozen --extra cpu
             uv run coverage run -m pytest tests/
             uv run coverage report -m
           "
