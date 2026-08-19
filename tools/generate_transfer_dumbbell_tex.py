@@ -15,17 +15,19 @@ Runs for both blocks are pulled from either of the two MLflow experiments below
 
 For each (feature extractor, decision engine) cell it averages AUROC over the
 four in-domain scenarios and the four LODO scenarios, then plots both averages as
-a dumbbell (in-domain dot vs. LODO square, connected by a gray stem), one mini-plot
-per feature extractor stacked in a single column -- the same visual language as the
-Chapter 3 in-domain-vs-LODO dumbbell figure (see ``generate_baselines_tex.py``) and
-the Chapter 5 concept-drift dumbbell figure (see ``generate_drift_figure.py``).
+a dumbbell (in-domain dot vs. LODO square, connected by a gray stem). The figure
+keeps the layout of the original transfer-effect lollipop plot -- one groupplot
+panel per decision engine (AE, OCSVM, LOF), one row per feature extractor, ordered
+handcrafted-then-pretrained by architectural complexity, with a dashed separator
+between the two blocks -- but draws each row as an in-domain-vs-LODO dumbbell
+instead of a zero-anchored delta stem, the same visual language as the Chapter 3
+dumbbell figure (see ``generate_baselines_tex.py``).
 
 The feature extractor list (HANDCRAFTED_EXTRACTORS / PRETRAINED_EXTRACTORS below)
 is a plain constant -- edit it directly to add, drop, or reorder extractors.
 A cell without a finished run (e.g. an extractor not yet implemented, or still
-running) drops that decision method's row from its mini-plot; an extractor with no
-complete decision method is dropped entirely, so the figure stays complete as new
-runs land.
+running) still gets its y-tick row; it is simply left without a dumbbell, so the
+figure stays complete as new runs land.
 
 MLflow is the single source of truth: the latest finished full-run per
 (feature_extractor, decision_engine, scenario) cell wins, across both
@@ -65,11 +67,9 @@ EXPERIMENTS = ["Superviz26-SQL", "FE-study-LODO"]
 INDOMAIN: list[str] = ["a-a", "b-b", "c-c", "d-d"]
 LODO: list[str] = ["bcd-a", "acd-b", "abd-c", "abc-d"]
 
-# Decision-engine rows inside each per-feature-extractor mini-plot. ENGINE_ORDER is the
-# top-to-bottom screen order; the symbolic y coords list them bottom-to-top (ENGINE_BTT).
-ENGINE_ORDER = {"lof": 0, "ocsvm": 1, "ae": 2}
-ENGINE_BTT = sorted(ENGINE_ORDER, key=lambda e: ENGINE_ORDER[e], reverse=True)  # ae, ocsvm, lof
-ENGINE_SHORT = {"lof": "LOF", "ocsvm": "OCSVM", "ae": "AE"}
+# Decision engines, top-to-bottom groupplot panel order. Fixed.
+ENGINES: list[tuple[str, str]] = [("ae", "AE"), ("ocsvm", "OCSVM"), ("lof", "LOF")]
+ENGINE_SHORT = dict(ENGINES)
 
 # --- feature extractors: edit these two lists to add/drop/reorder rows -------
 
@@ -106,8 +106,6 @@ PRETRAINED_EXTRACTORS: list[tuple[str, str]] = [
 
 # Combined, top-to-bottom display order.
 EXTRACTORS: list[tuple[str, str]] = HANDCRAFTED_EXTRACTORS + PRETRAINED_EXTRACTORS
-EXTRACTOR_SHORT = dict(EXTRACTORS)
-_HANDCRAFTED_KEYS = {key for key, _ in HANDCRAFTED_EXTRACTORS}
 
 Metrics = dict[str, float | None]
 Results = dict[tuple[str, str, str], Metrics]  # (extractor, engine, scenario) -> {"auroc": ...}
@@ -214,6 +212,8 @@ def _averages(data: Results) -> Averages:
 # --- dumbbell figure -----------------------------------------------------------
 
 # Places the gap label by each connector; \dumbthresh/\dumbthreshR are set once for the figure.
+# Defined with \def (not \newcommand) so it can be silently redefined when this figure is
+# input alongside the Chapter 3 / concept-drift dumbbell figures, which define the same macro.
 DUMBDELTA_MACRO = r"""  % \dumbdelta{leftx}{rightx}{ycoord}{value}: place the delta label left of the left marker;
   % flip it right of the right marker if it would overflow (leftx<thresh), else onto the midpoint.
   \def\dumbdelta#1#2#3#4{%
@@ -230,164 +230,141 @@ DUMBDELTA_MACRO = r"""  % \dumbdelta{leftx}{rightx}{ycoord}{value}: place the de
       \node[font=\tiny, anchor=east, xshift=-3pt] at (axis cs:#1,#3) {$#4$};
     \fi}"""
 
-# x ticks shared by every mini-plot; only those within the panel's x-range are kept.
-_XTICK_GRID = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+DUMBBELL_MACRO = (
+    "  \\def\\dumbrow#1#2#3{%\n"
+    "    % #1=ycoord #2=id-auroc #3=lodo-auroc -- gray connector plus the ID dot / LODO square markers.\n"
+    "    \\addplot[gray, line width=0.55pt, forget plot] coordinates {(#2,#1) (#3,#1)};\n"
+    "    \\addplot[only marks, mark=*, mark size=2.2pt, draw=black, fill=black, forget plot] coordinates {(#2,#1)};\n"
+    "    \\addplot[only marks, mark=square*, mark size=2pt, draw=black, fill=black, forget plot] coordinates {(#3,#1)};\n"
+    "  }"
+)
 
 
 def _fmt_tick(v: float) -> str:
-    """Format an x tick: a bare ``0`` for the origin, one decimal otherwise (e.g. ``0.2``, ``1.0``)."""
+    """Format an x tick: a bare ``0`` for the origin, one decimal otherwise."""
     return "0" if abs(v) < 1e-9 else f"{v:.1f}"
 
 
-def _xticks(xmin: float) -> str:
-    """Comma-separated ticks from ``_XTICK_GRID`` that fall within ``[xmin, 1]``."""
-    return ",".join(_fmt_tick(v) for v in _XTICK_GRID if v >= xmin - 1e-9)
+def _nice_bounds(vals: list[float]) -> tuple[float, float]:
+    """x-axis bounds: the data range padded slightly and rounded out to the nearest 0.05."""
+    lo, hi = min(vals), max(vals)
+    xmin = max(0.0, math.floor((lo - 0.02) * 20) / 20)
+    xmax = min(1.0, math.ceil((hi + 0.02) * 20) / 20)
+    return round(xmin, 2), round(xmax, 2)
 
 
-def _pgfplotsset(xmin: float, n_plots: int) -> str:
-    """The shared ``dumbstack`` mini-plot style (one x scale for the whole figure).
+def _xticks(xmin: float, xmax: float) -> str:
+    """Comma-separated ticks every 0.1 across ``[xmin, xmax]``."""
+    n_steps = round((xmax - xmin) / 0.1)
+    ticks = [round(xmin + i * 0.1, 2) for i in range(n_steps + 1)]
+    return ",".join(_fmt_tick(t) for t in ticks)
 
-    ``symbolic y coords``/``yticklabels`` are set per mini-plot instead of here, because a
-    feature extractor renders only the decision methods whose averages are complete, so the
-    engine rows differ from plot to plot. Mini-plots shrink only when the complete study would
-    otherwise exceed the usable thesis-page height.
-    """
-    plot_height = min(2.4, 22.0 / n_plots)
+
+def _pgfplotsset(xmin: float, xmax: float) -> str:
+    """The shared ``dumbaxis`` style: x range/ticks from the data, y ticks/labels from EXTRACTORS."""
+    n = len(EXTRACTORS)
+    yticks = ",".join(str(n - i) for i in range(n))
+    yticklabels = ",".join(label for _, label in EXTRACTORS)
+    # Row spacing scales with the number of extractors, so the figure stays legible
+    # as HANDCRAFTED_EXTRACTORS/PRETRAINED_EXTRACTORS grow or shrink.
+    height = round(5.9 * n / 15, 1)
     return (
-        "  % shared style for the per-feature-extractor AUROC mini-plots: identical x scale,\n"
-        "  % x ticks/label hidden by default and re-enabled only on the bottom-most plot.\n"
-        "  \\pgfplotsset{\n"
-        "    dumbstack/.style={\n"
-        f"      width=0.80\\linewidth, height={plot_height:.2f}cm,\n"
-        "      scale only axis,\n"
-        f"      xmin={xmin:.2f}, xmax=1.00,\n"
-        f"      xtick={{{_xticks(xmin)}}},\n"
-        "      ytick=data,\n"
-        "      tick label style={font=\\scriptsize},\n"
-        "      yticklabel style={font=\\tiny},\n"
-        "      enlarge y limits=0.12,\n"
-        "      xmajorgrids, grid style={dotted},\n"
-        "      tick align=outside,\n"
-        "      xticklabels={},\n"
-        "      title style={font=\\scriptsize, at={(0.01,1)}, anchor=south west, yshift=-5pt},\n"
-        "    },\n"
-        "  }"
+        "\\pgfplotsset{\n"
+        "  dumbaxis/.style={\n"
+        f"    xmin={xmin:.2f}, xmax={xmax:.2f},\n"
+        f"    xtick={{{_xticks(xmin, xmax)}}},\n"
+        "    xmajorgrids, grid style={dotted, gray},\n"
+        "    tick label style={font=\\scriptsize},\n"
+        "    label style={font=\\small},\n"
+        f"    ytick={{{yticks}}},\n"
+        f"    yticklabels={{{yticklabels}}},\n"
+        "    yticklabel style={font=\\scriptsize, anchor=east},\n"
+        "    enlarge y limits=0.02,\n"
+        "    axis line style={black!65},\n"
+        "    tick align=outside,\n"
+        "    width=0.82\\linewidth,\n"
+        f"    height={height}cm,\n"
+        "  },\n"
+        "}"
     )
 
 
-def _fe_plot(
-    extractor: str,
-    engines: list[str],
+def _panel(
+    engine: str,
+    elabel: str,
     avgs: Averages,
+    sep_y: float,
+    xmin: float,
+    xmax: float,
     *,
-    is_bottom: bool,
-    xticklabels: str,
-) -> str:
-    """Render one feature-extractor mini-plot (one dumbbell row per available decision method)."""
-    title = EXTRACTOR_SHORT[extractor]
-    comment = (
-        f"    % --- {title} (bottom plot: x-axis ticks + label shown here only) ---"
-        if is_bottom
-        else f"    % --- {title} ---"
-    )
-    ycoords = ",".join(ENGINE_SHORT[e] for e in engines)
-    axis_opts = f"dumbstack, title={title}, symbolic y coords={{{ycoords}}}, yticklabels={{{ycoords}}}"
-    if is_bottom:
-        axis_opts += f", xticklabels={{{xticklabels}}}, xlabel={{AUROC}}"
-
-    cells = {e: avgs[(extractor, e)] for e in engines}
-    connectors = "\n".join(
-        f"        \\addplot[gray, line width=0.8pt, forget plot] coordinates "
-        f"{{({cells[e]['lodo_auroc']:.4f},{ENGINE_SHORT[e]}) ({cells[e]['id_auroc']:.4f},{ENGINE_SHORT[e]})}};"
-        for e in engines
-    )
-    lodo_marks = " ".join(f"({cells[e]['lodo_auroc']:.4f},{ENGINE_SHORT[e]})" for e in engines)
-    id_marks = " ".join(f"({cells[e]['id_auroc']:.4f},{ENGINE_SHORT[e]})" for e in engines)
-    # Gap label per engine: green when the gap is small (> -0.05), red otherwise.
-    deltas = []
-    for e in engines:
-        idv, lodov = cells[e]["id_auroc"], cells[e]["lodo_auroc"]
+    is_last: bool,
+) -> list[str]:
+    """Render one ``\\nextgroupplot`` panel: one dumbbell row per extractor (skipped if incomplete)."""
+    n = len(EXTRACTORS)
+    opts = f"ylabel={{{elabel}}}" + ("" if is_last else ", xlabel={}")
+    lines = [f"      \\nextgroupplot[{opts}]"]
+    for i, (extractor, _) in enumerate(EXTRACTORS):
+        y = n - i
+        cell = avgs[(extractor, engine)]
+        idv, lodov = cell["id_auroc"], cell["lodo_auroc"]
+        if idv is None or lodov is None:
+            continue
+        lines.append(f"        \\dumbrow{{{y}}}{{{idv:.4f}}}{{{lodov:.4f}}}")
         delta = lodov - idv
         color = "66BB6A" if delta > -0.05 else "E57373"
         value = rf"\textcolor[HTML]{{{color}}}{{{delta:+.2f}}}"
-        deltas.append(
-            f"        \\dumbdelta{{{min(idv, lodov):.4f}}}{{{max(idv, lodov):.4f}}}{{{ENGINE_SHORT[e]}}}{{{value}}}"
-        )
-    delta_block = "\n".join(deltas)
-    suffix = "" if is_bottom else "\\\\[-6pt]"
-    return (
-        f"{comment}\n"
-        "    \\begin{tikzpicture}\n"
-        f"      \\begin{{axis}}[{axis_opts}]\n"
-        f"{connectors}\n"
-        f"        \\addplot[only marks, mark=square*, mark size=2pt, black] coordinates {{{lodo_marks}}};\n"
-        f"        \\addplot[only marks, mark=*, mark size=2pt, black] coordinates {{{id_marks}}};\n"
-        f"{delta_block}\n"
-        "      \\end{axis}\n"
-        f"    \\end{{tikzpicture}}{suffix}"
+        lines.append(f"        \\dumbdelta{{{min(idv, lodov):.4f}}}{{{max(idv, lodov):.4f}}}{{{y}}}{{{value}}}")
+    lines.append(
+        f"        \\draw[black!55, dashed, line width=0.45pt] (axis cs:{xmin:.2f},{sep_y}) -- (axis cs:{xmax:.2f},{sep_y});"
     )
+    return lines
 
 
 def render_figure(data: Results) -> str:
-    """Render the single-column AUROC dumbbell figure for the fully-available methods.
+    """Render the three-panel (AE, OCSVM, LOF) in-domain-vs-LODO dumbbell figure.
 
-    A feature extractor keeps its mini-plot as long as at least one of its decision methods
-    has complete ID/LODO averages; methods missing any scenario are dropped from the plot (not
-    the whole extractor), so the complete ones still render. A thin rule separates the
-    handcrafted block (top) from the pretrained block (bottom).
+    A row is drawn only for the (extractor, engine) cells with complete ID/LODO averages;
+    others are simply left without a dumbbell, so the panel stays complete as new runs land.
+    A dashed line separates the handcrafted block (top) from the pretrained block (bottom).
     """
     _warn_unregistered()
     avgs = _averages(data)
+    present = [
+        v
+        for cell in avgs.values()
+        for v in (cell["id_auroc"], cell["lodo_auroc"])
+        if v is not None
+    ]
+    if not present:
+        raise RuntimeError("No (extractor, engine) cell has both in-domain and LODO averages; nothing to plot.")
+    xmin, xmax = _nice_bounds(present)
 
-    def available_engines(extractor: str) -> list[str]:
-        return [
-            e
-            for e in ENGINE_BTT
-            if avgs[(extractor, e)]["id_auroc"] is not None and avgs[(extractor, e)]["lodo_auroc"] is not None
-        ]
-
-    plots: list[tuple[str, list[str]]] = []
-    for extractor, label in EXTRACTORS:
-        engines = available_engines(extractor)
-        for e in ENGINE_BTT:
-            if e not in engines:
-                logger.warning(f"Dropping {label} + {ENGINE_SHORT[e]} from dumbbell figure: incomplete ID/LODO averages.")
-        if engines:
-            plots.append((extractor, engines))
-    if not plots:
-        raise RuntimeError("No decision method has the in-domain and LODO averages required for the figure.")
-
-    auroc_min = min(
-        min(avgs[(extractor, e)]["id_auroc"], avgs[(extractor, e)]["lodo_auroc"])
-        for extractor, engines in plots
-        for e in engines
-    )
-    xmin = max(0.0, math.floor(auroc_min * 20 - 1) / 20)
-    xticklabels = _xticks(xmin)
+    # Boundary between the handcrafted block (top) and the pretrained block (bottom).
+    sep_y = len(PRETRAINED_EXTRACTORS) + 0.5
+    span = xmax - xmin
 
     lines = [
         "\\begin{figure}[p]",
         "  \\centering",
-        DUMBDELTA_MACRO,
-        _pgfplotsset(xmin, len(plots)),
-        f"  \\def\\dumbthresh{{{xmin + 0.20 * (1.0 - xmin):.2f}}}",
-        f"  \\def\\dumbthreshR{{{1.0 - 0.13 * (1.0 - xmin):.2f}}}",
+        f"  \\def\\dumbthresh{{{xmin + 0.20 * span:.2f}}}",
+        f"  \\def\\dumbthreshR{{{xmax - 0.13 * span:.2f}}}",
+        "  \\begin{tikzpicture}",
+        "    \\begin{groupplot}[",
+        "      group style={group size=1 by 3, vertical sep=1.0cm},",
+        "      dumbaxis,",
+        "      xlabel={AUROC},",
+        "    ]",
     ]
-    for i, (extractor, engines) in enumerate(plots):
-        is_bottom = i == len(plots) - 1
-        # A block separator between the handcrafted and pretrained rows, drawn once, right
-        # before the first pretrained mini-plot that actually renders.
-        if i > 0 and plots[i - 1][0] in _HANDCRAFTED_KEYS and extractor not in _HANDCRAFTED_KEYS:
-            lines.append("  \\noindent\\rule{0.80\\linewidth}{0.3pt}\\\\[2pt]")
-        lines.append(
-            "  " + _fe_plot(extractor, engines, avgs, is_bottom=is_bottom, xticklabels=xticklabels).replace("\n", "\n  ")
-        )
+    for i, (engine, elabel) in enumerate(ENGINES):
+        lines.extend(_panel(engine, elabel, avgs, sep_y, xmin, xmax, is_last=i == len(ENGINES) - 1))
     lines += [
+        "    \\end{groupplot}",
+        "  \\end{tikzpicture}",
         f"  \\caption{{{FIGURE_CAPTION}}}",
         "  \\label{fig:transfer-dumbbell}",
         "\\end{figure}",
     ]
-    return "\n".join(lines)
+    return f"{DUMBDELTA_MACRO}\n\n{DUMBBELL_MACRO}\n\n{_pgfplotsset(xmin, xmax)}\n\n" + "\n".join(lines)
 
 
 # --- entry point -----------------------------------------------------------------
