@@ -6,7 +6,9 @@ unlabelled benign target-domain samples suffice to recover in-domain performance
 sweep the adaptation budget ``k`` over ``{0, 5, 10, 50, 100, 500, 1000, 10000}`` and,
 for each ``k > 0`` and each of several seeds:
 
-  * draw ``k`` benign samples from the target's in-domain *train* split,
+  * take the first ``k`` rows of a per-seed ordered sample drawn from the target's
+    in-domain *train* split (the sample is drawn once, at the sweep's largest ``k``,
+    per seed; smaller ``k``s are prefixes of it, so no row is featurized twice),
   * re-load the pretrained LODO autoencoder (so every repetition restarts from the
     same pretrained weights) and fine-tune **only** its weights on those ``k``
     samples — feature extractor and scaler frozen — at the pretraining learning rate
@@ -41,12 +43,14 @@ from typing import Annotated
 import mlflow
 import numpy as np
 import pandas as pd
+import torch
 import typer
 from sklearn.metrics import average_precision_score, f1_score, recall_score, roc_auc_score
 
 from sqlad_benchmarking.data import split_normals
 from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
 from sqlad_benchmarking.datasets.superviz26_fsl import Superviz26, Superviz26FSL, load_fsl, lodo_source
+from sqlad_benchmarking.determinism import enable_determinism
 from sqlad_benchmarking.evaluate_suite import _model_filename, _validate_grid, parent_run_spec
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
 from sqlad_benchmarking.features.cache import memory_only
@@ -109,6 +113,33 @@ def _score_with_insider_mask(model: AEDetector, df_test: pd.DataFrame, capture_i
     return scores
 
 
+def _fine_tune_on_features(model: AEDetector, x, *, learning_rate: float, seed: int) -> None:
+    """Fine-tune ``model``'s network on an already-featurized matrix ``x``.
+
+    A local stand-in for :meth:`AEDetector.fine_tune` that skips its internal
+    featurization step: ``x`` here is a slice of a matrix the few-shot sweep
+    already computed once (see :func:`_prepare_seed_features`), so re-running the
+    extractor on it would just redo work.
+    """
+    enable_determinism()
+    torch.manual_seed(seed)
+    optimizer = torch.optim.Adam(model.net.parameters(), lr=learning_rate)
+    model._train(x, optimizer, model.config.epochs, None)  # noqa: SLF001
+
+
+@torch.no_grad()
+def _score_features(model: AEDetector, x) -> np.ndarray:
+    """Local stand-in for :meth:`AEDetector.score_samples` on an already-featurized ``x``."""
+    n_samples = x.shape[0]
+    scores = np.empty(n_samples, dtype=np.float32)
+    for start in range(0, n_samples, model.config.batch_size):
+        batch = model._batch_tensor(x[start : start + model.config.batch_size])  # noqa: SLF001
+        recon = model.net(batch)
+        s = torch.mean((recon - batch) ** 2, dim=1).cpu().numpy()
+        scores[start : start + len(s)] = s
+    return scores
+
+
 def _reps(ks: tuple[int, ...], seeds: tuple[int, ...]) -> list[tuple[int, tuple[int, ...]]]:
     """Group the sweep into one ``(k, seeds)`` entry per adaptation budget.
 
@@ -126,7 +157,8 @@ def _run_repetition(
     target: Superviz26FSL,
     extractor: str,
     lodo: Superviz26,
-    train_normal: pd.DataFrame,
+    x_k,
+    n_finetune: int,
     target_test: pd.DataFrame,
     labels: np.ndarray,
     n_attacks: int,
@@ -137,22 +169,21 @@ def _run_repetition(
     target_fpr: float,
     capture_insider: bool,
 ) -> FSLResultRow:
-    """Adapt one freshly-loaded checkpoint for a single (k, seed) and score the target."""
-    n_finetune = 0
+    """Adapt one freshly-loaded checkpoint for a single (k, seed) and score the target.
+
+    ``x_k`` is the already-featurized prefix of the seed's ordered sample (``None``
+    for ``k = 0``); it is a slice of the matrix computed once for the sweep's
+    largest ``k``, so no extractor work happens here.
+    """
     threshold = math.nan
     ft_seconds = 0.0
     if k > 0:
-        df_k = train_normal.sample(n=min(k, len(train_normal)), random_state=seed).reset_index(drop=True)
-        n_finetune = len(df_k)
         ft_lr = model.config.learning_rate * lr_scale
         t0 = time.perf_counter()
-        # The k samples are unique to this (k, seed), so their features are memoised in
-        # memory only: writing them would leave one cache file per repetition.
-        with memory_only(model.extractor):
-            model.fine_tune(df_k, learning_rate=ft_lr, seed=seed)
-            ft_seconds = time.perf_counter() - t0
-            # Recompute the operating point from the same k benign samples.
-            threshold = threshold_for_fpr(model.score_samples(df_k), target_fpr)
+        _fine_tune_on_features(model, x_k, learning_rate=ft_lr, seed=seed)
+        ft_seconds = time.perf_counter() - t0
+        # Recompute the operating point from the same k benign samples.
+        threshold = threshold_for_fpr(_score_features(model, x_k), target_fpr)
 
     t0 = time.perf_counter()
     scores = _score_with_insider_mask(model, target_test, capture_insider)
@@ -233,6 +264,35 @@ def _log_merged_k(rows: list[FSLResultRow], *, dataset: str, target: str, lodo: 
     mlflow.log_metrics(metrics)
 
 
+def _prepare_seed_features(
+    base_model_path: Path,
+    train_normal: pd.DataFrame,
+    ks: tuple[int, ...],
+    seeds: tuple[int, ...],
+) -> dict[int, tuple[pd.DataFrame, object]]:
+    """Precompute, per seed, the sweep's largest sample and its feature matrix.
+
+    Featurizing (e.g. embedding with SecureBERT) is the expensive step, and the old
+    code redid it from scratch for every ``k`` even though the samples mostly
+    overlap. Instead each seed draws its largest budget once; every smaller ``k``
+    then takes the first ``k`` rows of that same draw (in order, no re-sampling) and
+    slices the matching prefix of the feature matrix, so each row is featurized once.
+    """
+    max_k = max((k for k in ks if k > 0), default=0)
+    if max_k == 0:
+        return {}
+    ref_model = AEDetector.load(base_model_path)
+    features: dict[int, tuple[pd.DataFrame, object]] = {}
+    # The k-sample features are unique to this sweep, so keep them in memory only:
+    # writing them would leave one cache file per seed.
+    with memory_only(ref_model.extractor):
+        for seed in seeds:
+            n = min(max_k, len(train_normal))
+            ordered = train_normal.sample(n=n, random_state=seed).reset_index(drop=True)
+            features[seed] = (ordered, ref_model._featurize(ordered, fit=False))  # noqa: SLF001
+    return features
+
+
 def _run_target(
     family: DatasetFamily,
     target: Superviz26FSL,
@@ -281,6 +341,8 @@ def _run_target(
         f"adapting from {base_model_path.name}"
     )
 
+    seed_features = _prepare_seed_features(base_model_path, train_normal, ks, seeds)
+
     rows: list[FSLResultRow] = []
     # All seeds for a given k are merged into a single nested run (their metrics are
     # averaged); the per-seed rows are still returned individually for the CSV.
@@ -294,7 +356,8 @@ def _run_target(
                 target=target,
                 extractor=extractor,
                 lodo=lodo,
-                train_normal=train_normal,
+                x_k=seed_features[seed][1][:k] if k > 0 else None,
+                n_finetune=min(k, len(train_normal)) if k > 0 else 0,
                 target_test=target_test,
                 labels=labels,
                 n_attacks=n_attacks,
