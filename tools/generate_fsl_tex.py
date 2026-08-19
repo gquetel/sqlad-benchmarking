@@ -4,18 +4,22 @@ The few-shot experiment (:mod:`sqlad_benchmarking.evaluate_fsl`) takes each LODO
 autoencoder and adapts it to its held-out target domain with a small budget ``k``
 of benign samples, sweeping ``k`` over ``{0, 5, 10, 50, 100, 500, 1000, 10000}``
 and averaging over five seeds. ``k = 0`` is the unmodified LODO model. The runs
-live in the ``FE-study-FSL`` experiment (see tracking._EXPERIMENT_NAMES),
-one nested run per ``(feature_extractor, target, k)`` cell tagged ``setting=few_shot``.
+live in EXPERIMENTS_FSL below (see tracking._EXPERIMENT_NAMES): the legacy
+Chapter 3 experiment (cv/li/loginov/sbert/codet5 only, tagged ``kind=few_shot``)
+and the newer, wider ``FE-study-FSL`` study (tagged ``setting=few_shot``), one
+nested run per ``(feature_extractor, target, k)`` cell -- the same legacy-plus-new
+experiment pairing as the LODO / concept-drift dumbbell scripts.
 
 This emits the AUROC-vs-``k`` figure: one curve per feature extractor (AE head),
 averaging the per-target AUROC over the four target domains at each budget. A
 black-bordered marker identifies the smallest ``k`` whose AUROC is no more than ``0.01``
 below, or exceeds, the in-domain reference. That reference is the AE in-domain AUROC
-averaged over the four in-domain scenarios, read from the ``FE-study-LODO`` experiment.
+averaged over the four in-domain scenarios, read from EXPERIMENTS_BASE below
+(the legacy ``Superviz26-SQL`` plus the newer ``FE-study-LODO``).
 
 MLflow is the single source of truth: the latest finished run per
-``(extractor, target, k)`` cell wins, so re-running this refreshes the figure.
-Extractors with no few-shot data are dropped.
+``(extractor, target, k)`` cell wins, across both experiments, so re-running this
+refreshes the figure. Extractors with no few-shot data are dropped.
 
 Usage:
     python -m tools.generate_fsl_tex \
@@ -42,9 +46,11 @@ DEFAULT_FIGURE_OUT = (
 )
 
 # MLflow experiments: the few-shot sweep and the standard grid holding the in-domain
-# reference (see tracking._EXPERIMENT_NAMES).
-EXPERIMENT_FSL = "FE-study-FSL"
-EXPERIMENT_BASE = "FE-study-LODO"
+# reference (see tracking._EXPERIMENT_NAMES). Each is a pair of the legacy Chapter 3
+# experiment (cv/li/loginov/sbert/codet5 only) and the newer, wider feature-extractor
+# study, mirroring the LODO/concept-drift dumbbell scripts.
+EXPERIMENTS_FSL = ["FSL-Superviz26-SQL", "FE-study-FSL"]
+EXPERIMENTS_BASE = ["Superviz26-SQL", "FE-study-LODO"]
 
 # The set of feature extractors is discovered from the experiment, not hard-coded; these
 # only fix the appearance and stable order of each curve. The original five retain their
@@ -151,19 +157,20 @@ def _style(extractor: str, index: int) -> tuple[str, str, str, str]:
 def load_curves() -> dict[str, dict[int, float]]:
     """Per extractor, the AUROC averaged over the four targets at each adaptation budget ``k``.
 
-    Reads the latest finished ``kind=few_shot`` run per ``(extractor, target, k)`` cell; a budget
-    is kept only when all four targets are present, so every plotted point averages the same domains.
+    Reads the latest finished ``kind=few_shot`` run per ``(extractor, target, k)`` cell across
+    both EXPERIMENTS_FSL; a budget is kept only when all four targets are present, so every
+    plotted point averages the same domains.
     """
     # MLflow filter strings are AND-only (no OR), so neither the few-shot setting nor the
     # AE head can be matched server-side across their current/legacy tag spellings
     # (`setting`/`kind`, `decision_engine`/`pipeline`); reconcile both client-side below.
     runs = mlflow.search_runs(
-        experiment_names=[EXPERIMENT_FSL],
+        experiment_names=EXPERIMENTS_FSL,
         filter_string="attributes.status = 'FINISHED'",
         output_format="pandas",
     )
     if runs.empty:
-        raise RuntimeError(f"No finished run found in MLflow experiment {EXPERIMENT_FSL!r}.")
+        raise RuntimeError(f"No finished run found in MLflow experiments {EXPERIMENTS_FSL!r}.")
 
     # Ascending start_time so the latest run of a repeated cell overwrites earlier ones.
     runs = runs.sort_values("start_time")
@@ -218,12 +225,12 @@ def load_indomain(extractors: list[str]) -> dict[str, float]:
     # MLflow filter strings are AND-only (no OR); reconcile the AE head across the current
     # `decision_engine` and legacy `pipeline` tags client-side below.
     runs = mlflow.search_runs(
-        experiment_names=[EXPERIMENT_BASE],
+        experiment_names=EXPERIMENTS_BASE,
         filter_string="attributes.status = 'FINISHED' and tags.run_type = 'full-run'",
         output_format="pandas",
     )
     if runs.empty:
-        logger.warning(f"No finished full-run in {EXPERIMENT_BASE!r}; recovery ticks will be omitted.")
+        logger.warning(f"No finished full-run in {EXPERIMENTS_BASE!r}; recovery ticks will be omitted.")
         return {}
     runs = runs.sort_values("start_time")
     cells: dict[tuple[str, str], float] = {}
@@ -234,11 +241,12 @@ def load_indomain(extractors: list[str]) -> dict[str, float]:
             engine = r.get("tags.pipeline")
         if engine != "ae":
             continue
-        extractor, scenario, auroc = (
-            r.get("tags.feature_extractor"),
-            r.get("tags.scenario"),
-            _num(r.get("metrics.roc_auc")),
-        )
+        # Scenario key (a-a, bcd-a, ...): current runs tag it `scenario`; legacy runs
+        # (before the dataset/scenario tag split) carried it under `dataset` instead.
+        scenario = r.get("tags.scenario")
+        if not isinstance(scenario, str):
+            scenario = r.get("tags.dataset")
+        extractor, auroc = r.get("tags.feature_extractor"), _num(r.get("metrics.roc_auc"))
         if isinstance(extractor, str) and isinstance(scenario, str) and auroc is not None:
             cells[(extractor, scenario)] = auroc
 
