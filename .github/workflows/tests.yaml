@@ -32,6 +32,6 @@ jobs:
             set -euo pipefail
             uv lock --check
             uv sync --frozen --extra cpu
-            uv run coverage run -m pytest tests/
-            uv run coverage report -m
+            uv run --frozen --extra cpu coverage run -m pytest tests/ --skip-slow
+            uv run --frozen --extra cpu coverage report -m
           "
