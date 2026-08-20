@@ -60,6 +60,11 @@ _MLFLOW_KEY_RE = re.compile(r"[^0-9A-Za-z_\-./ ]+")
 # Validation fraction of train samples held out to calibrate the decision threshold
 VAL_FRACTION = 0.1
 
+# LLM2Vec and Qwen3-Emb are slow enough that a full-size run does not finish in time;
+# subsample both splits by 5x for these extractors only.
+SUBSAMPLE_EXTRACTORS = frozenset({"llm2vec", "qwen3-emb"})
+SUBSAMPLE_FRACTION = 1 / 5
+
 
 class Cell(NamedTuple):
     """One unit of the evaluation grid: a single (scenario, method, extractor)."""
@@ -297,6 +302,16 @@ def _run_one_tracked(
         df_test = family.load_split(
             scenario, "test", root=data_root, columns=("full_query", "label", "attack_technique"), limit=limit
         )
+
+    if extractor in SUBSAMPLE_EXTRACTORS:
+        n_train_before, n_test_before = len(df_train), len(df_test)
+        df_train = df_train.sample(frac=SUBSAMPLE_FRACTION, random_state=seed).reset_index(drop=True)
+        df_test = df_test.sample(frac=SUBSAMPLE_FRACTION, random_state=seed).reset_index(drop=True)
+        logger.info(
+            f"  subsampled train/test by 5x for {EXTRACTOR_LABELS.get(extractor, extractor)}: "
+            f"train {n_train_before} -> {len(df_train)}, test {n_test_before} -> {len(df_test)}"
+        )
+
     df_train_normal = split_normals(df_train)
     # Hold out a validation slice of the train normals to calibrate the threshold
     # out-of-sample. The model is fitted on df_fit only; df_val never informs the fit.
