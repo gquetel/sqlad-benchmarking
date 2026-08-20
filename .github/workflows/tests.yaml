@@ -9,10 +9,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+
+      # The runner's default disk is too small for Nix. This approach appears to be 
+      # standard (https://github.com/actions/runner-images/issues/14558) until a 
+      # NixOS image exists.
+      - name: Free up disk space for Nix
+        uses: wimpysworld/nothing-but-nix@v10
 
       - name: Install Nix
         uses: cachix/install-nix-action@v27
