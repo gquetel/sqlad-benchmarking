@@ -89,8 +89,12 @@ def smoke(ctx: Context, limit: int = 1000, no_track: bool = False, register: boo
 
 @task
 def test(ctx: Context) -> None:
-    """Run tests."""
-    ctx.run("coverage run -m pytest tests/", echo=True, pty=not NO_PTY)
+    """Run tests.
+
+    Slow tests are skipped. Each slow test needs a 14 GB download and a 32 GB+ GPU.
+    To run a slow test, call ``pytest`` directly on it.
+    """
+    ctx.run("coverage run -m pytest tests/ --skip-slow", echo=True, pty=not NO_PTY)
     ctx.run("coverage report -m -i", echo=True, pty=not NO_PTY)
 
 
