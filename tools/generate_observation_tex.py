@@ -149,13 +149,14 @@ GAUR_MODELS: list[tuple[str, str, str]] = [
 GAUR_GLABEL: dict[str, str] = {ext: glabel for ext, _, glabel in GAUR_MODELS}
 
 # Reference baselines of Chapter 3 for the bottom block of tab:perfs-vs-sota, in the same
-# order and spelling as tab:sup25-metrics.
+# order as tab:sup25-metrics. Labels use the colored-square macros from colors.tex, matching
+# how GAUR_MODELS names its rows.
 BASELINES: list[tuple[str, str]] = [
-    ("cv", "CountVectorizer"),
-    ("li", "Li et al."),
-    ("loginov", "Loginov"),
-    ("sbert", "SecureBERT"),
-    ("codet5", "CodeT5+"),
+    ("cv", r"\cv[]"),
+    ("li", r"\li[]"),
+    ("loginov", r"\loginov[]"),
+    ("sbert", r"\securebert[]"),
+    ("codet5", r"\codetfive[]"),
 ]
 
 # Source-padding widths so the generated .tex stays column-aligned and diff-friendly.
