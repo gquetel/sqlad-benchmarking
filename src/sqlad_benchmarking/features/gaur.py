@@ -347,14 +347,31 @@ def _new_connector_and_collector():
     return sqlc, gtc
 
 
+_NA_TRACE_ROW: dict[str, object] = {
+    "query_id": pd.NA,
+    "n_terminal": pd.NA,
+    "n_nonterminal": pd.NA,
+    "is_syntax_error": pd.NA,
+    "semantic_tree": pd.NA,
+    "depth": pd.NA,
+    "n_parser_invoc": pd.NA,
+}
+
+
 def _collect_one_trace(query: str, sqlc, gtc) -> dict[str, object]:
     """Collect the raw trace fields for one query via gaur_sqld.
 
     Syntax errors come back as a row of NaNs, not an exception; only connection failures propagate.
+    A query that executes but yields zero logged parser invocations (observed on some
+    attack-payload queries GAUR never traced against before) also comes back empty from
+    get_traces_from_query -- treat that the same as a syntax error rather than crashing.
     """
     from gaur_sqld.utils.traces_collector import get_traces_from_query
 
-    return get_traces_from_query(query, sqlc, gtc).iloc[0].to_dict()
+    trace_df = get_traces_from_query(query, sqlc, gtc)
+    if trace_df.empty:
+        return dict(_NA_TRACE_ROW)
+    return trace_df.iloc[0].to_dict()
 
 
 def _checkpoint_path(mode: str, query_df: pd.DataFrame) -> Path:
