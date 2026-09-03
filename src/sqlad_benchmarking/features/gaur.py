@@ -13,6 +13,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -28,16 +29,6 @@ logger = logging.getLogger(__name__)
 
 GaurMode = str
 
-
-_SERVER_TRACE_TYPE: dict[str, str] = {
-    "expert": "expert",
-    "chatgpt": "chatgpt",
-    "claude": "claude",
-    "llama": "llama",
-    "mistral": "mistral",
-    "gpt-oss": "gpt-oss",
-    "ruleid": "expert",
-}
 
 # Syntactic fields present on every GAUR trace row, regardless of semantic model.
 GAUR_SYNT_NAMES: tuple[str, ...] = (
@@ -197,9 +188,6 @@ _RULEID_TAGS: tuple[str, ...] = tuple(f"kind_{i}" for i in range(_RULEID_MIN, _R
 
 _MODES: tuple[str, ...] = ("expert", "chatgpt", "claude", "llama", "mistral", "gpt-oss", "ruleid")
 
-# Trace collection checkpoints every this fraction
-_CHECKPOINT_FRACTION = 0.05
-
 # Where checkpoints (derived feature rows, never raw traces) are written.
 _TRACE_CHECKPOINT_DIR = Path("data/processed/gaur_trace_checkpoints")
 
@@ -245,13 +233,12 @@ def _count_sql_keywords(text: str) -> int:
 TraceNode = tuple[str, str, str, str]  # (symbkind, tag1, tag2, sem_value)
 
 
-def parse_semantic_tree(trace: str | float | None) -> list[TraceNode]:
+def parse_semantic_tree(trace: str) -> list[TraceNode]:
     """Parse a GAUR ``semantic_tree`` trace into its ``(symbkind, tag1, tag2, value)`` nodes.
 
-    Malformed nodes are skipped and logged; a missing/NaN trace returns an empty list.
+    Malformed nodes are skipped and logged. gaur_sqld writes ``"||-||"`` for a query it
+    could not trace, which gives an empty list.
     """
-    if pd.isna(trace):
-        return []
     nodes: list[TraceNode] = []
     for node in trace.split("||-||")[0].split("|"):
         if not node:
@@ -312,9 +299,46 @@ def _tag_counts(mode: str, nodes: list[TraceNode]) -> dict[str, float]:
 
 # ----- Trace collection ---------------------------------------------------------
 #
-# Collects one query at a time (not gaur_sqld's batch get_traces_from_df) so one
-# MySQL connection stays open for the whole run. Failed rows get a default
-# feature row instead of being dropped.
+# gaur_sqld returns one trace row for each query, and marks a query it could not
+# trace with n_parser_invoc = 0. The collection runs in parts, and each part
+# writes its derived feature rows to disk. Raw traces never go to disk.
+
+# The collection is divided into this many parts, so progress is reported every
+# 10% and a failed run continues at the last complete part.
+_N_PARTS = 10
+
+
+def _part_edges(n: int) -> list[int]:
+    """Row index of every part boundary, from 0 to ``n``.
+
+    Args:
+        n: Number of queries to divide.
+
+    Returns:
+        ``n_parts + 1`` indexes. The parts differ by at most one row, and a short
+        input gives one part for each row.
+    """
+    n_parts = max(1, min(_N_PARTS, n))
+    return [(k * n) // n_parts for k in range(n_parts + 1)]
+
+
+def _quiet_collection_logs() -> None:
+    """Keep the dependency logs out of the progress lines.
+
+    gaur_sqld writes one INFO line for each part, and mysql.connector writes three
+    for each new connection. Warnings and errors still come through.
+    """
+    for name in ("gaur_sqld", "mysql.connector"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format a duration as ``1h02m``, ``2m03s`` or ``4.1s``."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, sec = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m" if hours else f"{minutes}m{sec:02d}s"
 
 
 def _configure_trace_type(trace_type: str) -> None:
@@ -324,143 +348,129 @@ def _configure_trace_type(trace_type: str) -> None:
     gcfg.update_location_mysqlfiles(trace_type)
 
 
-def _ensure_server(trace_type: str) -> None:
-    """Start (or reuse) the GAUR-instrumented MySQL server for ``trace_type``."""
-    from gaur_sqld.server import ensure_server
+def _trace_type(mode: str) -> str:
+    """Return the server that supplies the traces for ``mode``.
 
-    ensure_server(trace_type)
+    Args:
+        mode: A GAUR mode.
 
-
-def _new_connector_and_collector():
-    """Build a fresh, unconnected ``(SQLConnector, GaurTraceCollector)`` pair; connects lazily on first use."""
-    from gaur_sqld import config as gcfg
-    from gaur_sqld.utils.mysql_wrapper import SQLConnector
-    from gaur_sqld.utils.traces_collector import GaurTraceCollector
-
-    sqlc = SQLConnector(
-        user=gcfg.mysql_info.user,
-        pwd=gcfg.mysql_info.password,
-        socket_path=gcfg.mysql_info.socket_path,
-        database=gcfg.mysql_info.database,
-    )
-    gtc = GaurTraceCollector(fp_datadir=gcfg.mysql_info.datadir_path)
-    return sqlc, gtc
-
-
-_NA_TRACE_ROW: dict[str, object] = {
-    "query_id": pd.NA,
-    "n_terminal": pd.NA,
-    "n_nonterminal": pd.NA,
-    "is_syntax_error": pd.NA,
-    "semantic_tree": pd.NA,
-    "depth": pd.NA,
-    "n_parser_invoc": pd.NA,
-}
-
-
-def _collect_one_trace(query: str, sqlc, gtc) -> dict[str, object]:
-    """Collect the raw trace fields for one query via gaur_sqld.
-
-    Syntax errors come back as a row of NaNs, not an exception; only connection failures propagate.
-    A query that executes but yields zero logged parser invocations (observed on some
-    attack-payload queries GAUR never traced against before) also comes back empty from
-    get_traces_from_query -- treat that the same as a syntax error rather than crashing.
+    Returns:
+        The trace type of the server. ``ruleid`` reads the expert server, because it
+        only keeps the grammar-rule ids, which every server writes.
     """
-    from gaur_sqld.utils.traces_collector import get_traces_from_query
+    return "expert" if mode == "ruleid" else mode
 
-    trace_df = get_traces_from_query(query, sqlc, gtc)
-    if trace_df.empty:
-        return dict(_NA_TRACE_ROW)
-    return trace_df.iloc[0].to_dict()
+
+def _get_traces(part: pd.DataFrame) -> pd.DataFrame:
+    """Collect the GAUR traces for one part of the input.
+
+    Args:
+        part: Queries in a ``full_query`` column.
+
+    Returns:
+        One trace row for each query, in the order of ``part``.
+    """
+    from gaur_sqld.utils.traces_collector import get_traces_from_df
+
+    return get_traces_from_df(part, use_cache=False, disable_tqdm=True)
 
 
 def _checkpoint_path(mode: str, query_df: pd.DataFrame) -> Path:
     """Checkpoint path, keyed by mode + exact query order so a rerun only resumes against identical input."""
+    directory = _trace_checkpoint_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{_checkpoint_stem(mode, query_df)}.pkl"
+
+
+def _checkpoint_stem(mode: str, query_df: pd.DataFrame) -> str:
     h = hashlib.blake2b(digest_size=16)
     h.update(mode.encode())
     for q in query_df["full_query"]:
         h.update(b"\0")
         h.update(str(q).encode("utf-8", "surrogatepass"))
-    directory = _trace_checkpoint_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory / f"{mode}-{h.hexdigest()}.pkl"
+    return f"{mode}-{h.hexdigest()}"
 
 
-def _load_checkpoint(path: Path) -> tuple[list[dict[str, float]], int]:
-    """Return ``(feature rows collected so far, how many input rows they cover)``."""
+def _load_checkpoint(path: Path) -> list[dict[str, float]]:
+    """Return the feature rows collected so far, or an empty list."""
     if not path.exists():
-        return [], 0
-    state = joblib.load(path)
-    return state["rows"], state["n_done"]
+        return []
+    return joblib.load(path)
 
 
-def _save_checkpoint(path: Path, rows: list[dict[str, float]], n_done: int) -> None:
+def _save_checkpoint(path: Path, rows: list[dict[str, float]]) -> None:
     # Atomic write (tmp + rename), pid-suffixed so a concurrent job never sees a
     # half-written checkpoint (mirrors CachingExtractor._save).
     tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-    joblib.dump({"rows": rows, "n_done": n_done}, tmp)
+    joblib.dump(rows, tmp)
     os.replace(tmp, path)
 
 
 def _collect_and_featurize(mode: str, query_df: pd.DataFrame) -> list[dict[str, float]]:
-    """Collect GAUR traces for ``mode``, reducing each to a feature row immediately.
+    """Collect the GAUR traces for ``mode`` and make one feature row for each query.
 
-    Checkpoints progress to disk every ``_CHECKPOINT_FRACTION`` of rows so a rerun
-    resumes instead of recollecting from scratch. Every input row yields exactly
-    one feature row — failures get a default row rather than being dropped.
+    The collection runs in ``_N_PARTS`` equal parts. Each part writes the feature rows
+    to disk and logs the progress, so a failed run continues at the last complete part.
+    Each query makes exactly one feature row, so the number of rows on disk is also the
+    number of queries that they cover.
+
+    Args:
+        mode: A GAUR mode.
+        query_df: Queries in a ``full_query`` column.
+
+    Returns:
+        One feature row for each query, in the order of ``query_df``.
+
+    Raises:
+        RuntimeError: If the rows do not agree with the number of queries.
     """
-    trace_type = _SERVER_TRACE_TYPE[mode]
     n = len(query_df)
-    ckpt_path = _checkpoint_path(mode, query_df)
-    rows, start_idx = _load_checkpoint(ckpt_path)
+    if n == 0:
+        return []
 
-    if start_idx >= n:
-        ckpt_path.unlink(missing_ok=True)
-        return rows
-    if start_idx:
-        logger.info("Resuming GAUR collection for %s from row %d/%d", mode, start_idx, n)
+    _quiet_collection_logs()
+    _configure_trace_type(_trace_type(mode))
+    path = _checkpoint_path(mode, query_df)
+    rows = _load_checkpoint(path)
+    edges = _part_edges(n)
+    n_parts = len(edges) - 1
+    # A checkpoint only names mode + queries, not the part scheme that produced it, so one
+    # left over from a different _N_PARTS -- or a deprecated checkpoint format -- is not
+    # usable here. Discard it rather than resuming from a row count we cannot place.
+    if len(rows) not in edges:
+        if rows:
+            logger.warning(f"GAUR {mode}: discarding an incompatible checkpoint ({len(rows)} rows)")
+        rows = []
+    first = edges.index(len(rows))
 
-    _configure_trace_type(trace_type)
-    _ensure_server(trace_type)
-    sqlc, gtc = _new_connector_and_collector()
-    checkpoint_interval = max(1, round(n * _CHECKPOINT_FRACTION))
+    logger.info(f"GAUR {mode}: collecting {n} queries in {n_parts} parts, started {time.strftime('%H:%M:%S')}")
+    if first:
+        logger.info(f"GAUR {mode}: resuming at row {len(rows)}/{n}, part {first + 1}/{n_parts}")
 
-    for i in range(start_idx, n):
-        query = str(query_df.iloc[i]["full_query"])
-        try:
-            trace_row = _collect_one_trace(query, sqlc, gtc)
-        except Exception:
-            logger.error(
-                "GAUR collection failed on row %d/%d for %s; checkpointing %d completed rows",
-                i,
-                n,
-                mode,
-                len(rows),
-            )
-            _save_checkpoint(ckpt_path, rows, i)
-            raise
-        rows.append(_row_features(mode, trace_row))
+    started = time.monotonic()
+    n_failed = 0
+    for k in range(first, n_parts):
+        traces = _get_traces(query_df.iloc[edges[k] : edges[k + 1]])
+        n_failed += int((traces["n_parser_invoc"] == 0).sum())
+        rows.extend(_row_features(mode, trace) for trace in traces.to_dict("records"))
+        _save_checkpoint(path, rows)
+        logger.info(f"GAUR {mode}: {len(rows)}/{n} rows done at {time.strftime('%H:%M:%S')}")
 
-        done = i + 1
-        if done % checkpoint_interval == 0:
-            _save_checkpoint(ckpt_path, rows, done)
-            logger.info("GAUR collection checkpoint: %d/%d rows (%s)", done, n, mode)
+    if first < n_parts:
+        elapsed = _fmt_duration(time.monotonic() - started)
+        logger.info(f"GAUR {mode}: done in {elapsed}, {n_failed} queries without a trace")
 
+    # This guards the checkpoint, not the library: a file that holds more rows than
+    # the input gives a bad resume point. The library makes its own count agree.
     if len(rows) != n:
-        raise RuntimeError(f"GAUR collection for {mode} produced {len(rows)} feature rows for {n} input rows")
-    ckpt_path.unlink(missing_ok=True)
+        raise RuntimeError(f"GAUR collection for {mode} made {len(rows)} feature rows for {n} queries")
+    path.unlink(missing_ok=True)
     return rows
 
 
 def _row_features(mode: str, trace_row: dict) -> dict[str, float]:
-    feats: dict[str, float] = {
-        "n_terminal": float(trace_row["n_terminal"]) if pd.notna(trace_row["n_terminal"]) else 0.0,
-        "n_nonterminal": float(trace_row["n_nonterminal"]) if pd.notna(trace_row["n_nonterminal"]) else 0.0,
-        # A trace GAUR failed to collect is itself an anomalous signal.
-        "is_syntax_error": float(trace_row["is_syntax_error"]) if pd.notna(trace_row["is_syntax_error"]) else 1.0,
-        "depth": float(trace_row["depth"]) if pd.notna(trace_row["depth"]) else 0.0,
-        "n_parser_invoc": float(trace_row["n_parser_invoc"]) if pd.notna(trace_row["n_parser_invoc"]) else 0.0,
-    }
+    """Reduce one GAUR trace row to its feature row. A failed trace shows ``n_parser_invoc`` 0."""
+    feats = {name: float(trace_row[name]) for name in GAUR_SYNT_NAMES}
     nodes = parse_semantic_tree(trace_row["semantic_tree"])
     feats.update(_tag_counts(mode, nodes))
     avg, mx, mn = _keyword_stats(nodes)
@@ -511,3 +521,13 @@ class GaurExtractor(BaseEstimator, TransformerMixin):
     def get_feature_names_out(self, input_features=None) -> np.ndarray:
         names = gaur_feature_names(self.mode) + LI_FEATURE_NAMES
         return np.asarray(names, dtype=object)
+
+    def cache_key_state(self) -> str:
+        """Fold the gaur_sqld version into the cache key (see CachingExtractor).
+
+        The trace values come from the library, so a bump that changes them must
+        also change the key. The version must go up in gaur-sql-detect each time.
+        """
+        from gaur_sqld import __version__
+
+        return __version__

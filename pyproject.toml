@@ -87,7 +87,7 @@ omit = ["tests/*"]
 conflicts = [[{ extra = "cu126" }, { extra = "cpu" }]]
 
 [tool.uv.sources]
-gaur-sql-detect = { git = "https://github.com/gquetel/gaur-sql-detect", rev = "5c42db42d7e2882af5025b9bb77e1d8df3a6f0d6" }
+gaur-sql-detect = { git = "https://github.com/gquetel/gaur-sql-detect", rev = "60c3c228d08ad1bec61739e1976da1178f0ae2fa" }
 # More recent CUDA version dropped V100 support, we use an old one.
 torch = [
   { index = "pytorch-cu126", extra = "cu126" },

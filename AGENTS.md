@@ -75,6 +75,15 @@ versions or regenerate the lock without explicit instruction.
 * Use type hints.
 * Do not add inline comments unless absolutely necessary.
 
+# GAUR feature collection
+
+* The `gaur-*` extractors call `gaur_sqld`, which starts the instrumented MySQL server and returns one trace row for each query.
+* The collection runs in `_N_PARTS` (10) equal parts. Each part writes its feature rows to `data/processed/gaur_trace_checkpoints/` and logs one progress line, so a failed run continues at the last complete part. The checkpoint file goes away when the collection is complete.
+* `_quiet_collection_logs` puts the `gaur_sqld` and `mysql.connector` loggers at WARNING. Those two write one INFO line for each part and for each new connection, which hides the progress lines. Raise the level again if you must debug the server or the connection.
+* A query that GAUR cannot trace keeps its row, with `n_parser_invoc = 0`. That field is a feature, so the model receives the failure signal.
+* `gaur_sqld` sets the number of processes with its own `n_workers` setting. It raises a `GaurServerError` if the server writes a single shared `gaur.log`, because concurrent connections would overwrite each other's traces.
+* `GaurExtractor.cache_key_state` puts the `gaur_sqld` version in the feature-cache key. Increase the version in `gaur-sql-detect` each time the trace values change.
+
 # Experiment tracking
 
 * `evaluate_suite` logs params, metrics, the per-epoch AE training loss, and the fitted model artifact to MLflow when `MLFLOW_TRACKING_URI` is set (opt out with `--no-track`). Configuration is environment-driven via `.env` (see  `.env.example`).

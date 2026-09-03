@@ -6,6 +6,8 @@ This repository compares anomaly-detection methods for SQL attacks across severa
 
 All methods can be trained and evaluated on any compatible machine. Most experiments were run in parallel on a SLURM cluster using the provided submission tool, which assigns CPU or GPU resources as needed and submits jobs gradually to respect cluster limits. GAUR experiments were run locally because they require an instrumented MySQL server, but they can run on any machine where that dependency is available. See [Running experiments on SLURM](docs/source/slurm.md) and [Datasets](docs/source/datasets.md) for the commands and data requirements.
 
+The `gaur-*` extractors collect one parser trace per query, in ten equal parts. Each part writes its feature rows to disk and logs the rows that are done, so a failed collection continues at the last complete part. A query that GAUR cannot trace keeps its row, with `n_parser_invoc = 0`. `gaur_sqld` sets the number of processes with its own `n_workers` setting, and it stops the collection with a `GaurServerError` if the server writes a single shared `gaur.log`.
+
 ## Development environment
 
 Nix is the recommended setup and the one used in CI. It provides the expected Python interpreter and system libraries, synchronizes the packages from `uv.lock`, and activates the project virtual environment:

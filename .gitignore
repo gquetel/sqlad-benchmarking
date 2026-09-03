@@ -64,3 +64,6 @@ docs/site/
 /models/*.pt
 /models/*.pth
 /reports/*.csv
+
+# gaur_sqld writes its trace cache here
+cache/

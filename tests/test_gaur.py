@@ -1,6 +1,6 @@
 """Unit tests for the GAUR feature extractor.
 
-Stubs out ``_collect_one_trace`` and the keyword regex so tests don't need a live
+Stubs out ``_get_traces`` and the keyword regex so tests don't need a live
 GAUR-instrumented MySQL server or ``gaur_sqld`` installed.
 """
 
@@ -25,6 +25,9 @@ from sqlad_benchmarking.features.li import FEATURE_NAMES as LI_FEATURE_NAMES
 # A trace with two nodes: one tagged CREATE/USER with a literal, one untagged.
 _SAMPLE_TRACE = "1:2979:100:CREATE:USER:admin|2:15:101::: ||-||edges"
 
+# What gaur_sqld writes for a query it could not trace.
+_FAILED_TRACE = "||-||"
+
 
 def test_parse_semantic_tree_extracts_nodes():
     nodes = parse_semantic_tree(_SAMPLE_TRACE)
@@ -32,12 +35,6 @@ def test_parse_semantic_tree_extracts_nodes():
         ("2979", "CREATE", "USER", "admin"),
         ("15", "", "", " "),
     ]
-
-
-def test_parse_semantic_tree_handles_missing_trace():
-    assert parse_semantic_tree(pd.NA) == []
-    assert parse_semantic_tree(float("nan")) == []
-    assert parse_semantic_tree(None) == []
 
 
 def test_parse_semantic_tree_skips_malformed_node():
@@ -77,6 +74,24 @@ def test_unknown_mode_raises():
         GaurExtractor(mode="not-a-mode")
 
 
+def test_ruleid_reads_the_expert_server():
+    assert gaur._trace_type("ruleid") == "expert"
+    assert gaur._trace_type("mistral") == "mistral"
+
+
+def test_part_edges_makes_ten_equal_parts():
+    edges = gaur._part_edges(3_353_671)
+    sizes = [b - a for a, b in zip(edges[:-1], edges[1:], strict=True)]
+    assert len(sizes) == gaur._N_PARTS
+    assert sum(sizes) == 3_353_671
+    assert max(sizes) - min(sizes) <= 1
+
+
+def test_part_edges_never_makes_an_empty_part():
+    assert gaur._part_edges(7) == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert gaur._part_edges(1) == [0, 1]
+
+
 def _frame() -> pd.DataFrame:
     return pd.DataFrame({"full_query": ["select 1", "create user 'a'@'b' identified by 'x'"]})
 
@@ -92,17 +107,16 @@ def _stub_trace_row() -> dict:
     }
 
 
-def _stub_collect_one(query: str, sqlc, gtc) -> dict:
-    return _stub_trace_row()
+def _stub_traces(part: pd.DataFrame) -> pd.DataFrame:
+    """Stand in for gaur_sqld: one trace row for each query, in input order."""
+    return pd.DataFrame([_stub_trace_row() for _ in range(len(part))], index=part.index)
 
 
 @pytest.fixture(autouse=True)
 def _stub_gaur_sqld(monkeypatch, tmp_path):
     """Avoid depending on gaur_sqld/a live server; checkpoints go to tmp_path instead of the repo."""
     monkeypatch.setattr(gaur, "_configure_trace_type", lambda trace_type: None)
-    monkeypatch.setattr(gaur, "_ensure_server", lambda trace_type: None)
-    monkeypatch.setattr(gaur, "_new_connector_and_collector", lambda: (None, None))
-    monkeypatch.setattr(gaur, "_collect_one_trace", _stub_collect_one)
+    monkeypatch.setattr(gaur, "_get_traces", _stub_traces)
     monkeypatch.setattr(gaur, "_trace_checkpoint_dir", lambda: tmp_path)
     monkeypatch.setattr(gaur, "_sql_keyword_re", lambda: re.compile(r"\bselect\b", re.IGNORECASE))
 
@@ -137,18 +151,12 @@ def test_ruleid_extractor_output_is_dense_and_matches_counts(monkeypatch):
     # symbkind 2979 (used elsewhere to match the paper's worked example) falls
     # outside ruleid's [832, 1844] range, so use an in-range value here instead.
     in_range_trace = "1:1000:100:CREATE:USER:admin|2:1000:101::: ||-||edges"
-    monkeypatch.setattr(
-        gaur,
-        "_collect_one_trace",
-        lambda query, sqlc, gtc: {
-            "n_terminal": 3,
-            "n_nonterminal": 2,
-            "is_syntax_error": 0,
-            "semantic_tree": in_range_trace,
-            "depth": 4,
-            "n_parser_invoc": 1,
-        },
-    )
+
+    def in_range_traces(part: pd.DataFrame) -> pd.DataFrame:
+        row = _stub_trace_row() | {"semantic_tree": in_range_trace}
+        return pd.DataFrame([row for _ in range(len(part))], index=part.index)
+
+    monkeypatch.setattr(gaur, "_get_traces", in_range_traces)
     ext = GaurExtractor(mode="ruleid")
     df = _frame()
     dense = ext.fit(df).transform(df)
@@ -172,69 +180,100 @@ def test_non_ruleid_extractors_stay_dense():
     assert not issparse(matrix)
 
 
-# ----- _collect_and_featurize: never drop a row, checkpoint, resume ------------
+# ----- _collect_and_featurize: keep every row, checkpoint, resume ---------------
 
 
-def test_collect_and_featurize_never_drops_a_failed_row(monkeypatch):
-    """A failed row (all-NaN, as get_traces_from_query returns on failure) still yields a feature row."""
+def test_collect_and_featurize_keeps_a_failed_row(monkeypatch):
+    """A query gaur_sqld could not trace keeps its row, with n_parser_invoc 0 and no tags."""
 
-    def fake_collect_one(query: str, sqlc, gtc) -> dict:
-        if query == "select 2":
-            return {
-                "n_terminal": pd.NA,
-                "n_nonterminal": pd.NA,
-                "is_syntax_error": pd.NA,
-                "semantic_tree": pd.NA,
-                "depth": pd.NA,
-                "n_parser_invoc": pd.NA,
-            }
-        return _stub_trace_row()
+    def traces_with_one_failure(part: pd.DataFrame) -> pd.DataFrame:
+        rows = []
+        for query in part["full_query"]:
+            if query == "select 2":
+                rows.append(
+                    {
+                        "n_terminal": 0,
+                        "n_nonterminal": 0,
+                        "is_syntax_error": 0,
+                        "semantic_tree": _FAILED_TRACE,
+                        "depth": 0,
+                        "n_parser_invoc": 0,
+                    }
+                )
+            else:
+                rows.append(_stub_trace_row())
+        return pd.DataFrame(rows, index=part.index)
 
-    monkeypatch.setattr(gaur, "_collect_one_trace", fake_collect_one)
+    monkeypatch.setattr(gaur, "_get_traces", traces_with_one_failure)
     query_df = pd.DataFrame({"full_query": ["select 1", "select 2", "select 3"]})
 
     rows = gaur._collect_and_featurize("expert", query_df)
 
     assert len(rows) == len(query_df)
-    # The failed row still yields a (degraded) feature row rather than being dropped.
-    assert rows[1]["is_syntax_error"] == 1.0
-    assert rows[1]["n_terminal"] == 0.0
-    assert rows[0]["is_syntax_error"] == 0.0
+    assert rows[1]["n_parser_invoc"] == 0.0
+    assert rows[1]["CREATE"] == 0.0
+    assert rows[1]["avg_c_sqlkywds"] == 0.0
+    assert rows[0]["n_parser_invoc"] == 1.0
+    assert rows[0]["CREATE"] == 1.0
 
 
 def test_collect_and_featurize_checkpoints_and_resumes_after_failure(monkeypatch, tmp_path):
-    """A mid-collection failure checkpoints progress; a rerun resumes and cleans up on success."""
+    """A failure in one part checkpoints the complete parts; a rerun resumes and cleans up."""
     monkeypatch.setattr(gaur, "_trace_checkpoint_dir", lambda: tmp_path)
-    query_df = pd.DataFrame({"full_query": [f"select {i}" for i in range(20)]})
-    calls: list[str] = []
+    query_df = pd.DataFrame({"full_query": [f"select {i}" for i in range(20)]})  # 10 parts of 2 rows
+    parts: list[int] = []
 
-    def failing_collect_one(query: str, sqlc, gtc) -> dict:
-        calls.append(query)
-        if len(calls) == 12:
+    def failing_get_traces(part: pd.DataFrame) -> pd.DataFrame:
+        parts.append(len(part))
+        if len(parts) == 3:
             raise RuntimeError("simulated connection drop")
-        return _stub_trace_row()
+        return _stub_traces(part)
 
-    monkeypatch.setattr(gaur, "_collect_one_trace", failing_collect_one)
+    monkeypatch.setattr(gaur, "_get_traces", failing_get_traces)
     with pytest.raises(RuntimeError, match="simulated connection drop"):
         gaur._collect_and_featurize("expert", query_df)
 
     ckpt_path = gaur._checkpoint_path("expert", query_df)
     assert ckpt_path.exists()
-    rows_so_far, n_done = gaur._load_checkpoint(ckpt_path)
-    assert 0 < n_done < len(query_df)
-    assert len(rows_so_far) == n_done
+    # The two complete parts are on disk; the failed part is not.
+    assert len(gaur._load_checkpoint(ckpt_path)) == 4
 
-    calls.clear()
+    parts.clear()
 
-    def resumed_collect_one(query: str, sqlc, gtc) -> dict:
-        calls.append(query)
-        return _stub_trace_row()
+    def resumed_get_traces(part: pd.DataFrame) -> pd.DataFrame:
+        parts.append(len(part))
+        return _stub_traces(part)
 
-    monkeypatch.setattr(gaur, "_collect_one_trace", resumed_collect_one)
+    monkeypatch.setattr(gaur, "_get_traces", resumed_get_traces)
     result = gaur._collect_and_featurize("expert", query_df)
 
     assert len(result) == len(query_df)
-    # Only the rows not covered by the checkpoint were re-collected.
-    assert len(calls) == len(query_df) - n_done
+    # Only the rows not covered by the checkpoint were collected again.
+    assert sum(parts) == 16
+    assert len(parts) == 8
     # Checkpoint is removed once the whole collection succeeds.
     assert not ckpt_path.exists()
+
+
+def test_collect_and_featurize_discards_a_checkpoint_off_the_part_boundaries(monkeypatch, tmp_path, caplog):
+    """A checkpoint whose row count is not a part boundary (stale format, different _N_PARTS) is
+    discarded, not resumed from -- the whole input is collected again instead of crashing."""
+    monkeypatch.setattr(gaur, "_trace_checkpoint_dir", lambda: tmp_path)
+    query_df = pd.DataFrame({"full_query": [f"select {i}" for i in range(20)]})  # 10 parts of 2 rows
+
+    ckpt_path = gaur._checkpoint_path("expert", query_df)
+    gaur._save_checkpoint(ckpt_path, [{"n_terminal": 0.0}] * 3)  # 3 is not a part boundary
+
+    parts: list[int] = []
+
+    def get_traces(part: pd.DataFrame) -> pd.DataFrame:
+        parts.append(len(part))
+        return _stub_traces(part)
+
+    monkeypatch.setattr(gaur, "_get_traces", get_traces)
+    with caplog.at_level("WARNING"):
+        result = gaur._collect_and_featurize("expert", query_df)
+
+    assert len(result) == len(query_df)
+    assert sum(parts) == len(query_df)  # everything collected again, not just 17 rows
+    assert "discarding an incompatible checkpoint" in caplog.text
