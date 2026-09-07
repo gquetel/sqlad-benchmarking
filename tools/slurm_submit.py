@@ -38,9 +38,7 @@ the venv the compute nodes activate.
 
 Usage:
     # See what it would do, without touching the cluster:
-    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run --once
-    # One pass then exit (e.g. from cron):
-    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --once
+    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run
     # Only the cells that have no FINISHED run, to fill in the holes left by a broken batch:
     python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --check-mlflow
     # Everything at once, ignoring the cap (the pre-queue behaviour):
@@ -474,7 +472,9 @@ def _tick(
     headroom = max_jobs - len(running)
 
     pending = {name: cells for name, cells in _outstanding(units, done).items() if name not in in_flight_names}
-    logger.info(f"{len(running)} job(s) in flight, headroom {headroom}, {len(pending)} unit(s) pending")
+    # One cell is one array task, thus one job: count cells, not units.
+    remaining = sum(len(cells) for cells in pending.values())
+    logger.info(f"{len(running)} job(s) currently running, {remaining} job(s) remaining")
 
     by_name = {unit.job_name: unit for unit in units}
     for job_name, cells in pending.items():
@@ -519,7 +519,6 @@ def submit(
     ] = True,
     max_jobs: Annotated[int, typer.Option(help="Cap on jobs in flight (queued + running) at any time.")] = 24,
     interval: Annotated[int, typer.Option(help="Seconds between checks.")] = 300,
-    once: Annotated[bool, typer.Option(help="Do a single pass and exit instead of looping.")] = False,
     count_array_tasks: Annotated[
         bool, typer.Option(help="Count each array task against the cap (off: count whole arrays as one job).")
     ] = True,
@@ -597,9 +596,6 @@ def submit(
         )
         if remaining == 0:
             logger.info("all units submitted or done.")
-            return
-        if once:
-            logger.info(f"single pass done; {remaining} unit(s) still pending.")
             return
         time.sleep(interval)
 

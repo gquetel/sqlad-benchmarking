@@ -34,7 +34,7 @@ By default, the command remains active and submits more work as cluster capacity
 
 ```bash
 # Preview the plan (what is missing + the sbatch commands) without submitting:
-python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors li --dry-run --once
+python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors li --dry-run
 
 # Submit for real:
 python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li
@@ -62,7 +62,7 @@ nohup uv run --frozen --extra cu126 python -m tools.slurm_submit \
 Preview it anywhere first (off the submit node it assumes an empty queue):
 
 ```bash
-python -m tools.slurm_submit --methods ae --extractors li,cv,sbert --dry-run --once
+python -m tools.slurm_submit --methods ae --extractors li,cv,sbert --dry-run
 ```
 
 The gradual mode keeps the number of submitted jobs below `--max-jobs` and checks for available capacity every `--interval` seconds. It reads the SLURM queue each tick, so it never submits a unit that an earlier invocation still has in flight. No separate state file is required.
