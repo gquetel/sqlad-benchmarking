@@ -6,6 +6,13 @@
 
 _sqlad_repo="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
+# A shell without BASH_SOURCE (dash, e.g. a hook whose shebang is /bin/sh) resolves the line
+# above to "/", which builds the venv in the filesystem root. Stop instead.
+if [ ! -f "${_sqlad_repo}/pyproject.toml" ]; then
+    echo "setup-env.sh: cannot locate the repository (got '${_sqlad_repo}'); source it from bash." >&2
+    return 1 2>/dev/null || exit 1
+fi
+
 # Set SQLAD_EXTRA=cpu on a machine with no GPU (the lames, CI).
 : "${SQLAD_EXTRA:=cu126}"
 

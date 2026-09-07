@@ -1,4 +1,5 @@
-#!/bin/sh
+#!/bin/bash
 # A pull can move a pinned dependency, thus refresh the venv.
 # Enable once with: git config core.hooksPath .githooks
+# bash, not sh: the script finds the repo through BASH_SOURCE.
 . ./tools/setup-env.sh
