@@ -48,9 +48,13 @@ def _fast_ae(extractor: str) -> AEDetector:
 
 def test_scaler_for_routes_per_extractor():
     """Each extractor must be paired with the scaler its feature space needs."""
-    # cv (raw counts) and the sbert/codet5 embeddings go to OCSVM/LOF unscaled;
-    # the Li and Loginov dense features are standardised.
+    # The sparse extractors go to OCSVM/LOF unscaled: StandardScaler centres its
+    # input, which makes the matrix dense and raises.
     assert isinstance(_scaler_for("cv"), FunctionTransformer)
+    assert isinstance(_scaler_for("tfidf"), FunctionTransformer)
+    assert isinstance(_scaler_for("kakisim"), FunctionTransformer)
+    # The sbert/codet5 embeddings are dense but already bounded, so they stay
+    # unscaled too; the Li and Loginov dense features are standardised.
     assert isinstance(_scaler_for("sbert"), FunctionTransformer)
     assert isinstance(_scaler_for("codet5"), FunctionTransformer)
     assert isinstance(_scaler_for("li"), StandardScaler)
@@ -64,6 +68,7 @@ def test_scaler_for_routes_per_extractor():
         "li",
         "loginov",
         "cv",
+        "kakisim",
         pytest.param("sbert", marks=pytest.mark.slow),
         pytest.param("codet5", marks=pytest.mark.slow),
     ],

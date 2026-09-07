@@ -83,6 +83,9 @@ _KEYWORD_OVERRIDES: dict[str, str] = {
 _NOISY_FOR_T: set[str] = {"Int"}
 _NOISY_FOR_E: set[str] = {"Int", "Punct", "Par"}
 
+# Per-view vocabulary cap, keeping the matrix narrow enough for the dense decision heads.
+DEFAULT_MAX_FEATURES = 200
+
 
 def _get_tag(ttype, token_val: str, next_tok=None) -> str:
     if token_val == "(" or token_val == ")":
@@ -183,16 +186,28 @@ class KakisimExtractor(BaseEstimator, TransformerMixin):
     """Sklearn transformer producing the Kakisim multi-view count matrix.
 
     ``views`` selects which of T / C / E to include (default: all three).
-    Views with more than 1000 queries are tokenised in a process pool since
-    ``sqlparse`` parsing is the dominant cost.
+    ``max_features`` caps each view's vocabulary independently, so the matrix is at
+    most ``len(views) * max_features`` columns wide. Views with more than 1000
+    queries are tokenised in a process pool since ``sqlparse`` parsing is the
+    dominant cost.
     """
 
-    def __init__(self, views: list[str] | None = None, min_df: int = 1) -> None:
+    def __init__(
+        self,
+        views: list[str] | None = None,
+        min_df: int = 1,
+        max_features: int | None = DEFAULT_MAX_FEATURES,
+    ) -> None:
         self.views = views
         self.min_df = min_df
+        self.max_features = max_features
 
     def _views_set(self) -> set[str]:
         return set(self.views) if self.views is not None else {"T", "C", "E"}
+
+    def _make_vectorizer(self) -> CountVectorizer:
+        """One vectorizer for one view; each view caps its own vocabulary."""
+        return CountVectorizer(min_df=self.min_df, max_features=self.max_features)
 
     def _to_view_strings(self, queries: list[str]) -> tuple[list[str], list[str], list[str]]:
         if len(queries) > 1000:
@@ -207,11 +222,11 @@ class KakisimExtractor(BaseEstimator, TransformerMixin):
         t_strs, c_strs, e_strs = self._to_view_strings(_as_queries(X))
         self.vectorizers_: dict[str, CountVectorizer] = {}
         if "T" in views:
-            self.vectorizers_["T"] = CountVectorizer(min_df=self.min_df).fit(t_strs)
+            self.vectorizers_["T"] = self._make_vectorizer().fit(t_strs)
         if "C" in views:
-            self.vectorizers_["C"] = CountVectorizer(min_df=self.min_df).fit(c_strs)
+            self.vectorizers_["C"] = self._make_vectorizer().fit(c_strs)
         if "E" in views:
-            self.vectorizers_["E"] = CountVectorizer(min_df=self.min_df).fit(e_strs)
+            self.vectorizers_["E"] = self._make_vectorizer().fit(e_strs)
         return self
 
     def transform(self, X) -> csr_matrix:  # noqa: N803

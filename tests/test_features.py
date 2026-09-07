@@ -12,7 +12,7 @@ import torch
 from scipy.sparse import csr_matrix, issparse
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from sqlad_benchmarking.features import EXTRACTORS, GPU_EXTRACTORS, build_extractor
+from sqlad_benchmarking.features import EXTRACTORS, GPU_EXTRACTORS, SPARSE_EXTRACTORS, build_extractor
 from sqlad_benchmarking.features.cache import CachingExtractor
 from sqlad_benchmarking.features.countvect import CountVectorizerExtractor
 from sqlad_benchmarking.features.kakisim import KakisimExtractor
@@ -74,6 +74,18 @@ def test_gpu_extractors_are_registered():
         "llm2vec",
     }
     assert GPU_EXTRACTORS <= EXTRACTORS.keys()
+
+
+def test_sparse_extractors_match_their_output():
+    """SPARSE_EXTRACTORS picks the scaler, so a wrong entry breaks OCSVM/LOF at fit time."""
+    df = _frame()
+    # The GPU extractors download large models and the GAUR modes shell out to
+    # gaur_sqld, so both are left to their own tests; all of them are dense.
+    for name in EXTRACTORS.keys() - GPU_EXTRACTORS:
+        if name.startswith("gaur-"):
+            continue
+        matrix = build_extractor(name).fit(df).transform(df)
+        assert issparse(matrix) == (name in SPARSE_EXTRACTORS), name
 
 
 def test_build_extractor_unknown_name_raises():
@@ -198,6 +210,17 @@ def test_kakisim_is_stateful_and_sparse():
     assert issparse(matrix)
     assert matrix.shape[0] == len(df)
     assert matrix.shape[1] == len(ext.get_feature_names_out())
+
+
+def test_kakisim_caps_each_view_at_200_by_default():
+    """Each view caps its own vocabulary, so the matrix cannot grow with the corpus."""
+    ext = KakisimExtractor()
+    assert ext.max_features == 200
+    tmpl = "select c from t where x = "
+    queries = [tmpl + f"c{i} and y = 'v{i}'" for i in range(300)]
+    ext.fit(queries)
+    # T and E hold token values, so they reach the cap; C holds tag names only.
+    assert {name: len(v.vocabulary_) for name, v in ext.vectorizers_.items()} == {"T": 200, "C": 6, "E": 200}
 
 
 # ----- CachingExtractor ------------------------------------------------------

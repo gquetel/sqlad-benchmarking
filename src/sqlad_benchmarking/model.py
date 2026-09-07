@@ -29,7 +29,7 @@ from sklearn.svm import OneClassSVM
 from torch import nn
 
 from sqlad_benchmarking.determinism import enable_determinism
-from sqlad_benchmarking.features import DEFAULT_EXTRACTOR, GPU_EXTRACTORS, build_extractor
+from sqlad_benchmarking.features import DEFAULT_EXTRACTOR, GPU_EXTRACTORS, SPARSE_EXTRACTORS, build_extractor
 from sqlad_benchmarking.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
 
 logger = logging.getLogger(__name__)
@@ -40,13 +40,21 @@ MethodName = Literal["ocsvm", "lof", "ae"]
 METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoencoder"}
 
 
+# Dense embeddings that are already bounded, so they need no scaler. This is a
+# different reason to skip the scaler than SPARSE_EXTRACTORS below.
+_BOUNDED_EXTRACTORS = frozenset({"sbert", "codet5"})
+
+
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    cv/tfidf/sbert/codet5 stay unscaled (cv and tfidf are sparse; the embeddings are
-    already bounded). Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
+    Sparse extractors stay unscaled: StandardScaler centres its input, which makes the
+    matrix dense and raises. The bounded embeddings stay unscaled because they need no
+    scaling. Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
     """
-    return FunctionTransformer() if extractor in ("cv", "tfidf", "sbert", "codet5") else StandardScaler()
+    if extractor in SPARSE_EXTRACTORS or extractor in _BOUNDED_EXTRACTORS:
+        return FunctionTransformer()
+    return StandardScaler()
 
 
 # ----- OCSVM -----------------------------------------------------------------

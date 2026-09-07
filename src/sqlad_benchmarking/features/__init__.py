@@ -58,6 +58,10 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
     "gaur-ruleid": functools.partial(GaurExtractor, mode="ruleid"),
 }
 
+# Extractors whose transform returns a scipy sparse matrix. Decision heads must not
+# apply a scaler that centres its input: centring makes the matrix dense.
+SPARSE_EXTRACTORS = frozenset({"cv", "tfidf", "kakisim"})
+
 GPU_EXTRACTORS = frozenset(
     {
         "sbert",
@@ -134,6 +138,7 @@ __all__ = [
     "EXTRACTORS",
     "EXTRACTOR_LABELS",
     "GPU_EXTRACTORS",
+    "SPARSE_EXTRACTORS",
     "CachingExtractor",
     "CodeBertExtractor",
     "CodeT5Extractor",
