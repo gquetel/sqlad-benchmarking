@@ -39,14 +39,14 @@ from sqlad_benchmarking.features.cache import CachingExtractor
 from sqlad_benchmarking.model import AEDetector, Detector, MethodName, build_method, load_method
 from sqlad_benchmarking.tracking import setup_mlflow
 from tools.slurm_submit import (
-    ENV_SETUP,
     REPO_ROOT,
     SUBMIT_DIR,
-    _check_venv,
+    _check_env,
     _eligible_partitions,
     _gpu_section,
     _min_vram,
     _write_manifest,
+    env_setup,
 )
 
 logger = logging.getLogger(__name__)
@@ -306,7 +306,7 @@ def _write_array_script(
 {_header(job_name, cfg, log_pattern, extra)}
 set -euo pipefail
 cd {REPO_ROOT}
-{ENV_SETUP}
+{env_setup(cfg)}
 python -m tools.benchmark run-cell \\
   --manifest {manifest} \\
   --index "$SLURM_ARRAY_TASK_ID" \\
@@ -361,9 +361,9 @@ def cluster(
     cfg = yaml.safe_load(config.read_text())
     track = not no_track
 
-    # A dry run only prints scripts; a real submit needs the shared .venv the compute nodes source.
+    # A dry run only prints scripts; a real submit needs the shared venv the compute nodes source.
     if not dry_run:
-        _check_venv()
+        _check_env(cfg)
 
     cells = enumerate_cells(DATASET, "all", methods, extractors)
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S")

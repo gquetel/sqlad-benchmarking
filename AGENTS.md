@@ -18,10 +18,11 @@ versions or regenerate the lock without explicit instruction.
 # Relevant commands
 
 * The project uses `uv` for Python package management on top of the Nix-provided interpreter.
-  * To sync the environment from the lock: `uv sync --frozen`.
+  * To sync the environment from the lock: `. tools/setup-env.sh` (`.venv-nix` under Nix, `.venv-cluster` on the cluster).
   * To add a package: `uv add <package>==<exact-version>` (then commit `uv.lock` + `requirements.txt`).
   * To regenerate the lock and the `requirements.txt` export: `invoke lock`.
-  * To run a command in the project env: `uv run <command>` (e.g. `uv run python <script>.py`).
+  * To run a command in the project env: `uv run --frozen --extra cu126 <command>` (`--extra cpu` with no GPU).
+    Always pass the extra: without it, uv replaces torch with the default build.
 * The project uses `pytest` for testing: `pytest tests/`.
 * The project uses `treefmt` + `ruff` for formatting and linting:
     * To format code: `treefmt`.
@@ -55,17 +56,19 @@ versions or regenerate the lock without explicit instruction.
   `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough
   VRAM for it, from `min_vram_gb` in the config, so e.g. CodeT5+ skips the 16 GB V100). Site
   settings live in `configs/slurm.yaml`; jobs
-  activate the uv `.venv` (built once on the login node). Each cell writes its row to `reports/{dataset}/cells/*.csv`;
+  activate the uv `.venv-cluster` (built once on the submit node; `slurm_submit` refuses to submit when it
+  no longer matches `uv.lock`). Each cell writes its row to `reports/{dataset}/cells/*.csv`;
   MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run`.
     * Submit: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li`.
 * The cluster caps in-flight jobs (~24), so `slurm_submit` drip-feeds by default: one unit per
   `(method, extractor)` whenever `squeue` shows headroom, re-checking every `--interval` seconds.
-  No state file: each tick derives *done* from the cells having a FINISHED MLflow run and *in
-  flight* from job names in `squeue`, so it is safe to kill and resume, and it resubmits cells
-  whose job crashed or was preempted. Units submit only their outstanding cells. `--no-queue`
-  submits everything at once and `--no-check-mlflow` ignores what already ran. Run it detached on
-  the submit node — see `docs/source/slurm.md`.
+  No state file: *in flight* comes from the job names in `squeue`, so it never collides with an
+  earlier invocation. Every cell is submitted **exactly once** — a crashed or preempted cell is
+  never retried, because a retry burns compute and fills MLflow with dead runs; fix the cause and
+  run the command again. `--check-mlflow` drops cells that already have a FINISHED run (looked up
+  once, at startup), which is how a rerun fills in the holes left by a broken batch. `--no-queue`
+  submits everything at once. Run it detached on the submit node — see `docs/source/slurm.md`.
 
 # Code style
 * DO NOT ADD EXCEPTIONS TO RUFF BY YOURSELF. ASK ME FIRST. 

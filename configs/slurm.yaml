@@ -45,3 +45,9 @@ long_running:
   - sbert2
   - qwen3-emb
   - llm2vec
+
+# Environment the array tasks use on the compute nodes. `tools/setup-env.sh` builds it.
+env:
+  venv: .venv-cluster
+  # Modules to load before the venv. Empty: the wheels need nothing from Lmod.
+  modules: []

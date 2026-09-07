@@ -31,7 +31,7 @@ jobs:
           nix-shell nix/ci-env.nix --run "
             set -euo pipefail
             uv lock --check
-            uv sync --frozen --extra cpu
+            SQLAD_EXTRA=cpu . ./tools/setup-env.sh
             uv run --frozen --extra cpu coverage run -m pytest tests/ --skip-slow
             uv run --frozen --extra cpu coverage report -m
           "

@@ -1,0 +1,42 @@
+# Build or refresh the project environment from uv.lock. Source this file, do not run it.
+#
+# The packages always come from uv.lock. Only the interpreter changes: nix gives one on
+# the dev machines, uv installs its own on the cluster, which has no /nix. Each source
+# gets its own directory, because one checkout is visible to both over NFS.
+
+_sqlad_repo="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+
+# Set SQLAD_EXTRA=cpu on a machine with no GPU (the lames, CI).
+: "${SQLAD_EXTRA:=cu126}"
+
+if [ -n "${IN_NIX_SHELL:-}" ]; then
+    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/.venv-nix"
+    # A downloaded interpreter does not run on NixOS.
+    export UV_PYTHON_DOWNLOADS=never
+    export UV_PYTHON_PREFERENCE=only-system
+else
+    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/.venv-cluster"
+    # A nix interpreter needs /nix, which the cluster nodes do not have.
+    export UV_PYTHON_PREFERENCE=only-managed
+
+    # On demand only: the Lmod init script fails under `set -u`.
+    if [ -n "${SQLAD_MODULES:-}" ]; then
+        case $- in *u*) _sqlad_u=1; set +u ;; *) _sqlad_u=0 ;; esac
+        if [ -f /etc/profile.d/z00_lmod.sh ]; then . /etc/profile.d/z00_lmod.sh; fi
+        module purge
+        for _sqlad_m in ${SQLAD_MODULES}; do module load "${_sqlad_m}"; done
+        if [ "${_sqlad_u}" = 1 ]; then set -u; fi
+    fi
+
+    # uv installs itself in the home directory, which a batch shell can miss.
+    if ! command -v uv >/dev/null 2>&1 && [ -f "${HOME}/.local/bin/env" ]; then
+        . "${HOME}/.local/bin/env"
+    fi
+    if ! command -v uv >/dev/null 2>&1; then
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        . "${HOME}/.local/bin/env"
+    fi
+    uv python install
+fi
+
+uv sync --frozen --extra "${SQLAD_EXTRA}"

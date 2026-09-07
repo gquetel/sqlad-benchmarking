@@ -1,0 +1,4 @@
+#!/bin/sh
+# A pull can move a pinned dependency, thus refresh the venv.
+# Enable once with: git config core.hooksPath .githooks
+. ./tools/setup-env.sh

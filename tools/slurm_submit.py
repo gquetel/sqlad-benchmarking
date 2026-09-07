@@ -12,32 +12,39 @@ of the default 12h ``gpu`` block. Resources and the environment setup come from 
 The cluster caps in-flight jobs per user (~24) and a full grid is hundreds, so by default this
 does not submit everything at once: it splits the grid into **units** (one ``(method,
 extractor)``) and every ``--interval`` seconds submits as many outstanding cells as the current
-headroom allows. There is no state file -- each tick rebuilds the picture from MLflow and the
-cluster, so it is safe to kill, resume, or run twice:
+headroom allows. **Every cell goes out exactly once.** A cell that fails is not resubmitted:
+a failure is nearly always a bug or a bad resource request, and retrying it only burns compute
+and fills the tracking server with dead runs. Fix the cause, then run the command again --
+which is also how a preempted cell gets another chance.
 
-- **done** -- the cell has a FINISHED run on the tracking server. A crashed, preempted or hung
-  task leaves its run FAILED or stuck RUNNING, so it is not done and goes out again. This also
-  makes a rerun the way to fill in the holes left by a broken batch.
-- **in flight** -- a job named like the unit's :func:`_job_name` is in ``squeue``.
+- **done** -- already submitted in this session, or (with ``--check-mlflow``) it already had a
+  FINISHED run when the command started. The lookup happens once, at startup.
+- **in flight** -- a job named like the unit's :func:`_job_name` is in ``squeue``, e.g. from an
+  earlier invocation that is still running.
 - **pending** -- everything else; submitted while headroom remains. A unit submits only its
   outstanding cells, so a partly finished one costs a partial array.
 
-``--no-check-mlflow`` skips the lookup and submits every cell once; ``--no-queue`` submits
-everything in one go, ignoring the cap.
+``--check-mlflow`` skips cells that already finished, which is how you fill in the holes left
+by a broken batch; ``--no-queue`` submits everything in one go, ignoring the cap.
 
 Run it on the submit node under ``tmux``/``nohup`` so a dropped VPN does not kill it:
 
-    nohup uv run python -m tools.slurm_submit \\
+    nohup uv run --frozen --extra cu126 python -m tools.slurm_submit \\
       --dataset superviz26 --suite all --methods ocsvm,lof,ae --extractors li,cv,sbert,codet5 \\
       > reports/slurm/queue.log 2>&1 &
 
+Always give ``uv run`` the extra: without it uv replaces the pinned CUDA build of torch in
+the venv the compute nodes activate.
+
 Usage:
-    # See what is missing and what it would do, without touching the cluster:
+    # See what it would do, without touching the cluster:
     python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run --once
     # One pass then exit (e.g. from cron):
     python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --once
-    # Everything at once, finished or not (the pre-queue behaviour):
-    python -m tools.slurm_submit --dataset superviz26 --methods ae --no-queue --no-check-mlflow
+    # Only the cells that have no FINISHED run, to fill in the holes left by a broken batch:
+    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --check-mlflow
+    # Everything at once, ignoring the cap (the pre-queue behaviour):
+    python -m tools.slurm_submit --dataset superviz26 --methods ae --no-queue
     # Full-split data is heavy; give the AE/CodeT5+ cells a 24h GPU reservation:
     python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --gpu-section gpu-long
 """
@@ -47,6 +54,7 @@ from __future__ import annotations
 import getpass
 import json
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -74,13 +82,27 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Manifests, generated job scripts and .out logs (git-ignored), relative to REPO_ROOT.
 SUBMIT_DIR = "reports/slurm"
-# Run on the compute node (after cd-ing into the repo) before each cell. The uv .venv is
-# built once on the login node (`uv sync --frozen --extra cu126`) and reused from the shared filesystem;
-# array tasks only activate it (no concurrent `uv sync`, which would race).
-ENV_SETUP = "source .venv/bin/activate"
-# The activate script every array task sources on the compute node. Checked on the submit
-# node before sbatch so a missing .venv fails once here, not silently in N array tasks.
-VENV_ACTIVATE = REPO_ROOT / ".venv" / "bin" / "activate"
+# Site environment, when configs/slurm.yaml has no `env` block.
+DEFAULT_ENV = {"venv": ".venv-cluster", "modules": []}
+# The extra the compute nodes need: they run the GPU cells.
+VENV_EXTRA = "cu126"
+
+
+def _env(cfg: dict) -> dict:
+    """Site environment settings, with the defaults filled in."""
+    return {**DEFAULT_ENV, **cfg.get("env", {})}
+
+
+def env_setup(cfg: dict) -> str:
+    """Shell lines each array task runs before its cell: the site modules, then the venv.
+
+    The venv is built once on the submit node and reused from the shared filesystem; array
+    tasks only activate it, because a concurrent `uv sync` would race on one directory.
+    """
+    env = _env(cfg)
+    lines = ["module purge", *(f"module load {m}" for m in env["modules"])] if env["modules"] else []
+    lines.append(f"source {env['venv']}/bin/activate")
+    return "\n".join(lines)
 
 
 def _needs_gpu(cell: Cell) -> bool:
@@ -167,12 +189,33 @@ def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu", gpu_qos:
     return res
 
 
-def _check_venv(activate: Path = VENV_ACTIVATE) -> None:
-    """Fail fast if the shared .venv is missing; every array task sources it on the compute node."""
+def _check_venv(activate: Path) -> None:
+    """Fail fast if the shared venv is missing; every array task sources it on the compute node."""
     if not activate.exists():
-        raise typer.BadParameter(
-            f"{activate} not found; build it on the login node with `uv sync --frozen --extra cu126` before submitting."
-        )
+        raise typer.BadParameter(f"{activate} not found; build it with `. tools/setup-env.sh` before submitting.")
+
+
+def _check_lock(venv: Path) -> None:
+    """Fail fast if the venv no longer matches uv.lock, e.g. after a pull.
+
+    Array tasks never sync, thus a stale venv makes every one of them run the old packages.
+    """
+    uv = shutil.which("uv")
+    if uv is None:
+        logger.warning(f"uv is not on PATH; cannot check that {venv.name} matches uv.lock.")
+        return
+    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
+    # Safe: shell=False, absolute uv path, fixed arguments.
+    check = subprocess.run([uv, "sync", "--frozen", "--extra", VENV_EXTRA, "--check"], env=env, capture_output=True)  # noqa: S603
+    if check.returncode != 0:
+        raise typer.BadParameter(f"{venv.name} does not match uv.lock; run `. tools/setup-env.sh` before submitting.")
+
+
+def _check_env(cfg: dict) -> None:
+    """Check the shared venv on the submit node, once, before N array tasks activate it."""
+    venv = REPO_ROOT / _env(cfg)["venv"]
+    _check_venv(venv / "bin" / "activate")
+    _check_lock(venv)
 
 
 def _write_manifest(path: Path, cells: list[Cell]) -> None:
@@ -222,7 +265,7 @@ def _write_job_script(
 {header}
 set -euo pipefail
 cd {REPO_ROOT}
-{ENV_SETUP}
+{env_setup(cfg)}
 python -m tools.slurm_run_cell \\
   --manifest {manifest} \\
   --index "$SLURM_ARRAY_TASK_ID" \\
@@ -421,20 +464,25 @@ def _squeue(user: str, count_array_tasks: bool, dry_run: bool = False) -> list[s
 def _tick(
     units: list[Unit], *, done: set[Cell], max_jobs: int, user: str, count_array_tasks: bool, **submit_kwargs
 ) -> int:
-    """Submit as many pending units as fit under ``max_jobs``. Returns the number of units left to do."""
+    """Submit as many pending units as fit under ``max_jobs``. Returns the number of units still to do.
+
+    Every cell this tick disposes of -- submitted, rejected, or too big for the cap -- is added
+    to ``done``, so the caller's loop always makes progress and no cell goes out twice.
+    """
     running = _squeue(user, count_array_tasks, dry_run=submit_kwargs["dry_run"])
     in_flight_names = set(running)
     headroom = max_jobs - len(running)
 
-    outstanding = _outstanding(units, done)
-    pending = {name: cells for name, cells in outstanding.items() if name not in in_flight_names}
+    pending = {name: cells for name, cells in _outstanding(units, done).items() if name not in in_flight_names}
     logger.info(f"{len(running)} job(s) in flight, headroom {headroom}, {len(pending)} unit(s) pending")
 
     by_name = {unit.job_name: unit for unit in units}
     for job_name, cells in pending.items():
         n = len(cells)
         if n > max_jobs:
-            logger.warning(f"skipping {job_name}: {n} cells exceeds the {max_jobs}-job cap on its own")
+            # It can never fit, thus waiting for headroom would spin forever: drop it.
+            logger.warning(f"dropping {job_name}: {n} cells exceeds the {max_jobs}-job cap on its own")
+            done.update(cells)
             continue
         if n > headroom:
             continue
@@ -446,11 +494,11 @@ def _tick(
         try:
             _submit_cells(cells, run_id=run_id, **submit_kwargs)
         except Exception as exc:  # a rejected unit must not take the whole queue down
-            logger.error(f"submit failed for {job_name}: {exc}")
-            continue
-        done.update(cells)  # so a --no-check-mlflow pass does not resubmit them next tick
+            # sbatch rejects on a bad resource request, which the next tick would hit again.
+            logger.error(f"submit failed for {job_name}, not retrying: {exc}")
+        done.update(cells)  # submitted is done: a cell goes out once, whatever becomes of it
         headroom -= n
-    return len(outstanding)
+    return len(_outstanding(units, done))
 
 
 def submit(
@@ -460,8 +508,8 @@ def submit(
     extractors: Annotated[str, typer.Option(help="Comma-separated registered feature-extractor names.")] = "li",
     config: Annotated[Path, typer.Option(help="SLURM site config.")] = Path("configs/slurm.yaml"),
     check_mlflow: Annotated[
-        bool, typer.Option(help="Skip cells that already have a FINISHED run; off submits every cell once.")
-    ] = True,
+        bool, typer.Option(help="Skip cells that already have a FINISHED run, looked up once at startup.")
+    ] = False,
     run_type: Annotated[
         str, typer.Option(help="Only count runs tagged with this run_type ('full-run', 'smoke-run', '' for any).")
     ] = "full-run",
@@ -500,14 +548,14 @@ def submit(
     cfg["register"] = register
 
     # Fail fast on the submit node: a dry run only prints scripts, but a real submit needs
-    # the shared .venv the compute nodes will source.
+    # the shared venv the compute nodes will source.
     if not dry_run:
-        _check_venv()
+        _check_env(cfg)
 
     units = _build_units(dataset, suite, methods, extractors)
     total_cells = sum(len(u.cells) for u in units)
     if check_mlflow and not setup_mlflow(dataset):
-        raise typer.BadParameter("MLFLOW_TRACKING_URI is not set; use --no-check-mlflow to submit everything.")
+        raise typer.BadParameter("MLFLOW_TRACKING_URI is not set; --check-mlflow cannot look up what finished.")
 
     submit_kwargs = dict(
         dataset=dataset,
@@ -521,8 +569,9 @@ def submit(
         limit=limit,
         dry_run=dry_run,
     )
-    # Without the MLflow check nothing ever reports back, so cells are marked done as they
-    # are submitted and each goes out exactly once.
+    # Doneness is decided once, here: the cells that already finished. From then on a cell is
+    # marked done the moment it is submitted, so each goes out exactly once and a failing one
+    # is never retried.
     done: set[Cell] = set()
     if check_mlflow:
         done = _finished_cells(dataset, run_type or None, ks)
@@ -538,8 +587,6 @@ def submit(
 
     logger.info(f"{len(units)} units / {total_cells} cells; cap {max_jobs} jobs, checking every {interval}s")
     while True:
-        if check_mlflow:
-            done = _finished_cells(dataset, run_type or None, ks)
         remaining = _tick(
             units,
             done=done,

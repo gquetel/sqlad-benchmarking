@@ -16,12 +16,13 @@ Nix is the recommended setup and the one used in CI. It provides the expected Py
 nix-shell
 ```
 
-Without Nix, the Python packages can be installed with [uv](https://docs.astral.sh/uv/) when a compatible Python interpreter is already available:
+Without Nix, for example on the SLURM cluster, the same lock file builds a second environment. `uv` installs itself and its own interpreter, so nothing else is needed:
 
 ```sh
-uv sync --frozen --extra cu126
-source .venv/bin/activate
+. tools/setup-env.sh
 ```
+
+The script builds `.venv-nix` inside `nix-shell` and `.venv-cluster` elsewhere, both from `uv.lock`. It installs the CUDA build of torch; pass `SQLAD_EXTRA=cpu` on a machine with no GPU. Run project commands with `uv run --frozen --extra cu126`, which re-syncs the environment first. Always pass the extra: without it, uv replaces torch with the default build. After a `git pull`, source the script again, or enable the hook once with `git config core.hooksPath .githooks`.
 
 `requirements.txt` provides a pip-compatible export of the locked packages for environments that do not use uv.
 

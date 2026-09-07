@@ -11,13 +11,16 @@ from sqlad_benchmarking.evaluate_suite import Cell, _validate_grid, enumerate_ce
 from sqlad_benchmarking.features import GPU_EXTRACTORS
 from tools.slurm_submit import (
     _bucket,
+    _build_units,
     _check_venv,
     _eligible_partitions,
     _gpu_section,
     _is_long_running,
     _min_vram,
     _needs_gpu,
+    _tick,
     _write_job_script,
+    env_setup,
 )
 
 _JOB_CFG = {
@@ -182,11 +185,59 @@ def test_job_script_omits_limit_when_none(tmp_path):
 
 
 def test_check_venv_raises_when_missing(tmp_path):
-    with pytest.raises(typer.BadParameter, match="uv sync"):
-        _check_venv(tmp_path / ".venv" / "bin" / "activate")
+    with pytest.raises(typer.BadParameter, match="setup-env.sh"):
+        _check_venv(tmp_path / ".venv-cluster" / "bin" / "activate")
 
 
 def test_check_venv_passes_when_present(tmp_path):
     activate = tmp_path / "activate"
     activate.touch()
     _check_venv(activate)
+
+
+def test_env_setup_activates_the_configured_venv():
+    assert env_setup({}) == "source .venv-cluster/bin/activate"
+    assert env_setup({"env": {"venv": ".venv-other"}}) == "source .venv-other/bin/activate"
+
+
+def test_env_setup_purges_then_loads_the_site_modules_in_order():
+    lines = env_setup({"env": {"modules": ["gcc/14.3.0", "cuda/12.9"]}}).splitlines()
+    assert lines == [
+        "module purge",
+        "module load gcc/14.3.0",
+        "module load cuda/12.9",
+        "source .venv-cluster/bin/activate",
+    ]
+
+
+def test_tick_submits_each_cell_once_even_when_the_job_failed(monkeypatch):
+    """A cell goes out on the first tick only: a failure must not put it back in the queue.
+
+    The queue stays empty and nothing ever finishes, which is exactly what a crashing cell
+    looks like. The second tick must find nothing left to do.
+    """
+    submitted = []
+    monkeypatch.setattr("tools.slurm_submit._squeue", lambda *a, **kw: [])
+    monkeypatch.setattr("tools.slurm_submit._submit_cells", lambda cells, **kw: submitted.append(list(cells)))
+
+    units = _build_units("superviz26", "in_domain", "ocsvm", "li")
+    done: set[Cell] = set()
+    tick = lambda: _tick(units, done=done, max_jobs=24, user="tester", count_array_tasks=True, dry_run=True)  # noqa: E731
+
+    assert tick() == 0  # the unit goes out, and nothing is left over to wait for
+    assert tick() == 0  # a second pass resubmits nothing: the failed cells are not retried
+    assert len(submitted) == 1
+    assert submitted[0] == list(units[0].cells)
+
+
+def test_tick_drops_a_unit_too_big_for_the_cap(monkeypatch):
+    """A unit larger than the whole cap can never fit, thus it is dropped instead of waited on."""
+    monkeypatch.setattr("tools.slurm_submit._squeue", lambda *a, **kw: [])
+    monkeypatch.setattr("tools.slurm_submit._submit_cells", lambda cells, **kw: pytest.fail("must not submit"))
+
+    units = _build_units("superviz26", "in_domain", "ocsvm", "li")
+    done: set[Cell] = set()
+    remaining = _tick(units, done=done, max_jobs=1, user="tester", count_array_tasks=True, dry_run=True)
+
+    assert remaining == 0
+    assert done == set(units[0].cells)

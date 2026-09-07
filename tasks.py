@@ -12,8 +12,8 @@ PROJECT_NAME = "sqlad_benchmarking"
 # Setup commands
 @task
 def sync(ctx: Context) -> None:
-    """Create/refresh the .venv from uv.lock (deps + dev group + project)."""
-    ctx.run("uv sync --frozen --extra cu126", echo=True, pty=not NO_PTY)
+    """Create/refresh the venv from uv.lock (deps + dev group + project)."""
+    ctx.run("bash -c '. ./tools/setup-env.sh'", echo=True, pty=not NO_PTY)
 
 
 @task

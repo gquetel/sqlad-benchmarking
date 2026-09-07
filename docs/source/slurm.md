@@ -12,7 +12,21 @@ SLURM is optional: all methods can be trained and evaluated on any compatible ma
 
 Each array task runs one cell through `evaluate_suite` and writes its **own** per-cell CSV to `reports/{dataset}/cells/{method}_{extractor}_{scenario}.csv` — so the parallel jobs never share a writer and a rerun simply overwrites its own file.
 
-Cluster-specific settings, including partitions, memory limits, and time limits, live in [`configs/slurm.yaml`](https://github.com/gquetel/sqlad-benchmarking/blob/main/configs/slurm.yaml). Adapt this file before using the tool on another cluster. Jobs use the uv `.venv` created on the shared filesystem with `uv sync --frozen`.
+Cluster-specific settings, including partitions, memory limits, and time limits, live in [`configs/slurm.yaml`](https://github.com/gquetel/sqlad-benchmarking/blob/main/configs/slurm.yaml). Adapt this file before using the tool on another cluster. Its `env` block names the venv the array tasks activate, and the modules to load first.
+
+## Cluster environment
+
+The cluster has no Nix, and no module supplies Python 3.14. Thus `uv` installs itself and its own interpreter, both in your home directory, and builds the venv from the same `uv.lock` as the dev machine:
+
+```sh
+. tools/setup-env.sh   # -> .venv-cluster
+```
+
+Run this once on the submit node. The home directory is shared, so every node sees the result. No module is needed: the wheels find the system libraries, and torch carries its own CUDA runtime. If a node ever lacks one, list it in `env.modules` (or in `SQLAD_MODULES`), and the job scripts load it after `module purge`.
+
+The CUDA build stays pinned to `cu126` because the V100 partitions are Volta (compute capability 7.0), which newer CUDA versions drop. The same build also runs on the A100 partitions, which keeps every cell of a table on one stack.
+
+Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. `slurm_submit` therefore checks on the submit node that the venv matches `uv.lock`, and refuses to submit when it does not. Re-run the script after every `git pull`, or enable the hook once with `git config core.hooksPath .githooks`.
 
 ## Submitting
 
@@ -25,8 +39,8 @@ python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --ext
 # Submit for real:
 python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li
 
-# Submit everything at once and ignore previous MLflow runs:
-python -m tools.slurm_submit --dataset superviz26 --methods ae --extractors li --no-queue --no-check-mlflow
+# Submit everything at once, ignoring the in-flight cap:
+python -m tools.slurm_submit --dataset superviz26 --methods ae --extractors li --no-queue
 
 # Smoke run: cap each cell to a label-stratified subset (passed through to evaluate_suite):
 python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors sbert --limit 50000
@@ -39,7 +53,7 @@ Manifests, generated job scripts, and `.out` logs are written under `reports/slu
 Run it on the submit node, detached, so a dropped VPN does not kill it:
 
 ```bash
-nohup uv run python -m tools.slurm_submit \
+nohup uv run --frozen --extra cu126 python -m tools.slurm_submit \
   --dataset superviz26 --suite all --methods ae \
   --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb,llm2vec \
   --max-jobs 24 --interval 300 > reports/slurm/queue.log 2>&1 &
@@ -51,13 +65,15 @@ Preview it anywhere first (off the submit node it assumes an empty queue):
 python -m tools.slurm_submit --methods ae --extractors li,cv,sbert --dry-run --once
 ```
 
-The gradual mode keeps the number of submitted jobs below `--max-jobs` and checks for available capacity every `--interval` seconds. Before submitting work, it checks MLflow for completed runs and the SLURM queue for active jobs. Restarting the command therefore skips completed experiments and makes interrupted experiments eligible to run again. No separate state file is required.
+The gradual mode keeps the number of submitted jobs below `--max-jobs` and checks for available capacity every `--interval` seconds. It reads the SLURM queue each tick, so it never submits a unit that an earlier invocation still has in flight. No separate state file is required.
+
+**Each cell is submitted exactly once.** A cell that fails is not resubmitted: a failure is nearly always a bug or a wrong resource request, and a retry only burns compute and fills the tracking server with dead runs. Read the log under `reports/slurm/<run-id>/logs/`, fix the cause, then run the command again.
 
 Pass `--no-queue` to submit all selected experiments at once.
 
-`--no-check-mlflow` skips the lookup and submits every cell once — for a fresh grid, or when the tracking server is unreachable.
+`--check-mlflow` looks up, once at startup, which cells already have a FINISHED run and drops them. That is how a rerun fills in the holes left by a broken batch, instead of repeating the whole grid.
 
-**Preemptible GPU jobs.** GPU jobs use `--gpu-qos runfill` by default. If the cluster preempts one of these jobs, gradual submission makes it eligible to run again. Pass `--gpu-qos ""` to use the cluster's default QoS.
+**Preemptible GPU jobs.** GPU jobs use `--gpu-qos runfill` by default, so the cluster can kill one when someone else claims the GPU. A preempted cell is not resubmitted either; run the command again with `--check-mlflow` to pick up what it left behind. Pass `--gpu-qos ""` to use the cluster's default QoS.
 
 **Counting mode.** `--max-jobs` counts **array tasks** by default (`squeue -r`) — correct when the cap is on *submitted* jobs. If your cap is on *concurrently running* jobs, pass `--no-count-array-tasks`, or drop the queue entirely and throttle natively with `--array=0-N%24`. Check which you have: `sacctmgr show assoc user=$USER format=maxsubmit,maxjobs`.
 

@@ -47,16 +47,13 @@ pkgs.mkShell {
     # Use the Nix chromium; else kaleido grabs its own broken downloaded chrome.
     export BROWSER_PATH=${pkgs.chromium}/bin/chromium
 
-    # uv must use the Nix-provided interpreter, never download its own.
-    export UV_PYTHON_DOWNLOADS=never
-    export UV_PYTHON_PREFERENCE=only-system
-
-    # Build/refresh .venv from uv.lock
-    uv sync --frozen --extra cu126
+    # Build/refresh .venv-nix from uv.lock. The script also points uv at the Nix
+    # interpreter. The cluster sources the same script and gets .venv-cluster.
+    . ./tools/setup-env.sh
 
     # Activate the venv via PATH so it survives into the interactive shell,
     # whatever it is (bash, or a fish that the user's .bashrc exec-s).
-    export VIRTUAL_ENV="$PWD/.venv"
+    export VIRTUAL_ENV="$PWD/.venv-nix"
     export PATH="$VIRTUAL_ENV/bin:$PATH"
   '';
 }
