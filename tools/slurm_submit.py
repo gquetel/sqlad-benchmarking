@@ -29,15 +29,15 @@ by a broken batch; ``--no-queue`` submits everything in one go, ignoring the cap
 
 Run it on the submit node under ``tmux``/``nohup`` so a dropped VPN does not kill it:
 
-    nohup uv run --frozen --extra cu126 python -m tools.slurm_submit \\
+    nohup .venv-cluster/bin/python -m tools.slurm_submit \\
       --dataset superviz26 --suite all --methods ocsvm,lof,ae --extractors li,cv,sbert,codet5 \\
       > reports/slurm/queue.log 2>&1 &
 
-The environment the array tasks get does not come from that command. ``uv run`` here targets
-uv's default ``.venv``; the compute nodes activate ``env.venv`` from the config, a different
-directory. :func:`_ensure_env` owns it, and syncs it from ``uv.lock`` with the CUDA extra
-whenever it is missing, stale, or built for the wrong GPU architecture -- so the submitted
-jobs are right whatever shell submitted them.
+Run it from the venv the array tasks activate, not through ``uv run``: ``uv run`` targets uv's
+default ``.venv``, a different directory, so its ``--extra`` says nothing about what the nodes
+get and omitting it only churns ``.venv``. Whatever the caller's shell, :func:`_ensure_env`
+syncs ``env.venv`` from ``uv.lock`` with the CUDA extra when it is missing, stale, or built for
+the wrong GPU architecture, so the submitted jobs are right either way.
 
 Usage:
     # See what it would do, without touching the cluster:

@@ -28,14 +28,13 @@ The CUDA build stays pinned to `cu126` because the V100 partitions are Volta (co
 
 Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. So `slurm_submit` syncs it itself, at startup, when it is missing, does not match `uv.lock`, or its torch lacks kernels for a GPU partition the cells can land on (`gpu_arch` in `configs/slurm.yaml` lists each partition's architecture). Such a wheel otherwise reaches the node and dies there with `CUDA error: no kernel image is available for execution on the device` — once per cell, after the array is queued.
 
-Note that the extra you give the submit command does not decide what the nodes get:
+Run the submitter from that venv directly, not through `uv run`:
 
 ```sh
-uv run --frozen --extra cu126 python -m tools.slurm_submit ...   # this configures .venv
-source .venv-cluster/bin/activate                                # this is what the jobs run
+.venv-cluster/bin/python -m tools.slurm_submit ...
 ```
 
-`uv run` targets uv's default `.venv` unless `UV_PROJECT_ENVIRONMENT` points elsewhere, which only `setup-env.sh` does, and only in the shell that sourced it. `slurm_submit` closes that gap, so submitting from a plain shell is fine.
+`uv run` targets uv's default `.venv` unless `UV_PROJECT_ENVIRONMENT` points elsewhere, which only `setup-env.sh` does, and only in the shell that sourced it. So the extra you give `uv run` configures `.venv` and says nothing about what the nodes get, while `uv run` without the extra spends minutes replacing the pinned torch in `.venv` for nothing. `.venv-cluster` also runs on uv's own interpreter, so it needs no `nix-shell`, unlike a `.venv` built on a dev machine.
 
 ## Submitting
 
@@ -62,7 +61,7 @@ Manifests, generated job scripts, and `.out` logs are written under `reports/slu
 Run it on the submit node, detached, so a dropped VPN does not kill it:
 
 ```bash
-nohup uv run --frozen --extra cu126 python -m tools.slurm_submit \
+nohup .venv-cluster/bin/python -m tools.slurm_submit \
   --dataset superviz26 --suite all --methods ae \
   --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb,llm2vec \
   --max-jobs 24 --interval 300 > reports/slurm/queue.log 2>&1 &
