@@ -33,8 +33,11 @@ Run it on the submit node under ``tmux``/``nohup`` so a dropped VPN does not kil
       --dataset superviz26 --suite all --methods ocsvm,lof,ae --extractors li,cv,sbert,codet5 \\
       > reports/slurm/queue.log 2>&1 &
 
-Always give ``uv run`` the extra: without it uv replaces the pinned CUDA build of torch in
-the venv the compute nodes activate.
+The environment the array tasks get does not come from that command. ``uv run`` here targets
+uv's default ``.venv``; the compute nodes activate ``env.venv`` from the config, a different
+directory. :func:`_ensure_env` owns it, and syncs it from ``uv.lock`` with the CUDA extra
+whenever it is missing, stale, or built for the wrong GPU architecture -- so the submitted
+jobs are right whatever shell submitted them.
 
 Usage:
     # See what it would do, without touching the cluster:
@@ -94,8 +97,9 @@ def _env(cfg: dict) -> dict:
 def env_setup(cfg: dict) -> str:
     """Shell lines each array task runs before its cell: the site modules, then the venv.
 
-    The venv is built once on the submit node and reused from the shared filesystem; array
-    tasks only activate it, because a concurrent `uv sync` would race on one directory.
+    The venv is synced once on the submit node (see :func:`_ensure_env`) and reused from the
+    shared filesystem; array tasks only activate it, because a concurrent `uv sync` would
+    race on one directory.
     """
     env = _env(cfg)
     lines = ["module purge", *(f"module load {m}" for m in env["modules"])] if env["modules"] else []
@@ -187,26 +191,12 @@ def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu", gpu_qos:
     return res
 
 
-def _check_venv(activate: Path) -> None:
-    """Fail fast if the shared venv is missing; every array task sources it on the compute node."""
-    if not activate.exists():
-        raise typer.BadParameter(f"{activate} not found; build it with `. tools/setup-env.sh` before submitting.")
-
-
-def _check_lock(venv: Path) -> None:
-    """Fail fast if the venv no longer matches uv.lock, e.g. after a pull.
-
-    Array tasks never sync, thus a stale venv makes every one of them run the old packages.
-    """
+def _uv() -> str:
+    """Absolute path to uv, which owns the cluster venv."""
     uv = shutil.which("uv")
     if uv is None:
-        logger.warning(f"uv is not on PATH; cannot check that {venv.name} matches uv.lock.")
-        return
-    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
-    # Safe: shell=False, absolute uv path, fixed arguments.
-    check = subprocess.run([uv, "sync", "--frozen", "--extra", VENV_EXTRA, "--check"], env=env, capture_output=True)  # noqa: S603
-    if check.returncode != 0:
-        raise typer.BadParameter(f"{venv.name} does not match uv.lock; run `. tools/setup-env.sh` before submitting.")
+        raise typer.BadParameter("uv is not on PATH; it builds the venv the array tasks activate.")
+    return uv
 
 
 def _torch_arch_flags(venv: Path) -> set[str]:
@@ -243,33 +233,66 @@ def _target_arches(cells: list[Cell], cfg: dict, gpu_section: str) -> dict[str, 
     return targets
 
 
-def _check_gpu_arch(venv: Path, targets: dict[str, str]) -> None:
-    """Fail fast when the venv's torch has no kernels for a partition the grid can land on.
+def _lock_matches(venv: Path) -> bool:
+    """Whether ``venv`` holds exactly the packages uv.lock pins for the CUDA extra."""
+    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
+    # Safe: shell=False, absolute uv path, fixed arguments.
+    check = subprocess.run([_uv(), "sync", "--frozen", "--extra", VENV_EXTRA, "--check"], env=env, capture_output=True)  # noqa: S603
+    return check.returncode == 0
 
-    Without this the mismatch surfaces only on the compute node, as a CUDA "no kernel
-    image is available for execution on the device" once the model reaches the GPU --
-    after the array is queued, and once per cell.
-    """
-    if not targets:
-        return
+
+def _venv_faults(venv: Path, targets: dict[str, str]) -> list[str]:
+    """Reasons the array tasks cannot use ``venv``, empty when it is good to submit against."""
+    if not (venv / "bin" / "activate").exists():
+        return ["missing"]
+    faults = []
+    if not _lock_matches(venv):
+        faults.append("does not match uv.lock")
     have = _torch_arch_flags(venv)
-    missing = sorted(f"{p} ({a})" for p, a in targets.items() if a not in have)
-    if not missing:
-        return
-    built_for = " ".join(sorted(have)) or "no GPU architecture (a cpu-only torch)"
-    raise typer.BadParameter(
-        f"{venv.name} has torch built for {built_for}, which cannot run on {', '.join(missing)}. "
-        f"Rebuild it with `SQLAD_EXTRA={VENV_EXTRA} . tools/setup-env.sh`, or drop those partitions "
-        f"from configs/slurm.yaml."
-    )
+    missing = sorted(a for p, a in targets.items() if a not in have)
+    if missing:
+        faults.append(f"torch has no {', '.join(dict.fromkeys(missing))} kernels")
+    return faults
 
 
-def _check_env(cfg: dict, cells: list[Cell], gpu_section: str) -> None:
-    """Check the shared venv on the submit node, once, before N array tasks activate it."""
+def _sync_venv(venv: Path) -> None:
+    """Rebuild ``venv`` from uv.lock with the CUDA extra the compute nodes need.
+
+    The interpreter preference is left to the environment, as `tools/setup-env.sh` sets it:
+    the cluster nodes have no /nix, the dev machines have nothing else.
+    """
+    logger.info(f"syncing {venv.name} (--extra {VENV_EXTRA})")
+    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
+    # Safe: shell=False, absolute uv path, fixed arguments.
+    sync = subprocess.run([_uv(), "sync", "--frozen", "--extra", VENV_EXTRA], env=env, capture_output=True, text=True)  # noqa: S603
+    if sync.returncode != 0:
+        raise typer.BadParameter(f"could not sync {venv.name}: {sync.stderr.strip()}")
+
+
+def _ensure_env(cfg: dict, cells: list[Cell], gpu_section: str, user: str) -> None:
+    """Bring the shared venv up to date, once, before N array tasks activate it.
+
+    The array tasks activate this venv and never sync, and the shell that submits is not
+    the one that built it -- ``uv run`` in this repo targets uv's default ``.venv`` unless
+    ``UV_PROJECT_ENVIRONMENT`` is exported, so the extra passed to the submit command says
+    nothing about what the nodes get. Syncing here makes the submitted jobs right whatever
+    the caller's shell looked like.
+    """
     venv = REPO_ROOT / _env(cfg)["venv"]
-    _check_venv(venv / "bin" / "activate")
-    _check_lock(venv)
-    _check_gpu_arch(venv, _target_arches(cells, cfg, gpu_section))
+    targets = _target_arches(cells, cfg, gpu_section)
+    faults = _venv_faults(venv, targets)
+    if not faults:
+        return
+    logger.info(f"{venv.name}: {'; '.join(faults)}")
+    # Rewriting the directory under a task that is activating it breaks that task.
+    if _squeue(user, count_array_tasks=False):
+        raise typer.BadParameter(
+            f"{venv.name} needs a sync but jobs are in flight; wait for them or scancel, then rerun."
+        )
+    _sync_venv(venv)
+    faults = _venv_faults(venv, targets)
+    if faults:
+        raise typer.BadParameter(f"{venv.name} still wrong after a sync: {'; '.join(faults)}.")
 
 
 def _write_manifest(path: Path, cells: list[Cell]) -> None:
@@ -605,11 +628,10 @@ def submit(
     units = _build_units(dataset, suite, methods, extractors)
     total_cells = sum(len(u.cells) for u in units)
 
-    # Fail fast on the submit node: a dry run only prints scripts, but a real submit needs
-    # the shared venv the compute nodes will source, and it must fit the GPUs these cells
-    # can land on.
+    # A dry run only prints scripts; a real submit needs the shared venv the compute nodes
+    # will source to match uv.lock and to fit the GPUs these cells can land on.
     if not dry_run:
-        _check_env(cfg, [cell for unit in units for cell in unit.cells], gpu_section)
+        _ensure_env(cfg, [cell for unit in units for cell in unit.cells], gpu_section, getpass.getuser())
     if check_mlflow and not setup_mlflow(dataset):
         raise typer.BadParameter("MLFLOW_TRACKING_URI is not set; --check-mlflow cannot look up what finished.")
 

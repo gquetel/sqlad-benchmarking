@@ -26,12 +26,16 @@ Run this once on the submit node. The home directory is shared, so every node se
 
 The CUDA build stays pinned to `cu126` because the V100 partitions are Volta (compute capability 7.0), which newer CUDA versions drop. The same build also runs on the A100 partitions, which keeps every cell of a table on one stack.
 
-Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. `slurm_submit` therefore checks the venv on the submit node, and refuses to submit when either check fails:
+Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. So `slurm_submit` syncs it itself, at startup, when it is missing, does not match `uv.lock`, or its torch lacks kernels for a GPU partition the cells can land on (`gpu_arch` in `configs/slurm.yaml` lists each partition's architecture). Such a wheel otherwise reaches the node and dies there with `CUDA error: no kernel image is available for execution on the device` — once per cell, after the array is queued. A sync is refused while you have jobs in flight; wait for them or `scancel`, then re-run.
 
-- it matches `uv.lock`;
-- its torch carries kernels for every GPU partition the cells can land on, listed per partition under `gpu_arch` in `configs/slurm.yaml`. A wheel built without one, which is what a `uv` command that omits `--extra cu126` installs, otherwise reaches the node and dies there with `CUDA error: no kernel image is available for execution on the device` — once per cell, after the array is already queued.
+Note that the extra you give the submit command does not decide what the nodes get:
 
-Re-run the script after every `git pull`, or enable the hook once with `git config core.hooksPath .githooks`. Always pass `--extra cu126` to `uv run` in this checkout: without it `uv` replaces the pinned torch in the venv the compute nodes activate.
+```sh
+uv run --frozen --extra cu126 python -m tools.slurm_submit ...   # this configures .venv
+source .venv-cluster/bin/activate                                # this is what the jobs run
+```
+
+`uv run` targets uv's default `.venv` unless `UV_PROJECT_ENVIRONMENT` points elsewhere, which only `setup-env.sh` does, and only in the shell that sourced it. `slurm_submit` closes that gap, so submitting from a plain shell is fine.
 
 ## Submitting
 

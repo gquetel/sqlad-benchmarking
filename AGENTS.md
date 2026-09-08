@@ -56,10 +56,12 @@ versions or regenerate the lock without explicit instruction.
   `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough
   VRAM for it, from `min_vram_gb` in the config, so e.g. CodeT5+ skips the 16 GB V100). Site
   settings live in `configs/slurm.yaml`; jobs
-  activate the uv `.venv-cluster` (built once on the submit node). `slurm_submit` refuses to submit
-  when that venv no longer matches `uv.lock`, or when its torch has no kernels for a GPU partition
-  the cells can land on (`gpu_arch` in `configs/slurm.yaml` names each partition's architecture) --
-  a `uv` command that omits `--extra cu126` installs such a wheel, and it fails only on the node.
+  activate the uv `.venv-cluster`, which `slurm_submit` owns: it syncs that venv from `uv.lock`
+  with `--extra cu126` whenever it is missing, stale, or built without kernels for a GPU partition
+  the cells can land on (`gpu_arch` in `configs/slurm.yaml` names each partition's architecture).
+  The extra you pass to the submit command does **not** decide this -- `uv run` targets uv's
+  default `.venv` unless `UV_PROJECT_ENVIRONMENT` is exported, which only `setup-env.sh` does.
+  A sync is refused while jobs are in flight, because they activate that same directory.
   Each cell writes its row to `reports/{dataset}/cells/*.csv` and its log to
   `reports/{dataset}/logs/*.log`; MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run`.
