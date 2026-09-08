@@ -56,9 +56,12 @@ versions or regenerate the lock without explicit instruction.
   `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough
   VRAM for it, from `min_vram_gb` in the config, so e.g. CodeT5+ skips the 16 GB V100). Site
   settings live in `configs/slurm.yaml`; jobs
-  activate the uv `.venv-cluster` (built once on the submit node; `slurm_submit` refuses to submit when it
-  no longer matches `uv.lock`). Each cell writes its row to `reports/{dataset}/cells/*.csv`;
-  MLflow is the canonical store.
+  activate the uv `.venv-cluster` (built once on the submit node). `slurm_submit` refuses to submit
+  when that venv no longer matches `uv.lock`, or when its torch has no kernels for a GPU partition
+  the cells can land on (`gpu_arch` in `configs/slurm.yaml` names each partition's architecture) --
+  a `uv` command that omits `--extra cu126` installs such a wheel, and it fails only on the node.
+  Each cell writes its row to `reports/{dataset}/cells/*.csv` and its log to
+  `reports/{dataset}/logs/*.log`; MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run`.
     * Submit: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li`.
 * The cluster caps in-flight jobs (~24), so `slurm_submit` drip-feeds by default: one unit per
@@ -90,6 +93,18 @@ versions or regenerate the lock without explicit instruction.
 # Experiment tracking
 
 * `evaluate_suite` logs params, metrics, the per-epoch AE training loss, and the fitted model artifact to MLflow when `MLFLOW_TRACKING_URI` is set (opt out with `--no-track`). Configuration is environment-driven via `.env` (see  `.env.example`).
+* All three protocols log the same way. `tracking.capture_cell_log` tees a cell's log to
+  `reports/{dataset}/logs/{stem}.log` and `CellLog.upload` attaches it to the run, in a `finally`
+  so a failed cell still carries its traceback. The drift and few-shot evaluators use it too:
+  never add a protocol that leaves its diagnostics only in the SLURM array log, which no run
+  points to. A few-shot sweep opens one run per `k`, so its log lands on each of them, and on the
+  parent when the sweep fails before the first `k`.
+* `visualize.plot_curves` writes a cell's curve points and figures together, and the figures are
+  best-effort: rendering needs a headless browser that a compute node does not always give us, so
+  a failure there is logged and the cell keeps its metrics and its CSV points. `slurm_run_cell`
+  wraps the whole cell in `visualize.image_export`, which holds one browser open for the process:
+  starting one later, from a process already holding the embeddings and the test sets, is what
+  makes it die on the node.
 
 # Documentation
 

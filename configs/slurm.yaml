@@ -31,6 +31,16 @@ gpu-long:
     V100-32GB: 32
     V100-16GB: 16
 
+# CUDA architecture of the cards in each GPU partition. `slurm_submit` refuses to submit
+# a GPU array unless the venv's torch carries kernels for every partition the cells can
+# land on: a wheel built without one only fails once the job is on the node.
+gpu_arch:
+  A100: sm_80
+  A40: sm_86
+  A30: sm_80
+  V100-32GB: sm_70
+  V100-16GB: sm_70
+
 # Minimum per-GPU VRAM per cell, keyed by extractor or engine:extractor (the latter wins)
 min_vram_gb:
   default: 0

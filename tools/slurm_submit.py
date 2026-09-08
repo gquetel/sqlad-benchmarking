@@ -209,11 +209,67 @@ def _check_lock(venv: Path) -> None:
         raise typer.BadParameter(f"{venv.name} does not match uv.lock; run `. tools/setup-env.sh` before submitting.")
 
 
-def _check_env(cfg: dict) -> None:
+def _torch_arch_flags(venv: Path) -> set[str]:
+    """CUDA architectures (``sm_XX``) the venv's torch carries kernels for.
+
+    Reads the flags compiled into the wheel rather than ``torch.cuda.get_arch_list``,
+    which returns nothing on a submit node with no GPU driver. An empty set means a
+    torch that cannot use a GPU at all, e.g. the cpu extra.
+    """
+    python = venv / "bin" / "python"
+    if not python.exists():
+        return set()
+    code = "import torch; print(torch._C._cuda_getArchFlags() or '')"
+    # Safe: shell=False, path from the config, fixed arguments.
+    probe = subprocess.run([str(python), "-c", code], capture_output=True, text=True)  # noqa: S603
+    if probe.returncode != 0:
+        return set()
+    return set(probe.stdout.split())
+
+
+def _target_arches(cells: list[Cell], cfg: dict, gpu_section: str) -> dict[str, str]:
+    """Map every GPU partition these cells can be scheduled on to its CUDA architecture."""
+    declared = cfg.get("gpu_arch", {})
+    targets: dict[str, str] = {}
+    for cell in cells:
+        if not _needs_gpu(cell):
+            continue
+        section = cfg[_gpu_section(cell, cfg, gpu_section)]
+        for partition in _eligible_partitions(section, _min_vram(cell, cfg)):
+            if partition in declared:
+                targets[partition] = declared[partition]
+            else:
+                logger.warning(f"partition {partition} has no gpu_arch entry; not checking the venv against it.")
+    return targets
+
+
+def _check_gpu_arch(venv: Path, targets: dict[str, str]) -> None:
+    """Fail fast when the venv's torch has no kernels for a partition the grid can land on.
+
+    Without this the mismatch surfaces only on the compute node, as a CUDA "no kernel
+    image is available for execution on the device" once the model reaches the GPU --
+    after the array is queued, and once per cell.
+    """
+    if not targets:
+        return
+    have = _torch_arch_flags(venv)
+    missing = sorted(f"{p} ({a})" for p, a in targets.items() if a not in have)
+    if not missing:
+        return
+    built_for = " ".join(sorted(have)) or "no GPU architecture (a cpu-only torch)"
+    raise typer.BadParameter(
+        f"{venv.name} has torch built for {built_for}, which cannot run on {', '.join(missing)}. "
+        f"Rebuild it with `SQLAD_EXTRA={VENV_EXTRA} . tools/setup-env.sh`, or drop those partitions "
+        f"from configs/slurm.yaml."
+    )
+
+
+def _check_env(cfg: dict, cells: list[Cell], gpu_section: str) -> None:
     """Check the shared venv on the submit node, once, before N array tasks activate it."""
     venv = REPO_ROOT / _env(cfg)["venv"]
     _check_venv(venv / "bin" / "activate")
     _check_lock(venv)
+    _check_gpu_arch(venv, _target_arches(cells, cfg, gpu_section))
 
 
 def _write_manifest(path: Path, cells: list[Cell]) -> None:
@@ -546,13 +602,14 @@ def submit(
     cfg = yaml.safe_load(config.read_text())
     cfg["register"] = register
 
-    # Fail fast on the submit node: a dry run only prints scripts, but a real submit needs
-    # the shared venv the compute nodes will source.
-    if not dry_run:
-        _check_env(cfg)
-
     units = _build_units(dataset, suite, methods, extractors)
     total_cells = sum(len(u.cells) for u in units)
+
+    # Fail fast on the submit node: a dry run only prints scripts, but a real submit needs
+    # the shared venv the compute nodes will source, and it must fit the GPUs these cells
+    # can land on.
+    if not dry_run:
+        _check_env(cfg, [cell for unit in units for cell in unit.cells], gpu_section)
     if check_mlflow and not setup_mlflow(dataset):
         raise typer.BadParameter("MLFLOW_TRACKING_URI is not set; --check-mlflow cannot look up what finished.")
 

@@ -10,7 +10,7 @@ SLURM is optional: all methods can be trained and evaluated on any compatible ma
 - **GPU** for autoencoders and embedding-based extractors. Models with higher memory needs are
   limited to suitable GPUs.
 
-Each array task runs one cell through `evaluate_suite` and writes its **own** per-cell CSV to `reports/{dataset}/cells/{method}_{extractor}_{scenario}.csv` — so the parallel jobs never share a writer and a rerun simply overwrites its own file.
+Each array task runs one cell through `evaluate_suite` and writes its **own** per-cell CSV to `reports/{dataset}/cells/{method}_{extractor}_{scenario}.csv` — so the parallel jobs never share a writer and a rerun simply overwrites its own file. It also writes that cell's log to `reports/{dataset}/logs/{stem}.log` and uploads it to the cell's MLflow run, so a failure is readable from the run itself rather than only from the array's `.log` on the submit node.
 
 Cluster-specific settings, including partitions, memory limits, and time limits, live in [`configs/slurm.yaml`](https://github.com/gquetel/sqlad-benchmarking/blob/main/configs/slurm.yaml). Adapt this file before using the tool on another cluster. Its `env` block names the venv the array tasks activate, and the modules to load first.
 
@@ -26,7 +26,12 @@ Run this once on the submit node. The home directory is shared, so every node se
 
 The CUDA build stays pinned to `cu126` because the V100 partitions are Volta (compute capability 7.0), which newer CUDA versions drop. The same build also runs on the A100 partitions, which keeps every cell of a table on one stack.
 
-Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. `slurm_submit` therefore checks on the submit node that the venv matches `uv.lock`, and refuses to submit when it does not. Re-run the script after every `git pull`, or enable the hook once with `git config core.hooksPath .githooks`.
+Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. `slurm_submit` therefore checks the venv on the submit node, and refuses to submit when either check fails:
+
+- it matches `uv.lock`;
+- its torch carries kernels for every GPU partition the cells can land on, listed per partition under `gpu_arch` in `configs/slurm.yaml`. A wheel built without one, which is what a `uv` command that omits `--extra cu126` installs, otherwise reaches the node and dies there with `CUDA error: no kernel image is available for execution on the device` — once per cell, after the array is already queued.
+
+Re-run the script after every `git pull`, or enable the hook once with `git config core.hooksPath .githooks`. Always pass `--extra cu126` to `uv run` in this checkout: without it `uv` replaces the pinned torch in the venv the compute nodes activate.
 
 ## Submitting
 

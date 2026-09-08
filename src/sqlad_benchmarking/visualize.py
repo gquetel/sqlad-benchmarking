@@ -7,9 +7,12 @@ PNG and PDF (via plotly + kaleido); the PNG is uploaded as an MLflow artifact.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+import kaleido
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,6 +20,8 @@ from sklearn.metrics import auc, precision_recall_curve, roc_curve
 
 from sqlad_benchmarking.features import EXTRACTOR_LABELS
 from sqlad_benchmarking.model import METHOD_LABELS
+
+logger = logging.getLogger(__name__)
 
 # Disable log clutter because of kaleido
 for _name in ("kaleido", "choreographer", "logistro", "browser_proc"):
@@ -76,6 +81,55 @@ def plot_pr_curve(labels: np.ndarray, scores: np.ndarray, name: str, out_path: P
         )
     )
     return _export(fig, out_path, "Precision-Recall curve", "Recall", "Precision")
+
+
+@contextmanager
+def image_export() -> Iterator[None]:
+    """Hold one headless browser open for every figure written inside the block.
+
+    ``write_image`` starts a browser and tears it down again for each figure. On a
+    batch node that browser is launched from a process already holding the cell's
+    embeddings and test sets, and it dies on startup; opening it once, before the
+    data is loaded, keeps it out of that peak. Without it the figures still render,
+    one browser at a time.
+    """
+    try:
+        kaleido.start_sync_server(silence_warnings=True)
+    except Exception as exc:
+        logger.warning(f"Could not start the shared image-export browser ({exc}); rendering one at a time.")
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            kaleido.stop_sync_server(silence_warnings=True)
+        except Exception as exc:
+            logger.warning(f"Could not stop the shared image-export browser ({exc}).")
+
+
+def curve_artifact_dir(path: Path) -> str:
+    """MLflow artifact sub-directory a file written by :func:`plot_curves` belongs in."""
+    if path.suffix == ".csv":
+        return "curve_data"
+    return "roc_curves" if "_roc" in path.name else "pr_curves"
+
+
+def plot_curves(labels: np.ndarray, scores: np.ndarray, name: str, out_dir: Path, stem: str) -> list[Path]:
+    """Write one cell's raw curve points and its ROC/PR figures; return what reached disk.
+
+    The CSV points come first and need nothing but the filesystem. The figures need a
+    headless browser, which a batch node does not always give us, so a failure there is
+    logged and costs the pictures only: the points still allow an offline re-plot, and
+    the cell keeps its metrics.
+    """
+    written = list(dump_curve_points(labels, scores, out_dir, stem))
+    try:
+        written.append(plot_roc_curve(labels, scores, name, out_dir / f"{stem}_roc.png"))
+        written.append(plot_pr_curve(labels, scores, name, out_dir / f"{stem}_auprc.png"))
+    except Exception as exc:
+        logger.warning(f"Could not render the {stem} curves ({type(exc).__name__}: {exc}); keeping the CSV points.")
+    return written
 
 
 @dataclass(frozen=True)

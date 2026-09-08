@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import mlflow
@@ -19,6 +21,10 @@ from mlflow.data.meta_dataset import MetaDataset
 from mlflow.tracking import MlflowClient
 
 logger = logging.getLogger(__name__)
+# Dedicated to writing a failed cell's traceback into its own log file. propagate=False
+# keeps it off the root logger's console handler to prevent double print in stdout.
+_cell_failure_logger = logging.getLogger(f"{__name__}.cell_failure")
+_cell_failure_logger.propagate = False
 
 
 _EXPERIMENT_NAMES = {
@@ -136,6 +142,59 @@ def log_and_register_detector(
         code_paths=[str(_PACKAGE_ROOT)],
         registered_model_name=registered_name,
     )
+
+
+class CellLog:
+    """One evaluation cell's log file, uploadable to the MLflow run that is active.
+
+    Every protocol captures its cells the same way, so a cell's diagnostics live next
+    to its metrics and curves in MLflow instead of only in the SLURM array log, which
+    no run points to.
+    """
+
+    def __init__(self, path: Path, handler: logging.Handler) -> None:
+        self.path = path
+        self._handler = handler
+
+    def exception(self, message: str) -> None:
+        """Write the traceback being handled to the log file, not to the console."""
+        _cell_failure_logger.exception(message)
+
+    def upload(self, artifact_path: str = "logs") -> None:
+        """Attach the log so far to the active run, if any.
+
+        Never raises: this runs while a cell is failing, and a tracking-server problem
+        must not replace the error the caller is about to propagate.
+        """
+        if mlflow.active_run() is None:
+            return
+        try:
+            self._handler.flush()
+            mlflow.log_artifact(str(self.path), artifact_path=artifact_path)
+        except Exception as exc:
+            logger.warning(f"Could not upload log artifact {self.path.name}: {exc}")
+
+
+@contextmanager
+def capture_cell_log(log_dir: Path, stem: str) -> Iterator[CellLog]:
+    """Tee every log record emitted inside the block to ``log_dir/<stem>.log``.
+
+    The handler filters nothing of its own (DEBUG), so the file holds every record the
+    loggers pass on, down to the levels the console handler drops.
+    """
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{stem}.log"
+    handler = logging.FileHandler(log_path, mode="w")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(handler)
+    _cell_failure_logger.addHandler(handler)
+    try:
+        yield CellLog(log_path, handler)
+    finally:
+        logging.getLogger().removeHandler(handler)
+        _cell_failure_logger.removeHandler(handler)
+        handler.close()
 
 
 def find_parent_run_id(tags: dict[str, str]) -> str | None:

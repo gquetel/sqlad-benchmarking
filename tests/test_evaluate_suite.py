@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import typer
+import yaml
 
 from sqlad_benchmarking.datasets import FAMILIES
 from sqlad_benchmarking.evaluate_drift import evaluate_drift
@@ -12,12 +15,14 @@ from sqlad_benchmarking.features import GPU_EXTRACTORS
 from tools.slurm_submit import (
     _bucket,
     _build_units,
+    _check_gpu_arch,
     _check_venv,
     _eligible_partitions,
     _gpu_section,
     _is_long_running,
     _min_vram,
     _needs_gpu,
+    _target_arches,
     _tick,
     _write_job_script,
     env_setup,
@@ -241,3 +246,48 @@ def test_tick_drops_a_unit_too_big_for_the_cap(monkeypatch):
 
     assert remaining == 0
     assert done == set(units[0].cells)
+
+
+def test_target_arches_covers_every_partition_a_cpu_free_cell_can_land_on():
+    cfg = {**_GPU_CFG, "gpu_arch": {"A100": "sm_80", "A30": "sm_80", "V100-16GB": "sm_70", "V100-32GB": "sm_70"}}
+    targets = _target_arches([Cell("a", "ae", "li")], cfg, "gpu")
+    assert targets == {"A100": "sm_80", "A30": "sm_80", "V100-16GB": "sm_70", "V100-32GB": "sm_70"}
+
+
+def test_target_arches_skips_partitions_a_cell_has_too_little_vram_for():
+    cfg = {**_GPU_CFG, "gpu_arch": {"A100": "sm_80", "A30": "sm_80", "V100-16GB": "sm_70", "V100-32GB": "sm_70"}}
+    # codet5 needs 24 GB, so it never reaches the 16 GB V100 and sm_70 is not required.
+    assert "V100-16GB" not in _target_arches([Cell("a", "ocsvm", "codet5")], cfg, "gpu")
+
+
+def test_target_arches_is_empty_for_a_cpu_only_grid():
+    cfg = {**_GPU_CFG, "gpu_arch": {"A100": "sm_80"}}
+    assert _target_arches([Cell("a", "ocsvm", "li")], cfg, "gpu") == {}
+
+
+def test_check_gpu_arch_rejects_a_venv_without_the_partition_kernels(tmp_path, monkeypatch):
+    monkeypatch.setattr("tools.slurm_submit._torch_arch_flags", lambda venv: {"sm_75", "sm_80", "sm_86"})
+    with pytest.raises(typer.BadParameter, match="V100-16GB"):
+        _check_gpu_arch(tmp_path / ".venv-cluster", {"A100": "sm_80", "V100-16GB": "sm_70"})
+
+
+def test_check_gpu_arch_names_the_cpu_extra_when_torch_has_no_kernels(tmp_path, monkeypatch):
+    monkeypatch.setattr("tools.slurm_submit._torch_arch_flags", lambda venv: set())
+    with pytest.raises(typer.BadParameter, match="cpu-only torch"):
+        _check_gpu_arch(tmp_path / ".venv-cluster", {"A100": "sm_80"})
+
+
+def test_check_gpu_arch_passes_when_every_partition_is_covered(tmp_path, monkeypatch):
+    monkeypatch.setattr("tools.slurm_submit._torch_arch_flags", lambda venv: {"sm_70", "sm_80"})
+    _check_gpu_arch(tmp_path / ".venv-cluster", {"A100": "sm_80", "V100-16GB": "sm_70"})
+
+
+def test_check_gpu_arch_skips_a_cpu_only_grid(tmp_path, monkeypatch):
+    monkeypatch.setattr("tools.slurm_submit._torch_arch_flags", lambda venv: pytest.fail("must not probe torch"))
+    _check_gpu_arch(tmp_path / ".venv-cluster", {})
+
+
+def test_configured_partitions_all_declare_a_gpu_arch():
+    cfg = yaml.safe_load(Path("configs/slurm.yaml").read_text())
+    for section in ("gpu", "gpu-long"):
+        assert set(cfg[section]["partitions"]) <= set(cfg["gpu_arch"]), section
