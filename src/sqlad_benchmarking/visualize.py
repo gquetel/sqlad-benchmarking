@@ -7,9 +7,12 @@ PNG and PDF (via plotly + kaleido); the PNG is uploaded as an MLflow artifact.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+import kaleido
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,6 +20,8 @@ from sklearn.metrics import auc, precision_recall_curve, roc_curve
 
 from sqlad_benchmarking.features import EXTRACTOR_LABELS
 from sqlad_benchmarking.model import METHOD_LABELS
+
+logger = logging.getLogger(__name__)
 
 # Disable log clutter because of kaleido
 for _name in ("kaleido", "choreographer", "logistro", "browser_proc"):
@@ -76,6 +81,42 @@ def plot_pr_curve(labels: np.ndarray, scores: np.ndarray, name: str, out_path: P
         )
     )
     return _export(fig, out_path, "Precision-Recall curve", "Recall", "Precision")
+
+
+@contextmanager
+def image_export() -> Iterator[None]:
+    """Keep one Kaleido browser open for the context."""
+    try:
+        kaleido.start_sync_server(silence_warnings=True)
+    except Exception as exc:
+        logger.warning(f"Could not start the shared image-export browser ({exc}); rendering one at a time.")
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            kaleido.stop_sync_server(silence_warnings=True)
+        except Exception as exc:
+            logger.warning(f"Could not stop the shared image-export browser ({exc}).")
+
+
+def curve_artifact_dir(path: Path) -> str:
+    """Return the MLflow artifact directory for ``path``."""
+    if path.suffix == ".csv":
+        return "curve_data"
+    return "roc_curves" if "_roc" in path.name else "pr_curves"
+
+
+def plot_curves(labels: np.ndarray, scores: np.ndarray, name: str, out_dir: Path, stem: str) -> list[Path]:
+    """Write curve data and best-effort figures, returning created paths."""
+    written = list(dump_curve_points(labels, scores, out_dir, stem))
+    try:
+        written.append(plot_roc_curve(labels, scores, name, out_dir / f"{stem}_roc.png"))
+        written.append(plot_pr_curve(labels, scores, name, out_dir / f"{stem}_auprc.png"))
+    except Exception as exc:
+        logger.warning(f"Could not render the {stem} curves ({type(exc).__name__}: {exc}); keeping the CSV points.")
+    return written
 
 
 @dataclass(frozen=True)

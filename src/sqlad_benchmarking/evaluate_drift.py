@@ -46,8 +46,15 @@ from sqlad_benchmarking.evaluate_suite import (
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
 from sqlad_benchmarking.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
 from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, build_method
-from sqlad_benchmarking.tracking import delete_running_cell_runs, ensure_parent_run, log_dataset_input, setup_mlflow
-from sqlad_benchmarking.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
+from sqlad_benchmarking.tracking import (
+    CellLog,
+    capture_cell_log,
+    delete_running_cell_runs,
+    ensure_parent_run,
+    log_dataset_input,
+    setup_mlflow,
+)
+from sqlad_benchmarking.visualize import curve_artifact_dir, plot_curves
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +121,7 @@ def _evaluate_one_set(
     rpa = recall_per_attack(df_test["label"], preds, df_test["attack_technique"])
 
     labels = df_test["label"].to_numpy()
-    roc_path = plot_roc_curve(labels, scores, curve_stem, model_dir / "curves" / f"{curve_stem}_roc.png")
-    pr_path = plot_pr_curve(labels, scores, curve_stem, model_dir / "curves" / f"{curve_stem}_auprc.png")
-    roc_csv, pr_csv = dump_curve_points(labels, scores, model_dir / "curves", curve_stem)
-    return m, rpa, [roc_path, pr_path, roc_csv, pr_csv]
+    return m, rpa, plot_curves(labels, scores, curve_stem, model_dir / "curves", curve_stem)
 
 
 def _run_one(
@@ -127,6 +131,7 @@ def _run_one(
     extractor: str,
     data_root: Path,
     model_dir: Path,
+    log_dir: Path,
     limit: int | None = None,
     target_fpr: float = 0.001,
     capture_insider: bool = False,
@@ -137,6 +142,48 @@ def _run_one(
     save_methods: frozenset[str] = frozenset({"ae"}),
 ) -> DriftResultRow:
     """Train one cell on the origin (S1) normals and evaluate it on S1 and the shifted (S2) test set."""
+    stem = f"{method}_{extractor}_{family.name}_{domain.value}"
+    with capture_cell_log(log_dir, stem) as cell_log:
+        return _run_one_tracked(
+            family=family,
+            domain=domain,
+            method=method,
+            extractor=extractor,
+            data_root=data_root,
+            model_dir=model_dir,
+            stem=stem,
+            cell_log=cell_log,
+            limit=limit,
+            target_fpr=target_fpr,
+            capture_insider=capture_insider,
+            seed=seed,
+            track=track,
+            cache=cache,
+            cache_dir=cache_dir,
+            save_methods=save_methods,
+        )
+
+
+def _run_one_tracked(
+    *,
+    family: DatasetFamily,
+    domain: Superviz26Drift,
+    method: MethodName,
+    extractor: str,
+    data_root: Path,
+    model_dir: Path,
+    stem: str,
+    cell_log: CellLog,
+    limit: int | None,
+    target_fpr: float,
+    capture_insider: bool,
+    seed: int,
+    track: bool,
+    cache: bool,
+    cache_dir: Path | None,
+    save_methods: frozenset[str],
+) -> DriftResultRow:
+    """Run one drift cell while its log is captured."""
     logger.info(
         f"=== {METHOD_LABELS.get(method, method)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
         f"on concept-drift/{domain.value} ==="
@@ -165,147 +212,143 @@ def _run_one(
         )
     run_ctx = mlflow.start_run(run_name=run_name, nested=True) if track else nullcontext()
     with run_ctx:
-        if track:
-            mlflow.log_params(
-                {
-                    **asdict(model.config),
-                    "limit": limit,
-                    "domain": domain.value,
-                    "target_fpr": target_fpr,
-                    "capture_insider": capture_insider,
-                }
-            )
-            mlflow.set_tags(
-                {
-                    "decision_engine": method,
-                    "dataset": data_root.name,
-                    "feature_extractor": extractor,
-                    "domain": domain.value,
-                    "setting": "concept_drift",
-                    "run_type": run_type,
-                    "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
-                }
-            )
-            # Sets the "Dataset" column to the specific per-domain drift CSV: the
-            # reused Superviz26 manifest carries its sha256 under the "drift" group.
-            mf = family.manifest()
-            file_entry = mf["groups"]["drift"]["files"][family.resolve_path(domain).name]
-            log_dataset_input(
-                url=mf["record_url"],
-                name=f"{family.name}-{domain.value}",
-                digest=file_entry.get("sha256", ""),
-                context="train+test",
-            )
-
-        epoch_callback = (
-            (lambda epoch, loss: mlflow.log_metric("train_loss", loss, step=epoch))
-            if track and isinstance(model, AEDetector)
-            else None
-        )
-
-        t0 = time.perf_counter()
-        if isinstance(model, AEDetector):
-            model.fit(df_fit, epoch_callback=epoch_callback)
-        else:
-            model.fit(df_fit)
-        fit_s = time.perf_counter() - t0
-
-        # One threshold from the held-out origin normals, shared by both evaluations:
-        # the same fitted model is judged on S1 and S2, so the operating point is fixed.
-        threshold = threshold_for_fpr(model.score_samples(df_val), target_fpr)
-
-        t0 = time.perf_counter()
-        scores_s1 = _score_with_insider_mask(model, origin_test, capture_insider)
-        scores_s2 = _score_with_insider_mask(model, shifted_test, capture_insider)
-        score_s = time.perf_counter() - t0
-
-        stem = f"{method}_{extractor}_{family.name}_{domain.value}"
-        m_s1, rpa_s1, artifacts_s1 = _evaluate_one_set(
-            origin_test,
-            scores_s1,
-            threshold,
-            model_name=f"{stem}_s1",
-            curve_stem=f"{stem}_s1",
-            model_dir=model_dir,
-        )
-        m_s2, rpa_s2, artifacts_s2 = _evaluate_one_set(
-            shifted_test,
-            scores_s2,
-            threshold,
-            model_name=f"{stem}_s2",
-            curve_stem=f"{stem}_s2",
-            model_dir=model_dir,
-        )
-
-        if method in save_methods:
-            model_path = model_dir / _model_filename(family.name, method, extractor, domain)
-            model.save(model_path)
-        else:
-            model_path = None
-            logger.info(f"  not saving {method} model (--save-models)")
-
-        row = DriftResultRow(
-            dataset=family.name,
-            domain=domain.value,
-            method=method,
-            extractor=extractor,
-            n_train=int(len(df_fit)),
-            n_test_s1=int(len(origin_test)),
-            n_attacks_s1=int(origin_test["label"].sum()),
-            n_test_s2=int(len(shifted_test)),
-            n_attacks_s2=int(shifted_test["label"].sum()),
-            auroc_s1=m_s1["rocauc"],
-            auroc_s2=m_s2["rocauc"],
-            delta_auroc=m_s1["rocauc"] - m_s2["rocauc"],
-            auprc_s1=m_s1["auprc"],
-            auprc_s2=m_s2["auprc"],
-            f1_s1=m_s1["f1"],
-            f1_s2=m_s2["f1"],
-            recall_s1=m_s1["recall"],
-            recall_s2=m_s2["recall"],
-            auroc_s1_ci=m_s1["auroc_ci"],
-            auroc_s2_ci=m_s2["auroc_ci"],
-            threshold=float(threshold),
-            fit_seconds=round(fit_s, 3),
-            score_seconds=round(score_s, 3),
-            model_path=str(model_path) if model_path else "",
-        )
-
-        if track:
-            mlflow.log_params({"n_train": row.n_train, "n_test_s1": row.n_test_s1, "n_test_s2": row.n_test_s2})
-            mlflow.log_metrics(
-                {
-                    "auroc_s1": row.auroc_s1,
-                    "auroc_s2": row.auroc_s2,
-                    "delta_auroc": row.delta_auroc,
-                    "auprc_s1": row.auprc_s1,
-                    "auprc_s2": row.auprc_s2,
-                    "f1_s1": row.f1_s1,
-                    "f1_s2": row.f1_s2,
-                    "recall_s1": row.recall_s1,
-                    "recall_s2": row.recall_s2,
-                    "auroc_s1_ci": row.auroc_s1_ci,
-                    "auroc_s2_ci": row.auroc_s2_ci,
-                    "threshold": row.threshold,
-                    "fit_seconds": row.fit_seconds,
-                    "score_seconds": row.score_seconds,
-                }
-            )
-            if rpa_s1:
-                mlflow.log_metrics({f"{_mlflow_key(t)}_s1": v for t, v in rpa_s1.items()})
-            if rpa_s2:
-                mlflow.log_metrics({f"{_mlflow_key(t)}_s2": v for t, v in rpa_s2.items()})
-            for artifact in artifacts_s1 + artifacts_s2:
-                sub = (
-                    "roc_curves"
-                    if "_roc" in artifact.name
-                    else "pr_curves"
-                    if "_auprc" in artifact.name
-                    else "curve_data"
+        try:
+            if track:
+                mlflow.log_params(
+                    {
+                        **asdict(model.config),
+                        "limit": limit,
+                        "domain": domain.value,
+                        "target_fpr": target_fpr,
+                        "capture_insider": capture_insider,
+                    }
                 )
-                mlflow.log_artifact(str(artifact), artifact_path=sub)
+                mlflow.set_tags(
+                    {
+                        "decision_engine": method,
+                        "dataset": data_root.name,
+                        "feature_extractor": extractor,
+                        "domain": domain.value,
+                        "setting": "concept_drift",
+                        "run_type": run_type,
+                        "slurm_job_id": os.environ.get("SLURM_JOB_ID", ""),
+                    }
+                )
+                mf = family.manifest()
+                file_entry = mf["groups"]["drift"]["files"][family.resolve_path(domain).name]
+                log_dataset_input(
+                    url=mf["record_url"],
+                    name=f"{family.name}-{domain.value}",
+                    digest=file_entry.get("sha256", ""),
+                    context="train+test",
+                )
 
-        return row
+            epoch_callback = (
+                (lambda epoch, loss: mlflow.log_metric("train_loss", loss, step=epoch))
+                if track and isinstance(model, AEDetector)
+                else None
+            )
+
+            t0 = time.perf_counter()
+            if isinstance(model, AEDetector):
+                model.fit(df_fit, epoch_callback=epoch_callback)
+            else:
+                model.fit(df_fit)
+            fit_s = time.perf_counter() - t0
+
+            # Use one origin-derived threshold for both test sets.
+            threshold = threshold_for_fpr(model.score_samples(df_val), target_fpr)
+
+            t0 = time.perf_counter()
+            scores_s1 = _score_with_insider_mask(model, origin_test, capture_insider)
+            scores_s2 = _score_with_insider_mask(model, shifted_test, capture_insider)
+            score_s = time.perf_counter() - t0
+
+            m_s1, rpa_s1, artifacts_s1 = _evaluate_one_set(
+                origin_test,
+                scores_s1,
+                threshold,
+                model_name=f"{stem}_s1",
+                curve_stem=f"{stem}_s1",
+                model_dir=model_dir,
+            )
+            m_s2, rpa_s2, artifacts_s2 = _evaluate_one_set(
+                shifted_test,
+                scores_s2,
+                threshold,
+                model_name=f"{stem}_s2",
+                curve_stem=f"{stem}_s2",
+                model_dir=model_dir,
+            )
+
+            if method in save_methods:
+                model_path = model_dir / _model_filename(family.name, method, extractor, domain)
+                model.save(model_path)
+            else:
+                model_path = None
+                logger.info(f"  not saving {method} model (--save-models)")
+
+            row = DriftResultRow(
+                dataset=family.name,
+                domain=domain.value,
+                method=method,
+                extractor=extractor,
+                n_train=int(len(df_fit)),
+                n_test_s1=int(len(origin_test)),
+                n_attacks_s1=int(origin_test["label"].sum()),
+                n_test_s2=int(len(shifted_test)),
+                n_attacks_s2=int(shifted_test["label"].sum()),
+                auroc_s1=m_s1["rocauc"],
+                auroc_s2=m_s2["rocauc"],
+                delta_auroc=m_s1["rocauc"] - m_s2["rocauc"],
+                auprc_s1=m_s1["auprc"],
+                auprc_s2=m_s2["auprc"],
+                f1_s1=m_s1["f1"],
+                f1_s2=m_s2["f1"],
+                recall_s1=m_s1["recall"],
+                recall_s2=m_s2["recall"],
+                auroc_s1_ci=m_s1["auroc_ci"],
+                auroc_s2_ci=m_s2["auroc_ci"],
+                threshold=float(threshold),
+                fit_seconds=round(fit_s, 3),
+                score_seconds=round(score_s, 3),
+                model_path=str(model_path) if model_path else "",
+            )
+
+            if track:
+                mlflow.log_params({"n_train": row.n_train, "n_test_s1": row.n_test_s1, "n_test_s2": row.n_test_s2})
+                mlflow.log_metrics(
+                    {
+                        "auroc_s1": row.auroc_s1,
+                        "auroc_s2": row.auroc_s2,
+                        "delta_auroc": row.delta_auroc,
+                        "auprc_s1": row.auprc_s1,
+                        "auprc_s2": row.auprc_s2,
+                        "f1_s1": row.f1_s1,
+                        "f1_s2": row.f1_s2,
+                        "recall_s1": row.recall_s1,
+                        "recall_s2": row.recall_s2,
+                        "auroc_s1_ci": row.auroc_s1_ci,
+                        "auroc_s2_ci": row.auroc_s2_ci,
+                        "threshold": row.threshold,
+                        "fit_seconds": row.fit_seconds,
+                        "score_seconds": row.score_seconds,
+                    }
+                )
+                if rpa_s1:
+                    mlflow.log_metrics({f"{_mlflow_key(t)}_s1": v for t, v in rpa_s1.items()})
+                if rpa_s2:
+                    mlflow.log_metrics({f"{_mlflow_key(t)}_s2": v for t, v in rpa_s2.items()})
+                for artifact in artifacts_s1 + artifacts_s2:
+                    mlflow.log_artifact(str(artifact), artifact_path=curve_artifact_dir(artifact))
+
+            return row
+        except Exception:
+            cell_log.exception(f"Cell {stem} failed")
+            raise
+        finally:
+            if track:
+                cell_log.upload()
 
 
 def evaluate_drift(
@@ -360,6 +403,7 @@ def evaluate_drift(
             if scenario is not None
             else Path(f"reports/{dataset}_results.csv")
         )
+    log_dir = Path(f"reports/{dataset}/logs")
     model_dir.mkdir(parents=True, exist_ok=True)
     report.parent.mkdir(parents=True, exist_ok=True)
     if scenario is not None:
@@ -387,6 +431,7 @@ def evaluate_drift(
                         extractor,
                         data_root,
                         model_dir,
+                        log_dir,
                         limit=limit,
                         target_fpr=target_fpr,
                         capture_insider=cell_capture_insider,

@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import mlflow
@@ -19,6 +21,8 @@ from mlflow.data.meta_dataset import MetaDataset
 from mlflow.tracking import MlflowClient
 
 logger = logging.getLogger(__name__)
+_cell_failure_logger = logging.getLogger(f"{__name__}.cell_failure")
+_cell_failure_logger.propagate = False
 
 
 _EXPERIMENT_NAMES = {
@@ -136,6 +140,46 @@ def log_and_register_detector(
         code_paths=[str(_PACKAGE_ROOT)],
         registered_model_name=registered_name,
     )
+
+
+class CellLog:
+    """A per-cell log uploadable to the active MLflow run."""
+
+    def __init__(self, path: Path, handler: logging.Handler) -> None:
+        self.path = path
+        self._handler = handler
+
+    def exception(self, message: str) -> None:
+        """Record the current exception without console propagation."""
+        _cell_failure_logger.exception(message)
+
+    def upload(self, artifact_path: str = "logs") -> None:
+        """Upload the current log to the active run, if any."""
+        if mlflow.active_run() is None:
+            return
+        try:
+            self._handler.flush()
+            mlflow.log_artifact(str(self.path), artifact_path=artifact_path)
+        except Exception as exc:
+            logger.warning(f"Could not upload log artifact {self.path.name}: {exc}")
+
+
+@contextmanager
+def capture_cell_log(log_dir: Path, stem: str) -> Iterator[CellLog]:
+    """Capture log records in ``log_dir/<stem>.log``."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{stem}.log"
+    handler = logging.FileHandler(log_path, mode="w")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(handler)
+    _cell_failure_logger.addHandler(handler)
+    try:
+        yield CellLog(log_path, handler)
+    finally:
+        logging.getLogger().removeHandler(handler)
+        _cell_failure_logger.removeHandler(handler)
+        handler.close()
 
 
 def find_parent_run_id(tags: dict[str, str]) -> str | None:

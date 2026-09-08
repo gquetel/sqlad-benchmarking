@@ -10,7 +10,7 @@ SLURM is optional: all methods can be trained and evaluated on any compatible ma
 - **GPU** for autoencoders and embedding-based extractors. Models with higher memory needs are
   limited to suitable GPUs.
 
-Each array task runs one cell through `evaluate_suite` and writes its **own** per-cell CSV to `reports/{dataset}/cells/{method}_{extractor}_{scenario}.csv` — so the parallel jobs never share a writer and a rerun simply overwrites its own file.
+Each array task runs one cell through `evaluate_suite` and writes its own CSV to `reports/{dataset}/cells/{method}_{extractor}_{scenario}.csv`. It also writes `reports/{dataset}/logs/{stem}.log` and uploads the log to MLflow, including on failure.
 
 Cluster-specific settings, including partitions, memory limits, and time limits, live in [`configs/slurm.yaml`](https://github.com/gquetel/sqlad-benchmarking/blob/main/configs/slurm.yaml). Adapt this file before using the tool on another cluster. Its `env` block names the venv the array tasks activate, and the modules to load first.
 
@@ -26,7 +26,15 @@ Run this once on the submit node. The home directory is shared, so every node se
 
 The CUDA build stays pinned to `cu126` because the V100 partitions are Volta (compute capability 7.0), which newer CUDA versions drop. The same build also runs on the A100 partitions, which keeps every cell of a table on one stack.
 
-Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. `slurm_submit` therefore checks on the submit node that the venv matches `uv.lock`, and refuses to submit when it does not. Re-run the script after every `git pull`, or enable the hook once with `git config core.hooksPath .githooks`.
+Array tasks only activate the shared venv. Before submission, `slurm_submit` syncs it from `uv.lock` with `--extra cu126` and checks its torch kernels against eligible partitions in `gpu_arch`.
+
+Run the submitter from that venv directly, not through `uv run`:
+
+```sh
+.venv-cluster/bin/python -m tools.slurm_submit ...
+```
+
+Do not use `uv run`: without `UV_PROJECT_ENVIRONMENT`, it manages `.venv`, not `.venv-cluster`. The cluster venv uses uv's interpreter and does not need `nix-shell`.
 
 ## Submitting
 
@@ -53,7 +61,7 @@ Manifests, generated job scripts, and `.out` logs are written under `reports/slu
 Run it on the submit node, detached, so a dropped VPN does not kill it:
 
 ```bash
-nohup uv run --frozen --extra cu126 python -m tools.slurm_submit \
+nohup .venv-cluster/bin/python -m tools.slurm_submit \
   --dataset superviz26 --suite all --methods ae \
   --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb,llm2vec \
   --max-jobs 24 --interval 300 > reports/slurm/queue.log 2>&1 &

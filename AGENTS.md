@@ -55,10 +55,11 @@ versions or regenerate the lock without explicit instruction.
   `(scenario, method, extractor)` cell out as a job array (one array per resource class:
   `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough
   VRAM for it, from `min_vram_gb` in the config, so e.g. CodeT5+ skips the 16 GB V100). Site
-  settings live in `configs/slurm.yaml`; jobs
-  activate the uv `.venv-cluster` (built once on the submit node; `slurm_submit` refuses to submit when it
-  no longer matches `uv.lock`). Each cell writes its row to `reports/{dataset}/cells/*.csv`;
-  MLflow is the canonical store.
+  settings live in `configs/slurm.yaml`; jobs activate the shared `.venv-cluster`. Before submission,
+  `slurm_submit` syncs it from `uv.lock` with `--extra cu126` and verifies its torch kernels against
+  the eligible partitions declared in `gpu_arch`.
+  Each cell writes its row to `reports/{dataset}/cells/*.csv` and its log to
+  `reports/{dataset}/logs/*.log`; MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run`.
     * Submit: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li`.
 * The cluster caps in-flight jobs (~24), so `slurm_submit` drip-feeds by default: one unit per
@@ -90,6 +91,10 @@ versions or regenerate the lock without explicit instruction.
 # Experiment tracking
 
 * `evaluate_suite` logs params, metrics, the per-epoch AE training loss, and the fitted model artifact to MLflow when `MLFLOW_TRACKING_URI` is set (opt out with `--no-track`). Configuration is environment-driven via `.env` (see  `.env.example`).
+* Every protocol writes `reports/{dataset}/logs/{stem}.log` and uploads it to its MLflow run,
+  including on failure. Few-shot uploads the shared sweep log to every `k` run.
+* `visualize.plot_curves` always writes curve points; figures are best-effort. `slurm_run_cell`
+  keeps one image-export browser open per cell.
 
 # Documentation
 

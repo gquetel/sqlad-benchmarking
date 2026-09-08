@@ -56,7 +56,14 @@ from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_ins
 from sqlad_benchmarking.features.cache import memory_only
 from sqlad_benchmarking.metrics import threshold_for_fpr, wilson_ci
 from sqlad_benchmarking.model import AEDetector
-from sqlad_benchmarking.tracking import delete_running_cell_runs, ensure_parent_run, log_dataset_input, setup_mlflow
+from sqlad_benchmarking.tracking import (
+    CellLog,
+    capture_cell_log,
+    delete_running_cell_runs,
+    ensure_parent_run,
+    log_dataset_input,
+    setup_mlflow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +306,7 @@ def _run_target(
     extractor: str,
     data_root: Path,
     model_dir: Path,
+    log_dir: Path,
     ks: tuple[int, ...],
     seeds: tuple[int, ...],
     *,
@@ -309,6 +317,51 @@ def _run_target(
     track: bool,
 ) -> list[FSLResultRow]:
     """Sweep the adaptation budget for one (target, extractor) cell and return its rows."""
+    stem = f"ae_{extractor}_{family.name}_{target.value}"
+    with capture_cell_log(log_dir, stem) as cell_log:
+        try:
+            return _run_target_tracked(
+                family=family,
+                target=target,
+                extractor=extractor,
+                data_root=data_root,
+                model_dir=model_dir,
+                stem=stem,
+                cell_log=cell_log,
+                ks=ks,
+                seeds=seeds,
+                test_limit=test_limit,
+                lr_scale=lr_scale,
+                target_fpr=target_fpr,
+                capture_insider=capture_insider,
+                track=track,
+            )
+        except Exception:
+            cell_log.exception(f"Cell {stem} failed")
+            # The child runs are closed, so upload failures to the parent.
+            if track:
+                cell_log.upload()
+            raise
+
+
+def _run_target_tracked(
+    *,
+    family: DatasetFamily,
+    target: Superviz26FSL,
+    extractor: str,
+    data_root: Path,
+    model_dir: Path,
+    stem: str,
+    cell_log: CellLog,
+    ks: tuple[int, ...],
+    seeds: tuple[int, ...],
+    test_limit: int | None,
+    lr_scale: float,
+    target_fpr: float,
+    capture_insider: bool,
+    track: bool,
+) -> list[FSLResultRow]:
+    """Run one few-shot cell while its log is captured."""
     logger.info(
         f"=== Few-shot adaptation: Autoencoder + {EXTRACTOR_LABELS.get(extractor, extractor)} -> {target.value} ==="
     )
@@ -394,6 +447,7 @@ def _run_target(
                     digest=file_entry.get("sha256", ""),
                     context="finetune+test",
                 )
+                cell_log.upload()
 
     return rows
 
@@ -454,6 +508,7 @@ def evaluate_fsl(
             if scenario is not None
             else Path(f"reports/{dataset}_results.csv")
         )
+    log_dir = Path(f"reports/{dataset}/logs")
     report.parent.mkdir(parents=True, exist_ok=True)
     if scenario is not None:
         report.unlink(missing_ok=True)
@@ -478,6 +533,7 @@ def evaluate_fsl(
                     extractor,
                     data_root,
                     model_dir,
+                    log_dir,
                     ks_parsed,
                     seeds_parsed,
                     test_limit=test_limit,

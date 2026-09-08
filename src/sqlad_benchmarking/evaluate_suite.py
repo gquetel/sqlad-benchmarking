@@ -35,19 +35,17 @@ from sqlad_benchmarking.features import EXTRACTOR_LABELS, EXTRACTORS, extractor_
 from sqlad_benchmarking.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
 from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, build_method
 from sqlad_benchmarking.tracking import (
+    CellLog,
+    capture_cell_log,
     delete_running_cell_runs,
     ensure_parent_run,
     log_and_register_detector,
     log_dataset_input,
     setup_mlflow,
 )
-from sqlad_benchmarking.visualize import dump_curve_points, plot_pr_curve, plot_roc_curve
+from sqlad_benchmarking.visualize import curve_artifact_dir, plot_curves
 
 logger = logging.getLogger(__name__)
-# Dedicated to writing a failed cell's traceback into its own log file. propagate=False
-# keeps it off the root logger's console handler to prevent double print in stdout.
-_cell_failure_logger = logging.getLogger(f"{__name__}.cell_failure")
-_cell_failure_logger.propagate = False
 
 ALL_METHODS: tuple[MethodName, ...] = ("ocsvm", "lof", "ae")
 
@@ -215,20 +213,8 @@ def _run_one(
     save_methods: frozenset[str] = frozenset({"ae"}),
 ) -> ResultRow:
     """Train + evaluate one (scenario, method, extractor) cell, optionally logging to MLflow."""
-    # Tee this cell's log output to its own file under reports/ and (when tracking)
-    # attach it to the child run as an artifact, so a cell's diagnostics live next to
-    # its metrics and curves in MLflow. SLURM's per-array .log interleaves nothing here
-    # (one cell per array task) but isn't reachable from a run; this file is.
     stem = f"{method}_{extractor}_{family.name}_{scenario.value}"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{stem}.log"
-    log_handler = logging.FileHandler(log_path, mode="w")
-    # DEBUG so the artifact uploaded to MLflow captures the fullest diagnostics.
-    log_handler.setLevel(logging.DEBUG)
-    log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    logging.getLogger().addHandler(log_handler)
-    _cell_failure_logger.addHandler(log_handler)
-    try:
+    with capture_cell_log(log_dir, stem) as cell_log:
         return _run_one_tracked(
             family=family,
             scenario=scenario,
@@ -237,8 +223,7 @@ def _run_one(
             data_root=data_root,
             model_dir=model_dir,
             stem=stem,
-            log_path=log_path,
-            log_handler=log_handler,
+            cell_log=cell_log,
             limit=limit,
             target_fpr=target_fpr,
             capture_insider=capture_insider,
@@ -249,10 +234,6 @@ def _run_one(
             cache_dir=cache_dir,
             save_methods=save_methods,
         )
-    finally:
-        logging.getLogger().removeHandler(log_handler)
-        _cell_failure_logger.removeHandler(log_handler)
-        log_handler.close()
 
 
 def _run_one_tracked(
@@ -264,8 +245,7 @@ def _run_one_tracked(
     data_root: Path,
     model_dir: Path,
     stem: str,
-    log_path: Path,
-    log_handler: logging.Handler,
+    cell_log: CellLog,
     limit: int | None,
     target_fpr: float,
     capture_insider: bool,
@@ -276,7 +256,7 @@ def _run_one_tracked(
     cache_dir: Path | None,
     save_methods: frozenset[str],
 ) -> ResultRow:
-    """Body of :func:`_run_one`, run with a file handler already capturing this cell's log."""
+    """Run one suite cell while its log is captured."""
     logger.info(
         f"=== {METHOD_LABELS.get(method, method)} + {EXTRACTOR_LABELS.get(extractor, extractor)} "
         f"on {family.name.capitalize()}/{scenario.value} ==="
@@ -432,13 +412,8 @@ def _run_one_tracked(
                 model_path = None
                 logger.info(f"  not saving {method} model (--save-models)")
 
-            # One ROC and one AUPRC curve per cell, written under models/curves/.
             labels = df_test["label"].to_numpy()
-            curve_stem = stem
-            roc_path = plot_roc_curve(labels, scores, scenario.value, model_dir / "curves" / f"{curve_stem}_roc.png")
-            pr_path = plot_pr_curve(labels, scores, scenario.value, model_dir / "curves" / f"{curve_stem}_auprc.png")
-            # Persist the raw curve points so curves can be re-plotted offline without refitting.
-            roc_csv, pr_csv = dump_curve_points(labels, scores, model_dir / "curves", curve_stem)
+            curve_artifacts = plot_curves(labels, scores, scenario.value, model_dir / "curves", stem)
 
             row = ResultRow(
                 dataset=family.name,
@@ -493,10 +468,8 @@ def _run_one_tracked(
                 )
                 if rpa:
                     mlflow.log_metrics({_mlflow_key(t): v for t, v in rpa.items()})
-                mlflow.log_artifact(str(roc_path), artifact_path="roc_curves")
-                mlflow.log_artifact(str(pr_path), artifact_path="pr_curves")
-                mlflow.log_artifact(str(roc_csv), artifact_path="curve_data")
-                mlflow.log_artifact(str(pr_csv), artifact_path="curve_data")
+                for artifact in curve_artifacts:
+                    mlflow.log_artifact(str(artifact), artifact_path=curve_artifact_dir(artifact))
                 if register and model_path is not None:
                     registered_name = f"sqldetect-{method}-{extractor}-{family.name}-{scenario.value}"
                     log_and_register_detector(model_path, registered_name, df_test[["full_query"]].head(3))
@@ -505,17 +478,11 @@ def _run_one_tracked(
 
             return row
         except Exception:
-            _cell_failure_logger.exception(f"Cell {stem} failed")
+            cell_log.exception(f"Cell {stem} failed")
             raise
         finally:
-            # Attach the captured per-cell log even if the cell raised: a failed run
-            # should still carry its diagnostics in MLflow.
             if track:
-                try:
-                    log_handler.flush()
-                    mlflow.log_artifact(str(log_path), artifact_path="logs")
-                except Exception as exc:
-                    logger.warning(f"Could not upload log artifact for {stem}: {exc}")
+                cell_log.upload()
 
 
 def evaluate_suite(

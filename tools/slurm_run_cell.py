@@ -23,6 +23,7 @@ from sqlad_benchmarking.datasets import FAMILIES
 from sqlad_benchmarking.evaluate_drift import evaluate_drift
 from sqlad_benchmarking.evaluate_fsl import evaluate_fsl
 from sqlad_benchmarking.evaluate_suite import evaluate_suite
+from sqlad_benchmarking.visualize import image_export
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +58,20 @@ def run_cell(
         raise typer.BadParameter(f"--index {index} out of range for {len(lines)} cells in {manifest}")
     cell = json.loads(lines[index])
     logger.info(f"Running cell {index}/{len(lines) - 1}: {cell}")
-    # Dispatch on the family's protocol: concept-drift cells train once and evaluate
-    # two test sets, few-shot cells adapt a pretrained LODO model over a k-sweep, so
-    # each runs through its own evaluator instead of the standard suite.
+    with image_export():
+        _dispatch(cell, dataset, target_fpr, seed, register, track, limit)
+
+
+def _dispatch(
+    cell: dict,
+    dataset: str,
+    target_fpr: float,
+    seed: int,
+    register: bool,
+    track: bool,
+    limit: int | None,
+) -> None:
+    """Run a cell with its dataset family's evaluator."""
     protocol = FAMILIES[dataset].protocol if dataset in FAMILIES else "suite"
     if protocol == "drift":
         evaluate_drift(

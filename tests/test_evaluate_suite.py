@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import typer
+import yaml
 
 from sqlad_benchmarking.datasets import FAMILIES
 from sqlad_benchmarking.evaluate_drift import evaluate_drift
@@ -12,13 +15,15 @@ from sqlad_benchmarking.features import GPU_EXTRACTORS
 from tools.slurm_submit import (
     _bucket,
     _build_units,
-    _check_venv,
     _eligible_partitions,
+    _ensure_env,
     _gpu_section,
     _is_long_running,
     _min_vram,
     _needs_gpu,
+    _target_arches,
     _tick,
+    _venv_faults,
     _write_job_script,
     env_setup,
 )
@@ -184,15 +189,54 @@ def test_job_script_omits_limit_when_none(tmp_path):
     assert "--limit" not in _write_cpu_script(tmp_path, limit=None)
 
 
-def test_check_venv_raises_when_missing(tmp_path):
-    with pytest.raises(typer.BadParameter, match="setup-env.sh"):
-        _check_venv(tmp_path / ".venv-cluster" / "bin" / "activate")
+def test_venv_faults_reports_a_missing_venv(tmp_path):
+    assert _venv_faults(tmp_path / ".venv-cluster", {}) == ["missing"]
 
 
-def test_check_venv_passes_when_present(tmp_path):
-    activate = tmp_path / "activate"
-    activate.touch()
-    _check_venv(activate)
+def test_venv_faults_reports_the_architectures_the_partitions_need(tmp_path, monkeypatch):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "activate").touch()
+    monkeypatch.setattr("tools.slurm_submit._lock_matches", lambda venv: True)
+    monkeypatch.setattr("tools.slurm_submit._torch_arch_flags", lambda venv: {"sm_75", "sm_80", "sm_86"})
+    assert _venv_faults(tmp_path, {"A100": "sm_80", "V100-16GB": "sm_70"}) == ["torch has no sm_70 kernels"]
+
+
+def test_venv_faults_is_empty_when_every_partition_is_covered(tmp_path, monkeypatch):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "activate").touch()
+    monkeypatch.setattr("tools.slurm_submit._lock_matches", lambda venv: True)
+    monkeypatch.setattr("tools.slurm_submit._torch_arch_flags", lambda venv: {"sm_70", "sm_80"})
+    assert _venv_faults(tmp_path, {"A100": "sm_80", "V100-16GB": "sm_70"}) == []
+
+
+def test_venv_faults_does_not_probe_torch_for_a_cpu_only_grid(tmp_path, monkeypatch):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "activate").touch()
+    monkeypatch.setattr("tools.slurm_submit._lock_matches", lambda venv: True)
+    monkeypatch.setattr("tools.slurm_submit._torch_arch_flags", lambda venv: set())
+    assert _venv_faults(tmp_path, {}) == []
+
+
+def test_ensure_env_syncs_a_faulty_venv_and_submits(monkeypatch):
+    synced = []
+    faults = iter([["torch has no sm_70 kernels"], []])
+    monkeypatch.setattr("tools.slurm_submit._venv_faults", lambda venv, targets: next(faults))
+    monkeypatch.setattr("tools.slurm_submit._sync_venv", lambda venv: synced.append(venv))
+    _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu")
+    assert [v.name for v in synced] == [".venv-cluster"]
+
+
+def test_ensure_env_leaves_a_good_venv_alone(monkeypatch):
+    monkeypatch.setattr("tools.slurm_submit._venv_faults", lambda venv, targets: [])
+    monkeypatch.setattr("tools.slurm_submit._sync_venv", lambda venv: pytest.fail("must not sync"))
+    _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu")
+
+
+def test_ensure_env_gives_up_when_a_sync_does_not_help(monkeypatch):
+    monkeypatch.setattr("tools.slurm_submit._venv_faults", lambda venv, targets: ["torch has no sm_70 kernels"])
+    monkeypatch.setattr("tools.slurm_submit._sync_venv", lambda venv: None)
+    with pytest.raises(typer.BadParameter, match="still wrong after a sync"):
+        _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu")
 
 
 def test_env_setup_activates_the_configured_venv():
@@ -241,3 +285,25 @@ def test_tick_drops_a_unit_too_big_for_the_cap(monkeypatch):
 
     assert remaining == 0
     assert done == set(units[0].cells)
+
+
+def test_target_arches_covers_every_partition_a_cpu_free_cell_can_land_on():
+    cfg = {**_GPU_CFG, "gpu_arch": {"A100": "sm_80", "A30": "sm_80", "V100-16GB": "sm_70", "V100-32GB": "sm_70"}}
+    targets = _target_arches([Cell("a", "ae", "li")], cfg, "gpu")
+    assert targets == {"A100": "sm_80", "A30": "sm_80", "V100-16GB": "sm_70", "V100-32GB": "sm_70"}
+
+
+def test_target_arches_skips_partitions_a_cell_has_too_little_vram_for():
+    cfg = {**_GPU_CFG, "gpu_arch": {"A100": "sm_80", "A30": "sm_80", "V100-16GB": "sm_70", "V100-32GB": "sm_70"}}
+    assert "V100-16GB" not in _target_arches([Cell("a", "ocsvm", "codet5")], cfg, "gpu")
+
+
+def test_target_arches_is_empty_for_a_cpu_only_grid():
+    cfg = {**_GPU_CFG, "gpu_arch": {"A100": "sm_80"}}
+    assert _target_arches([Cell("a", "ocsvm", "li")], cfg, "gpu") == {}
+
+
+def test_configured_partitions_all_declare_a_gpu_arch():
+    cfg = yaml.safe_load(Path("configs/slurm.yaml").read_text())
+    for section in ("gpu", "gpu-long"):
+        assert set(cfg[section]["partitions"]) <= set(cfg["gpu_arch"]), section
