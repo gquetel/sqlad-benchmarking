@@ -61,7 +61,6 @@ versions or regenerate the lock without explicit instruction.
   the cells can land on (`gpu_arch` in `configs/slurm.yaml` names each partition's architecture).
   The extra you pass to the submit command does **not** decide this -- `uv run` targets uv's
   default `.venv` unless `UV_PROJECT_ENVIRONMENT` is exported, which only `setup-env.sh` does.
-  A sync is refused while jobs are in flight, because they activate that same directory.
   Each cell writes its row to `reports/{dataset}/cells/*.csv` and its log to
   `reports/{dataset}/logs/*.log`; MLflow is the canonical store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run`.

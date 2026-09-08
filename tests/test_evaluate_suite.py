@@ -221,33 +221,22 @@ def test_ensure_env_syncs_a_faulty_venv_and_submits(monkeypatch):
     synced = []
     faults = iter([["torch has no sm_70 kernels"], []])
     monkeypatch.setattr("tools.slurm_submit._venv_faults", lambda venv, targets: next(faults))
-    monkeypatch.setattr("tools.slurm_submit._squeue", lambda *a, **kw: [])
     monkeypatch.setattr("tools.slurm_submit._sync_venv", lambda venv: synced.append(venv))
-    _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu", "someone")
+    _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu")
     assert [v.name for v in synced] == [".venv-cluster"]
 
 
 def test_ensure_env_leaves_a_good_venv_alone(monkeypatch):
     monkeypatch.setattr("tools.slurm_submit._venv_faults", lambda venv, targets: [])
     monkeypatch.setattr("tools.slurm_submit._sync_venv", lambda venv: pytest.fail("must not sync"))
-    monkeypatch.setattr("tools.slurm_submit._squeue", lambda *a, **kw: pytest.fail("must not read the queue"))
-    _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu", "someone")
-
-
-def test_ensure_env_refuses_to_sync_under_running_jobs(monkeypatch):
-    monkeypatch.setattr("tools.slurm_submit._venv_faults", lambda venv, targets: ["does not match uv.lock"])
-    monkeypatch.setattr("tools.slurm_submit._squeue", lambda *a, **kw: ["cd-li-ae-superviz26-drift"])
-    monkeypatch.setattr("tools.slurm_submit._sync_venv", lambda venv: pytest.fail("must not sync under jobs"))
-    with pytest.raises(typer.BadParameter, match="in flight"):
-        _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu", "someone")
+    _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu")
 
 
 def test_ensure_env_gives_up_when_a_sync_does_not_help(monkeypatch):
     monkeypatch.setattr("tools.slurm_submit._venv_faults", lambda venv, targets: ["torch has no sm_70 kernels"])
-    monkeypatch.setattr("tools.slurm_submit._squeue", lambda *a, **kw: [])
     monkeypatch.setattr("tools.slurm_submit._sync_venv", lambda venv: None)
     with pytest.raises(typer.BadParameter, match="still wrong after a sync"):
-        _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu", "someone")
+        _ensure_env(_GPU_CFG, [Cell("a", "ae", "li")], "gpu")
 
 
 def test_env_setup_activates_the_configured_venv():

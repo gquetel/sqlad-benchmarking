@@ -26,7 +26,7 @@ Run this once on the submit node. The home directory is shared, so every node se
 
 The CUDA build stays pinned to `cu126` because the V100 partitions are Volta (compute capability 7.0), which newer CUDA versions drop. The same build also runs on the A100 partitions, which keeps every cell of a table on one stack.
 
-Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. So `slurm_submit` syncs it itself, at startup, when it is missing, does not match `uv.lock`, or its torch lacks kernels for a GPU partition the cells can land on (`gpu_arch` in `configs/slurm.yaml` lists each partition's architecture). Such a wheel otherwise reaches the node and dies there with `CUDA error: no kernel image is available for execution on the device` — once per cell, after the array is queued. A sync is refused while you have jobs in flight; wait for them or `scancel`, then re-run.
+Array tasks only activate the venv, because a concurrent `uv sync` would race on one shared directory. So `slurm_submit` syncs it itself, at startup, when it is missing, does not match `uv.lock`, or its torch lacks kernels for a GPU partition the cells can land on (`gpu_arch` in `configs/slurm.yaml` lists each partition's architecture). Such a wheel otherwise reaches the node and dies there with `CUDA error: no kernel image is available for execution on the device` — once per cell, after the array is queued.
 
 Note that the extra you give the submit command does not decide what the nodes get:
 

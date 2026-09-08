@@ -269,7 +269,7 @@ def _sync_venv(venv: Path) -> None:
         raise typer.BadParameter(f"could not sync {venv.name}: {sync.stderr.strip()}")
 
 
-def _ensure_env(cfg: dict, cells: list[Cell], gpu_section: str, user: str) -> None:
+def _ensure_env(cfg: dict, cells: list[Cell], gpu_section: str) -> None:
     """Bring the shared venv up to date, once, before N array tasks activate it.
 
     The array tasks activate this venv and never sync, and the shell that submits is not
@@ -284,11 +284,6 @@ def _ensure_env(cfg: dict, cells: list[Cell], gpu_section: str, user: str) -> No
     if not faults:
         return
     logger.info(f"{venv.name}: {'; '.join(faults)}")
-    # Rewriting the directory under a task that is activating it breaks that task.
-    if _squeue(user, count_array_tasks=False):
-        raise typer.BadParameter(
-            f"{venv.name} needs a sync but jobs are in flight; wait for them or scancel, then rerun."
-        )
     _sync_venv(venv)
     faults = _venv_faults(venv, targets)
     if faults:
@@ -631,7 +626,7 @@ def submit(
     # A dry run only prints scripts; a real submit needs the shared venv the compute nodes
     # will source to match uv.lock and to fit the GPUs these cells can land on.
     if not dry_run:
-        _ensure_env(cfg, [cell for unit in units for cell in unit.cells], gpu_section, getpass.getuser())
+        _ensure_env(cfg, [cell for unit in units for cell in unit.cells], gpu_section)
     if check_mlflow and not setup_mlflow(dataset):
         raise typer.BadParameter("MLFLOW_TRACKING_URI is not set; --check-mlflow cannot look up what finished.")
 
