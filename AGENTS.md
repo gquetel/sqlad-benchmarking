@@ -54,7 +54,7 @@ versions or regenerate the lock without explicit instruction.
 * To parallelize the evaluation grid on a SLURM cluster, `tools.slurm_submit` fans each
   `(scenario, method, extractor)` cell out as a job array (one array per resource class:
   `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough
-  VRAM for it, from `min_vram_gb` in the config, so e.g. CodeT5+ skips the 16 GB V100). Site
+  VRAM for it, from `min_vram_gb` in the config). Site
   settings live in `configs/slurm.yaml`; jobs activate the shared `.venv-cluster`. Before submission,
   `slurm_submit` syncs it from `uv.lock` with `--extra cu126` and verifies its torch kernels against
   the eligible partitions declared in `gpu_arch`.

@@ -41,7 +41,7 @@ gpu_arch:
 # Minimum per-GPU VRAM per cell, keyed by extractor or engine:extractor (the latter wins)
 min_vram_gb:
   default: 0
-  codet5: 24
+  codet5: 32
   qwen3-emb: 24
   llm2vec: 32
 
