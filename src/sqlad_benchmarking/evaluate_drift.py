@@ -36,6 +36,8 @@ from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
 from sqlad_benchmarking.datasets.superviz26_drift import Superviz26Drift, load_drift
 from sqlad_benchmarking.evaluate_suite import (
     DEFAULT_SAVE_METHODS,
+    SUBSAMPLE_EXTRACTORS,
+    SUBSAMPLE_FRACTION,
     VAL_FRACTION,
     _mlflow_key,
     _model_filename,
@@ -189,6 +191,16 @@ def _run_one_tracked(
         f"on concept-drift/{domain.value} ==="
     )
     origin_train, origin_test, shifted_test = load_drift(domain, root=data_root, limit=limit, seed=seed)
+
+    if extractor in SUBSAMPLE_EXTRACTORS:
+        origin_train = origin_train.sample(frac=SUBSAMPLE_FRACTION, random_state=seed).reset_index(drop=True)
+        origin_test = origin_test.sample(frac=SUBSAMPLE_FRACTION, random_state=seed).reset_index(drop=True)
+        shifted_test = shifted_test.sample(frac=SUBSAMPLE_FRACTION, random_state=seed).reset_index(drop=True)
+        logger.info(
+            f"  {EXTRACTOR_LABELS.get(extractor, extractor)} is configured to use a subsample, "
+            f"reduced train/S1/S2 to {SUBSAMPLE_FRACTION:.0%}"
+        )
+
     df_train_normal = split_normals(origin_train)
     # Hold out a validation slice of the train normals to calibrate the threshold
     # out-of-sample; the model is fitted on df_fit only.

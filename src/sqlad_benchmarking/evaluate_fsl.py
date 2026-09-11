@@ -51,7 +51,13 @@ from sqlad_benchmarking.data import split_normals
 from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
 from sqlad_benchmarking.datasets.superviz26_fsl import Superviz26, Superviz26FSL, load_fsl, lodo_source
 from sqlad_benchmarking.determinism import enable_determinism
-from sqlad_benchmarking.evaluate_suite import _model_filename, _validate_grid, parent_run_spec
+from sqlad_benchmarking.evaluate_suite import (
+    SUBSAMPLE_EXTRACTORS,
+    SUBSAMPLE_FRACTION,
+    _model_filename,
+    _validate_grid,
+    parent_run_spec,
+)
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
 from sqlad_benchmarking.features.cache import memory_only
 from sqlad_benchmarking.metrics import threshold_for_fpr, wilson_ci
@@ -386,6 +392,16 @@ def _run_target_tracked(
     # One fixed test set per cell (down-sampled once), shared by the whole sweep so
     # AUROCs at different k are read on the same samples.
     target_train, target_test = load_fsl(target, root=data_root, test_limit=test_limit, seed=7)
+
+    if extractor in SUBSAMPLE_EXTRACTORS:
+        # Only the test set matters here: the train side is already capped at max(ks)
+        # rows by _prepare_seed_features, so it is unaffected by dataset size.
+        target_test = target_test.sample(frac=SUBSAMPLE_FRACTION, random_state=7).reset_index(drop=True)
+        logger.info(
+            f"  {EXTRACTOR_LABELS.get(extractor, extractor)} is configured to use a subsample, "
+            f"reduced test to {SUBSAMPLE_FRACTION:.0%}"
+        )
+
     train_normal = split_normals(target_train)
     labels = target_test["label"].to_numpy()
     n_attacks = int(labels.sum())
