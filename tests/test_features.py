@@ -19,6 +19,7 @@ from sqlad_benchmarking.features.kakisim import KakisimExtractor
 from sqlad_benchmarking.features.loginov import FEATURE_NAMES, LoginovExtractor, extract_loginov_features
 from sqlad_benchmarking.features.qwen3_emb import Qwen3EmbExtractor
 from sqlad_benchmarking.features.tfidf import TfidfExtractor
+from sqlad_benchmarking.grid import EXTRACTOR_LABELS
 
 
 def _frame() -> pd.DataFrame:
@@ -310,3 +311,8 @@ def test_cache_pickle_roundtrip(tmp_path):
     # Restored extractor still reads the same cache dir, so the base is not re-invoked.
     assert restored.base.n_calls == before
     np.testing.assert_array_equal(out, np.array([[len(q)] for q in _frame()["full_query"]], dtype=np.float32))
+
+
+def test_the_registry_and_the_grid_names_stay_in_sync():
+    assert set(EXTRACTORS) == set(EXTRACTOR_LABELS)
+    assert GPU_EXTRACTORS <= set(EXTRACTORS)

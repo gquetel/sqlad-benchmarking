@@ -31,9 +31,18 @@ from sklearn.model_selection import train_test_split
 
 from sqlad_benchmarking.data import load_whole_sampled, split_normals
 from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
-from sqlad_benchmarking.features import EXTRACTOR_LABELS, EXTRACTORS, extractor_observes_insider
+from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
+from sqlad_benchmarking.grid import (
+    ALL_METHODS,
+    METHOD_LABELS,
+    Cell,
+    MethodName,
+    _validate_grid,
+    enumerate_cells,
+    parent_run_spec,
+)
 from sqlad_benchmarking.metrics import compute_metrics, recall_per_attack, threshold_for_fpr
-from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, build_method
+from sqlad_benchmarking.model import AEDetector, build_method
 from sqlad_benchmarking.tracking import (
     CellLog,
     capture_cell_log,
@@ -48,8 +57,6 @@ from sqlad_benchmarking.visualize import curve_artifact_dir, plot_curves
 
 logger = logging.getLogger(__name__)
 
-ALL_METHODS: tuple[MethodName, ...] = ("ocsvm", "lof", "ae")
-
 # OCSVM/LOF artifacts embed their training features: big, and nothing reloads them.
 DEFAULT_SAVE_METHODS = "ae"
 
@@ -63,82 +70,6 @@ VAL_FRACTION = 0.1
 # subsample both splits by 5x for these extractors only.
 SUBSAMPLE_EXTRACTORS = frozenset({"llm2vec", "qwen3-emb"})
 SUBSAMPLE_FRACTION = 1 / 5
-
-
-class Cell(NamedTuple):
-    """One unit of the evaluation grid: a single (scenario, method, extractor)."""
-
-    scenario: str
-    method: str
-    extractor: str
-
-
-def _all_scenarios(family: DatasetFamily) -> dict[str, StrEnum]:
-    """Map every scenario value the family exposes to its StrEnum member."""
-    return {s.value: s for scenarios in family.suites.values() for s in scenarios}
-
-
-def _validate_grid(
-    dataset: str, suite: str, methods: str, extractors: str, scenario: str | None = None
-) -> tuple[DatasetFamily, tuple[StrEnum, ...], tuple[str, ...], tuple[str, ...]]:
-    """Validate the requested grid and resolve it to (family, scenarios, methods, extractors).
-
-    When ``scenario`` is given it overrides ``suite`` and selects that single scenario;
-    otherwise the named suite is expanded. Raises ``typer.BadParameter`` on any unknown name.
-    """
-    if dataset not in FAMILIES:
-        raise typer.BadParameter(f"--dataset must be one of {sorted(FAMILIES)}")
-    family = FAMILIES[dataset]
-    if scenario is not None:
-        scenarios = _all_scenarios(family)
-        if scenario not in scenarios:
-            raise typer.BadParameter(f"--scenario for {dataset} must be one of {sorted(scenarios)}")
-        datasets: tuple[StrEnum, ...] = (scenarios[scenario],)
-    else:
-        if suite not in family.suites:
-            raise typer.BadParameter(f"--suite for {dataset} must be one of {sorted(family.suites)}")
-        datasets = family.suites[suite]
-    requested_methods = tuple(p.strip() for p in methods.split(",") if p.strip())
-    unknown = set(requested_methods) - set(ALL_METHODS)
-    if unknown:
-        raise typer.BadParameter(f"Unknown method(s): {sorted(unknown)}")
-    requested_extractors = tuple(e.strip() for e in extractors.split(",") if e.strip())
-    unknown_extractors = set(requested_extractors) - set(EXTRACTORS)
-    if unknown_extractors:
-        raise typer.BadParameter(f"Unknown extractor(s): {sorted(unknown_extractors)}")
-    return family, datasets, requested_methods, requested_extractors
-
-
-def parent_run_spec(family: DatasetFamily, method: str, extractor: str) -> tuple[str, dict[str, str]]:
-    """Build the (name, tags) of the MLflow parent run that groups a (method, extractor)."""
-    name = (
-        f"{family.name.capitalize()}:"
-        f"{METHOD_LABELS.get(method, method)} and "
-        f"{EXTRACTOR_LABELS.get(extractor, extractor)}"
-    )
-    # The family is not tagged: each family has its own MLflow experiment, so the
-    # parent is uniquely identified within that experiment by (method, extractor).
-    tags = {
-        "decision_engine": method,
-        "feature_extractor": extractor,
-        "run_role": "parent",
-    }
-    return name, tags
-
-
-def enumerate_cells(dataset: str, suite: str, methods: str, extractors: str) -> list[Cell]:
-    """Flatten the requested grid into ordered cells (method -> extractor -> scenario).
-
-    The ordering mirrors the nested loops in :func:`evaluate_suite`, so it is a stable
-    single source of truth for callers that fan the grid out (e.g. the SLURM submitter).
-    """
-    _, datasets, requested_methods, requested_extractors = _validate_grid(dataset, suite, methods, extractors)
-    return [
-        Cell(scenario.value, method, extractor)
-        for method in requested_methods
-        for extractor in requested_extractors
-        for scenario in datasets
-    ]
 
 
 @dataclass

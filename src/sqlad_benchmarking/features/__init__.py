@@ -31,6 +31,7 @@ from sqlad_benchmarking.features.roberta import RobertaExtractor
 from sqlad_benchmarking.features.securebert import SecureBert2Extractor, SecureBertExtractor
 from sqlad_benchmarking.features.sentbert import SentBertExtractor
 from sqlad_benchmarking.features.tfidf import TfidfExtractor
+from sqlad_benchmarking.grid import DEFAULT_EXTRACTOR, EXTRACTOR_LABELS, GPU_EXTRACTORS
 
 # Short name -> zero-arg factory returning a fresh, unfitted extractor.
 EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
@@ -61,51 +62,6 @@ EXTRACTORS: dict[str, Callable[[], TransformerMixin]] = {
 # Extractors whose transform returns a scipy sparse matrix. Decision heads must not
 # apply a scaler that centres its input: centring makes the matrix dense.
 SPARSE_EXTRACTORS = frozenset({"cv", "tfidf", "kakisim"})
-
-GPU_EXTRACTORS = frozenset(
-    {
-        "sbert",
-        "sbert2",
-        "codet5",
-        "roberta",
-        "modernbert",
-        "codebert",
-        "flan-t5",
-        "sentbert",
-        "qwen3-emb",
-        "llm2vec",
-    }
-)
-
-# Default extractor used when a caller does not specify one.
-DEFAULT_EXTRACTOR = "li"
-
-# Human-readable labels for logs and MLflow run names. Acronyms stay uppercase;
-# labels mirror their reference works (Li et al., SecureBERT, GAUR).
-EXTRACTOR_LABELS: dict[str, str] = {
-    "li": "Li",
-    "cv": "CountVectorizer",
-    "tfidf": "TF-IDF",
-    "sbert": "SecureBERT",
-    "sbert2": "SecureBERT2",
-    "loginov": "Loginov",
-    "kakisim": "Kakisim",
-    "codet5": "CodeT5+",
-    "roberta": "RoBERTa-base",
-    "modernbert": "ModernBERT-base",
-    "codebert": "CodeBERT",
-    "flan-t5": "Flan-T5-Small",
-    "sentbert": "SentenceBERT-mpnet",
-    "qwen3-emb": "Qwen3-Emb-0.6B",
-    "llm2vec": "LLM2Vec-Mistral-7B",
-    "gaur-expert": "GAUR (Expert)",
-    "gaur-chatgpt": "GAUR (ChatGPT)",
-    "gaur-claude": "GAUR (Claude)",
-    "gaur-llama": "GAUR (Llama)",
-    "gaur-mistral": "GAUR (Mistral)",
-    "gaur-gpt-oss": "GAUR (GPT-OSS)",
-    "gaur-ruleid": "GAUR (RuleID)",
-}
 
 
 def extractor_observes_insider(name: str) -> bool:

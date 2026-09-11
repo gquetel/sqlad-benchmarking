@@ -31,14 +31,9 @@ from torch import nn
 from sqlad_benchmarking.determinism import enable_determinism
 from sqlad_benchmarking.features import DEFAULT_EXTRACTOR, GPU_EXTRACTORS, SPARSE_EXTRACTORS, build_extractor
 from sqlad_benchmarking.features.cache import CachingExtractor, maybe_wrap, resolve_cache_dir
+from sqlad_benchmarking.grid import METHOD_LABELS, MethodName
 
 logger = logging.getLogger(__name__)
-
-MethodName = Literal["ocsvm", "lof", "ae"]
-
-# Human-readable labels for logs and MLflow run names; acronyms stay uppercase.
-METHOD_LABELS: dict[str, str] = {"ocsvm": "OCSVM", "lof": "LOF", "ae": "Autoencoder"}
-
 
 # Dense embeddings that are already bounded, so they need no scaler. This is a
 # different reason to skip the scaler than SPARSE_EXTRACTORS below.

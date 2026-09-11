@@ -60,6 +60,7 @@ from sqlad_benchmarking.evaluate_suite import (
 )
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
 from sqlad_benchmarking.features.cache import memory_only
+from sqlad_benchmarking.grid import DEFAULT_KS
 from sqlad_benchmarking.metrics import threshold_for_fpr, wilson_ci
 from sqlad_benchmarking.model import AEDetector
 from sqlad_benchmarking.tracking import (
@@ -80,7 +81,6 @@ DATASET = "superviz26-fsl"
 # few-shot models adapt from. The few-shot family only adds the adaptation protocol.
 BASE_FAMILY = "superviz26"
 
-DEFAULT_KS = "0,5,10,50,100,500,1000,10000"
 DEFAULT_SEEDS = "0,1,2,3,4"
 # Target test sets are large; down-sampling keeps the AUROC computation tractable.
 DEFAULT_TEST_LIMIT = 50000

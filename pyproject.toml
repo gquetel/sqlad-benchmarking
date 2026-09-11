@@ -41,6 +41,14 @@ cu126 = ["torch==2.12.0"]
 cpu = ["torch==2.12.0"]
 
 [dependency-groups]
+# Dependencies for the torch-free SLURM submit environment.
+submit = [
+  "mlflow-skinny==3.14",
+  "pandas",
+  "python-dotenv",
+  "pyyaml",
+  "typer",
+]
 dev = [
   "pytest",
   "coverage",

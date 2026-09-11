@@ -16,25 +16,34 @@ Cluster-specific settings, including partitions, memory limits, and time limits,
 
 ## Cluster environment
 
-The cluster has no Nix, and no module supplies Python 3.14. Thus `uv` installs itself and its own interpreter, both in your home directory, and builds the venv from the same `uv.lock` as the dev machine:
+The cluster has no Nix or Python 3.14 module. `uv` installs itself and Python in the home directory and builds two environments from `uv.lock`:
+
+| venv | use | build |
+|---|---|---|
+| `.venv-cluster` | array tasks, manual runs on a compute node | `. tools/setup-env.sh` |
+| `.venv-submit` | `slurm_submit`, on the submit node | `. tools/setup-env.sh submit` |
+
+The submit node's 3.5 GiB memory limit cannot unpack the CUDA wheels. Build `.venv-cluster` on a compute node:
 
 ```sh
-. tools/setup-env.sh   # -> .venv-cluster
+srun --partition=CPU --mem=16G --pty bash -lc '. tools/setup-env.sh'
 ```
 
-Run this once on the submit node. The home directory is shared, so every node sees the result. No module is needed: the wheels find the system libraries, and torch carries its own CUDA runtime. If a node ever lacks one, list it in `env.modules` (or in `SQLAD_MODULES`), and the job scripts load it after `module purge`.
+The shared home directory makes the result available to every node. If a system library is missing, add its module to `env.modules` or `SQLAD_MODULES`.
 
 The CUDA build stays pinned to `cu126` because the V100 partitions are Volta (compute capability 7.0), which newer CUDA versions drop. The same build also runs on the A100 partitions, which keeps every cell of a table on one stack.
 
-Array tasks only activate the shared venv. Before submission, `slurm_submit` syncs it from `uv.lock` with `--extra cu126` and checks its torch kernels against eligible partitions in `gpu_arch`.
-
-Run the submitter from that venv directly, not through `uv run`:
+`.venv-submit` omits torch and fits within the submit node's limit:
 
 ```sh
-.venv-cluster/bin/python -m tools.slurm_submit ...
+. tools/setup-env.sh submit          # once
+source .venv-submit/bin/activate.fish
+python -m tools.slurm_submit ...
 ```
 
-Do not use `uv run`: without `UV_PROJECT_ENVIRONMENT`, it manages `.venv`, not `.venv-cluster`. The cluster venv uses uv's interpreter and does not need `nix-shell`.
+Without `UV_PROJECT_ENVIRONMENT`, `uv run` manages a separate `.venv`. Activate the required environment or call its Python directly.
+
+Array tasks fail if `.venv-cluster` is stale or lacks kernels for their GPU partition.
 
 ## Submitting
 
@@ -61,7 +70,7 @@ Manifests, generated job scripts, and `.out` logs are written under `reports/slu
 Run it on the submit node, detached, so a dropped VPN does not kill it:
 
 ```bash
-nohup .venv-cluster/bin/python -m tools.slurm_submit \
+nohup .venv-submit/bin/python -m tools.slurm_submit \
   --dataset superviz26 --suite all --methods ae \
   --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb,llm2vec \
   --max-jobs 24 --interval 300 > reports/slurm/queue.log 2>&1 &

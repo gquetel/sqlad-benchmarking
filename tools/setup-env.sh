@@ -3,6 +3,13 @@
 # The packages always come from uv.lock. Only the interpreter changes: nix gives one on
 # the dev machines, uv installs its own on the cluster, which has no /nix. Each source
 # gets its own directory, because one checkout is visible to both over NFS.
+#
+#   . tools/setup-env.sh            # full environment
+#   . tools/setup-env.sh submit     # torch-free submit environment
+#
+# The full cluster environment exceeds the submit node's memory limit.
+#
+#   srun --partition=CPU --mem=16G --pty bash -lc '. tools/setup-env.sh'
 
 _sqlad_repo="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
@@ -46,4 +53,11 @@ else
     uv python install
 fi
 
-uv sync --frozen --extra "${SQLAD_EXTRA}"
+if [ "${1:-}" = "submit" ]; then
+    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/.venv-submit"
+    # Install the project without its training dependencies.
+    uv sync --frozen --only-group submit &&
+        uv pip install --quiet --python "${UV_PROJECT_ENVIRONMENT}/bin/python" --no-deps -e "${_sqlad_repo}"
+else
+    uv sync --frozen --extra "${SQLAD_EXTRA}"
+fi

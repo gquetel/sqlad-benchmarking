@@ -2660,6 +2660,13 @@ dev = [
     { name = "mypy" },
     { name = "pytest" },
 ]
+submit = [
+    { name = "mlflow-skinny" },
+    { name = "pandas" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "typer" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2690,6 +2697,13 @@ dev = [
     { name = "mkdocstrings-python" },
     { name = "mypy" },
     { name = "pytest" },
+]
+submit = [
+    { name = "mlflow-skinny", specifier = "==3.14" },
+    { name = "pandas" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "typer" },
 ]
 
 [[package]]

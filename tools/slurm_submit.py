@@ -1,58 +1,10 @@
-"""Fan an evaluation grid out to SLURM, drip-feeding it under the cluster's in-flight job cap.
-
-Each cell ``(scenario, method, extractor)`` becomes one array task that runs through
-:func:`evaluate_suite` and writes its own per-cell CSV under ``reports/{dataset}/cells/``
-(no shared writer, no merge step). Cells needing a GPU (``method == "ae"`` or an
-extractor in :data:`sqlad_benchmarking.features.GPU_EXTRACTORS`) go to a GPU array whose partition list is
-the GPU partitions with enough VRAM for that cell (per-cell minimum from ``min_vram_gb``, so a
-hungry model like CodeT5+ skips the 16 GB V100); the rest go to a CPU array. Cells listed in
-``long_running`` (config, keyed like ``min_vram_gb``) run on the 24h ``gpu-long`` block instead
-of the default 12h ``gpu`` block. Resources and the environment setup come from ``configs/slurm.yaml``.
-
-The cluster caps in-flight jobs per user (~24) and a full grid is hundreds, so by default this
-does not submit everything at once: it splits the grid into **units** (one ``(method,
-extractor)``) and every ``--interval`` seconds submits as many outstanding cells as the current
-headroom allows. **Every cell goes out exactly once.** A cell that fails is not resubmitted:
-a failure is nearly always a bug or a bad resource request, and retrying it only burns compute
-and fills the tracking server with dead runs. Fix the cause, then run the command again --
-which is also how a preempted cell gets another chance.
-
-- **done** -- already submitted in this session, or (with ``--check-mlflow``) it already had a
-  FINISHED run when the command started. The lookup happens once, at startup.
-- **in flight** -- a job named like the unit's :func:`_job_name` is in ``squeue``, e.g. from an
-  earlier invocation that is still running.
-- **pending** -- everything else; submitted while headroom remains. A unit submits only its
-  outstanding cells, so a partly finished one costs a partial array.
-
-``--check-mlflow`` skips cells that already finished, which is how you fill in the holes left
-by a broken batch; ``--no-queue`` submits everything in one go, ignoring the cap.
-
-Run it on the submit node under ``tmux``/``nohup`` so a dropped VPN does not kill it:
-
-    nohup .venv-cluster/bin/python -m tools.slurm_submit \\
-      --dataset superviz26 --suite all --methods ocsvm,lof,ae --extractors li,cv,sbert,codet5 \\
-      > reports/slurm/queue.log 2>&1 &
-
-Use the configured cluster venv directly. :func:`_ensure_env` syncs and validates it before
-submission; ``uv run`` manages the default ``.venv`` unless ``UV_PROJECT_ENVIRONMENT`` is set.
-
-Usage:
-    # See what it would do, without touching the cluster:
-    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run
-    # Only the cells that have no FINISHED run, to fill in the holes left by a broken batch:
-    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --check-mlflow
-    # Everything at once, ignoring the cap (the pre-queue behaviour):
-    python -m tools.slurm_submit --dataset superviz26 --methods ae --no-queue
-    # Full-split data is heavy; give the AE/CodeT5+ cells a 24h GPU reservation:
-    python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --gpu-section gpu-long
-"""
+"""Submit evaluation grids to SLURM."""
 
 from __future__ import annotations
 
 import getpass
 import json
 import logging
-import os
 import shutil
 import subprocess
 import time
@@ -65,34 +17,26 @@ import typer
 import yaml
 
 from sqlad_benchmarking.datasets import FAMILIES
-from sqlad_benchmarking.evaluate_fsl import DEFAULT_KS
-from sqlad_benchmarking.evaluate_suite import Cell, enumerate_cells, parent_run_spec
-from sqlad_benchmarking.features import GPU_EXTRACTORS
+from sqlad_benchmarking.grid import DEFAULT_KS, GPU_EXTRACTORS, Cell, enumerate_cells, parent_run_spec
 from sqlad_benchmarking.tracking import ensure_parent_run, experiment_name, setup_mlflow
 
 logger = logging.getLogger(__name__)
 
-# The tag naming a cell's scenario differs per protocol: each evaluator names it after what
-# it iterates over.
 SCENARIO_TAG = {"suite": "scenario", "drift": "domain", "fsl": "target"}
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Manifests, generated job scripts and .out logs (git-ignored), relative to REPO_ROOT.
 SUBMIT_DIR = "reports/slurm"
-# Site environment, when configs/slurm.yaml has no `env` block.
 DEFAULT_ENV = {"venv": ".venv-cluster", "modules": []}
-# The extra the compute nodes need: they run the GPU cells.
-VENV_EXTRA = "cu126"
 
 
 def _env(cfg: dict) -> dict:
-    """Site environment settings, with the defaults filled in."""
+    """Return the configured task environment."""
     return {**DEFAULT_ENV, **cfg.get("env", {})}
 
 
 def env_setup(cfg: dict) -> str:
-    """Return the module and venv setup for array tasks."""
+    """Build the task environment setup commands."""
     env = _env(cfg)
     lines = ["module purge", *(f"module load {m}" for m in env["modules"])] if env["modules"] else []
     lines.append(f"source {env['venv']}/bin/activate")
@@ -100,19 +44,19 @@ def env_setup(cfg: dict) -> str:
 
 
 def _needs_gpu(cell: Cell) -> bool:
-    """A cell needs a GPU when it trains an autoencoder or uses a GPU embedding extractor."""
+    """Return whether a cell needs a GPU."""
     return cell.method == "ae" or cell.extractor in GPU_EXTRACTORS
 
 
 def _min_vram(cell: Cell, cfg: dict) -> int:
-    """Per-GPU VRAM (GB) a cell needs: engine:extractor overrides extractor, else the default."""
+    """Return a cell's minimum VRAM in GB."""
     reqs = cfg.get("min_vram_gb", {})
     key = f"{cell.method}:{cell.extractor}"
     return int(reqs.get(key, reqs.get(cell.extractor, reqs.get("default", 0))))
 
 
 def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
-    """GPU partitions meeting req GB of VRAM, in config (preference) order so cells prefer the fastest GPU."""
+    """Return GPU partitions with enough VRAM."""
     eligible = [name for name, gb in gpu_cfg["partitions"].items() if gb >= req]
     if not eligible:
         raise typer.BadParameter(f"no GPU partition has >= {req} GB VRAM; check configs/slurm.yaml.")
@@ -120,22 +64,18 @@ def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
 
 
 def _is_long_running(cell: Cell, cfg: dict) -> bool:
-    """Whether a cell needs extended wall time, per config ``long_running`` (keyed by extractor or method)."""
+    """Return whether a cell needs extended wall time."""
     keys = set(cfg.get("long_running", []))
     return f"{cell.method}:{cell.extractor}" in keys or cell.extractor in keys
 
 
 def _gpu_section(cell: Cell, cfg: dict, default: str) -> str:
-    """GPU resource block for a cell: ``gpu-long`` when flagged long-running, else the submission default."""
+    """Return a cell's GPU resource section."""
     return "gpu-long" if _is_long_running(cell, cfg) else default
 
 
 def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
-    """Bucket label for a cell's array: cpu, the GPU section (gpu/gpu-long), or ``{section}-{req}gb`` for VRAM-pinned.
-
-    The section is baked into the label so long-running cells land in their own array (each
-    array carries one #SBATCH header) instead of sharing the default GPU block's wall time.
-    """
+    """Return a cell's resource bucket."""
     if not _needs_gpu(cell):
         return "cpu"
     section = _gpu_section(cell, cfg, gpu_section)
@@ -144,7 +84,7 @@ def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
 
 
 def _experiment_tag(dataset: str, suite: str) -> str:
-    """Short experiment-type tag for the job name: fsl/cd/big by family, else id/lodo by suite."""
+    """Return the experiment tag used in job names."""
     family = FAMILIES.get(dataset)
     if family is not None and family.protocol == "fsl":
         return "fsl"
@@ -156,21 +96,14 @@ def _experiment_tag(dataset: str, suite: str) -> str:
 
 
 def _job_name(dataset: str, suite: str, cells: list[Cell]) -> str:
-    """Informative SLURM job name: {tag}-{extractors}-{methods}-{dataset}.
-
-    Buckets split by resource class, so one array can mix extractors/methods; each is
-    listed once (in first-seen order) joined by '+' (e.g. id-li+cv-ocsvm+ae-superviz26).
-    """
+    """Build a SLURM job name."""
     extractors = "+".join(dict.fromkeys(c.extractor for c in cells))
     methods = "+".join(dict.fromkeys(c.method for c in cells))
     return f"{_experiment_tag(dataset, suite)}-{extractors}-{methods}-{dataset}"
 
 
 def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu", gpu_qos: str | None = None) -> dict:
-    """SBATCH resource block for a cell: the cpu block, or ``gpu_section`` with a VRAM-filtered partition list.
-
-    ``gpu_qos`` (opt-in, GPU cells only) overrides the QoS, e.g. the preemptible ``runfill``.
-    """
+    """Resolve a cell's SBATCH resources."""
     if not _needs_gpu(cell):
         return dict(cfg["cpu"])
     if gpu_section not in cfg:
@@ -183,92 +116,13 @@ def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu", gpu_qos:
     return res
 
 
-def _uv() -> str:
-    """Return uv's absolute path."""
-    uv = shutil.which("uv")
-    if uv is None:
-        raise typer.BadParameter("uv is not on PATH; it builds the venv the array tasks activate.")
-    return uv
-
-
-def _torch_arch_flags(venv: Path) -> set[str]:
-    """Return CUDA architectures compiled into the venv's torch."""
-    python = venv / "bin" / "python"
-    if not python.exists():
-        return set()
-    code = "import torch; print(torch._C._cuda_getArchFlags() or '')"
-    probe = subprocess.run([str(python), "-c", code], capture_output=True, text=True)  # noqa: S603
-    if probe.returncode != 0:
-        return set()
-    return set(probe.stdout.split())
-
-
-def _target_arches(cells: list[Cell], cfg: dict, gpu_section: str) -> dict[str, str]:
-    """Map every GPU partition these cells can be scheduled on to its CUDA architecture."""
-    declared = cfg.get("gpu_arch", {})
-    targets: dict[str, str] = {}
-    for cell in cells:
-        if not _needs_gpu(cell):
-            continue
-        section = cfg[_gpu_section(cell, cfg, gpu_section)]
-        for partition in _eligible_partitions(section, _min_vram(cell, cfg)):
-            if partition in declared:
-                targets[partition] = declared[partition]
-            else:
-                logger.warning(f"partition {partition} has no gpu_arch entry; not checking the venv against it.")
-    return targets
-
-
-def _lock_matches(venv: Path) -> bool:
-    """Return whether ``venv`` matches uv.lock for the CUDA extra."""
-    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
-    check = subprocess.run([_uv(), "sync", "--frozen", "--extra", VENV_EXTRA, "--check"], env=env, capture_output=True)  # noqa: S603
-    return check.returncode == 0
-
-
-def _venv_faults(venv: Path, targets: dict[str, str]) -> list[str]:
-    """Return reasons ``venv`` is unsuitable for the array tasks."""
-    if not (venv / "bin" / "activate").exists():
-        return ["missing"]
-    faults = []
-    if not _lock_matches(venv):
-        faults.append("does not match uv.lock")
-    have = _torch_arch_flags(venv)
-    missing = sorted(a for p, a in targets.items() if a not in have)
-    if missing:
-        faults.append(f"torch has no {', '.join(dict.fromkeys(missing))} kernels")
-    return faults
-
-
-def _sync_venv(venv: Path) -> None:
-    """Sync ``venv`` from uv.lock with the CUDA extra."""
-    logger.info(f"syncing {venv.name} (--extra {VENV_EXTRA})")
-    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
-    sync = subprocess.run([_uv(), "sync", "--frozen", "--extra", VENV_EXTRA], env=env, capture_output=True, text=True)  # noqa: S603
-    if sync.returncode != 0:
-        raise typer.BadParameter(f"could not sync {venv.name}: {sync.stderr.strip()}")
-
-
-def _ensure_env(cfg: dict, cells: list[Cell], gpu_section: str) -> None:
-    """Sync and validate the shared venv before submission."""
-    venv = REPO_ROOT / _env(cfg)["venv"]
-    targets = _target_arches(cells, cfg, gpu_section)
-    faults = _venv_faults(venv, targets)
-    if not faults:
-        return
-    logger.info(f"{venv.name}: {'; '.join(faults)}")
-    _sync_venv(venv)
-    faults = _venv_faults(venv, targets)
-    if faults:
-        raise typer.BadParameter(f"{venv.name} still wrong after a sync: {'; '.join(faults)}.")
-
-
 def _write_manifest(path: Path, cells: list[Cell]) -> None:
+    """Write cells as a JSON Lines manifest."""
     path.write_text("".join(json.dumps(cell._asdict()) + "\n" for cell in cells))
 
 
 def _reap_trap(dataset: str, manifest: Path, track: bool) -> str:
-    """Return the MLflow cleanup exit trap."""
+    """Build the MLflow cleanup trap."""
     if not track:
         return ""
     call = (
@@ -300,7 +154,7 @@ def _write_job_script(
     track: bool,
     limit: int | None,
 ) -> None:
-    """Generate a self-contained array script: full #SBATCH header, then dispatch one cell per index."""
+    """Write a SLURM array script."""
     directives = [
         f"#SBATCH --job-name={job_name}",
         f"#SBATCH --output={log_pattern}",
@@ -342,10 +196,7 @@ python -m tools.slurm_run_cell \\
 
 
 def _submit_array(script: Path, dry_run: bool) -> str | None:
-    """Submit (or, in dry-run, just print) one job array and return its job id.
-
-    Resources live in the script's #SBATCH header, so submission is just ``sbatch <script>``.
-    """
+    """Submit an array and return its job ID."""
     cmd = ["sbatch", str(script)]
     if dry_run:
         logger.info("DRY-RUN: " + " ".join(cmd))
@@ -354,10 +205,8 @@ def _submit_array(script: Path, dry_run: bool) -> str | None:
     if not sbatch:
         raise typer.BadParameter("sbatch not found on PATH; run on a SLURM submit node or use --dry-run.")
     cmd[0] = sbatch
-    # Safe: shell=False, absolute sbatch path, script generated from the versioned config.
     result = subprocess.run(cmd, shell=False, capture_output=True, text=True)  # noqa: S603
     if result.returncode != 0:
-        # Propagate sbatch errors
         raise typer.BadParameter(f"sbatch rejected {script}:\n{result.stderr.strip() or result.stdout.strip()}")
     logger.info(result.stdout.strip())
     return result.stdout.strip().split()[-1]
@@ -378,18 +227,13 @@ def _submit_cells(
     run_id: str | None,
     dry_run: bool,
 ) -> None:
-    """Pre-create the MLflow parents and submit ``cells`` as one job array per resource class."""
-    # An explicit run_id is honoured as-is; an auto-generated one starts as a timestamp so we
-    # have a directory to stage manifests/scripts in, then gets renamed to date-<jobid> once
-    # sbatch hands back the first array's id (the id doesn't exist until after submission).
+    """Submit cells as resource-grouped arrays."""
     explicit_run_id = run_id is not None
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S")
     submit_dir = REPO_ROOT / SUBMIT_DIR / run_id
     (submit_dir / "logs").mkdir(parents=True, exist_ok=True)
     logger.info(f"{len(cells)} cells -> {submit_dir}")
 
-    # Pre-create the MLflow parents once, serially, so concurrent array tasks reuse them
-    # instead of racing on find-or-create and spawning duplicate parents.
     if track and setup_mlflow(dataset):
         for method, extractor in {(c.method, c.extractor) for c in cells}:
             name, tags = parent_run_spec(FAMILIES[dataset], method, extractor)
@@ -428,9 +272,6 @@ def _submit_cells(
     elif job_ids:
         logger.info(f"Submitted job arrays: {', '.join(job_ids)}")
         if not explicit_run_id:
-            # Rename the staging dir to date-<first job id>. The in-flight arrays carry the
-            # original absolute --output/--error paths, so leave a symlink at the old path for
-            # tasks that open their logs after the rename.
             final_dir = REPO_ROOT / SUBMIT_DIR / f"{run_id.split('-')[0]}-{job_ids[0]}"
             submit_dir.rename(final_dir)
             submit_dir.symlink_to(final_dir)
@@ -438,7 +279,7 @@ def _submit_cells(
 
 
 class Unit(NamedTuple):
-    """One submission: a ``(method, extractor)`` pair across every scenario of the suite."""
+    """A method-extractor submission unit."""
 
     method: str
     extractor: str
@@ -447,7 +288,7 @@ class Unit(NamedTuple):
 
 
 def _build_units(dataset: str, suite: str, methods: str, extractors: str) -> list[Unit]:
-    """Split the grid into one unit per ``(method, extractor)``, in the order given on the CLI."""
+    """Split a grid into submission units."""
     units = []
     for method in methods.split(","):
         for extractor in extractors.split(","):
@@ -457,18 +298,14 @@ def _build_units(dataset: str, suite: str, methods: str, extractors: str) -> lis
 
 
 def _protocol(dataset: str) -> str:
+    """Return a dataset's evaluation protocol."""
     return FAMILIES[dataset].protocol if dataset in FAMILIES else "suite"
 
 
 def _finished_cells(dataset: str, run_type: str | None, ks: str) -> set[Cell]:
-    """Cells with a FINISHED run on the tracking server.
-
-    Few-shot cells sweep several ``k`` under one target, so one counts as finished only
-    once every ``k`` has its own run.
-    """
+    """Return cells with complete tracked runs."""
     protocol = _protocol(dataset)
     filters = ["attributes.status = 'FINISHED'"]
-    # The few-shot evaluator does not tag run_type, so filtering on it would drop every run.
     if run_type and protocol != "fsl":
         filters.append(f"tags.run_type = '{run_type}'")
     name = experiment_name(dataset)
@@ -483,7 +320,6 @@ def _finished_cells(dataset: str, run_type: str | None, ks: str) -> set[Cell]:
     seen: dict[Cell, set[str]] = defaultdict(set)
     for run in runs:
         tags = run.data.tags
-        # Parent runs carry no scenario tag: they group children, they are not results.
         scenario = tags.get(tag)
         if not scenario:
             continue
@@ -494,7 +330,7 @@ def _finished_cells(dataset: str, run_type: str | None, ks: str) -> set[Cell]:
 
 
 def _outstanding(units: list[Unit], done: set[Cell]) -> dict[str, list[Cell]]:
-    """Cells still to run, per unit job name, dropping units with nothing left."""
+    """Group outstanding cells by job name."""
     pending = {}
     for unit in units:
         cells = [cell for cell in unit.cells if cell not in done]
@@ -504,21 +340,16 @@ def _outstanding(units: list[Unit], done: set[Cell]) -> dict[str, list[Cell]]:
 
 
 def _squeue(user: str, count_array_tasks: bool, dry_run: bool = False) -> list[str]:
-    """Job names currently queued or running for ``user`` (``-r`` expands array tasks into one row each).
-
-    Returns one entry per counted job, so ``len()`` is the number of jobs against the cap
-    and the names identify which units are already in flight.
-    """
+    """Return a user's queued and running job names."""
     squeue = shutil.which("squeue")
     if not squeue:
-        if dry_run:  # let a dry run work off the submit node: pretend the queue is empty
+        if dry_run:
             logger.info("DRY-RUN: squeue not found, assuming an empty queue.")
             return []
         raise typer.BadParameter("squeue not found on PATH; run this on the SLURM submit node or use --dry-run.")
     cmd = [squeue, "-h", "-u", user, "-O", "Name:200"]
     if count_array_tasks:
         cmd.append("-r")
-    # Safe: shell=False, absolute squeue path, no user-controlled arguments.
     result = subprocess.run(cmd, shell=False, capture_output=True, text=True)  # noqa: S603
     if result.returncode != 0:
         raise RuntimeError(f"squeue failed: {result.stderr.strip()}")
@@ -528,17 +359,12 @@ def _squeue(user: str, count_array_tasks: bool, dry_run: bool = False) -> list[s
 def _tick(
     units: list[Unit], *, done: set[Cell], max_jobs: int, user: str, count_array_tasks: bool, **submit_kwargs
 ) -> int:
-    """Submit as many pending units as fit under ``max_jobs``. Returns the number of units still to do.
-
-    Every cell this tick disposes of -- submitted, rejected, or too big for the cap -- is added
-    to ``done``, so the caller's loop always makes progress and no cell goes out twice.
-    """
+    """Fill available queue capacity and return the units left."""
     running = _squeue(user, count_array_tasks, dry_run=submit_kwargs["dry_run"])
     in_flight_names = set(running)
     headroom = max_jobs - len(running)
 
     pending = {name: cells for name, cells in _outstanding(units, done).items() if name not in in_flight_names}
-    # One cell is one array task, thus one job: count cells, not units.
     remaining = sum(len(cells) for cells in pending.values())
     logger.info(f"{len(running)} job(s) currently running, {remaining} job(s) remaining")
 
@@ -546,7 +372,6 @@ def _tick(
     for job_name, cells in pending.items():
         n = len(cells)
         if n > max_jobs:
-            # It can never fit, thus waiting for headroom would spin forever: drop it.
             logger.warning(f"dropping {job_name}: {n} cells exceeds the {max_jobs}-job cap on its own")
             done.update(cells)
             continue
@@ -554,15 +379,12 @@ def _tick(
             continue
         unit = by_name[job_name]
         logger.info(f"submitting {job_name} ({n} cells)")
-        # Explicit per-unit run_id: several units can be submitted in the same tick, and the
-        # auto-generated id is a whole-second timestamp they would collide on.
         run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{unit.method}-{unit.extractor}"
         try:
             _submit_cells(cells, run_id=run_id, **submit_kwargs)
-        except Exception as exc:  # a rejected unit must not take the whole queue down
-            # sbatch rejects on a bad resource request, which the next tick would hit again.
+        except Exception as exc:
             logger.error(f"submit failed for {job_name}, not retrying: {exc}")
-        done.update(cells)  # submitted is done: a cell goes out once, whatever becomes of it
+        done.update(cells)
         headroom -= n
     return len(_outstanding(units, done))
 
@@ -607,7 +429,7 @@ def submit(
     ] = None,
     dry_run: Annotated[bool, typer.Option(help="Print the manifests and sbatch commands without submitting.")] = False,
 ) -> None:
-    """Submit the grid's outstanding cells, by default drip-fed under the in-flight job cap."""
+    """Submit outstanding grid cells."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     cfg = yaml.safe_load(config.read_text())
     cfg["register"] = register
@@ -615,8 +437,6 @@ def submit(
     units = _build_units(dataset, suite, methods, extractors)
     total_cells = sum(len(u.cells) for u in units)
 
-    if not dry_run:
-        _ensure_env(cfg, [cell for unit in units for cell in unit.cells], gpu_section)
     if check_mlflow and not setup_mlflow(dataset):
         raise typer.BadParameter("MLFLOW_TRACKING_URI is not set; --check-mlflow cannot look up what finished.")
 
@@ -632,9 +452,6 @@ def submit(
         limit=limit,
         dry_run=dry_run,
     )
-    # Doneness is decided once, here: the cells that already finished. From then on a cell is
-    # marked done the moment it is submitted, so each goes out exactly once and a failing one
-    # is never retried.
     done: set[Cell] = set()
     if check_mlflow:
         done = _finished_cells(dataset, run_type or None, ks)

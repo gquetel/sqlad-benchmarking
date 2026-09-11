@@ -18,7 +18,7 @@ versions or regenerate the lock without explicit instruction.
 # Relevant commands
 
 * The project uses `uv` for Python package management on top of the Nix-provided interpreter.
-  * To sync the environment from the lock: `. tools/setup-env.sh` (`.venv-nix` under Nix, `.venv-cluster` on the cluster).
+  * To sync the environment from the lock: `. tools/setup-env.sh` (`.venv-nix` under Nix, `.venv-cluster` on the cluster). Use `. tools/setup-env.sh submit` for the torch-free `.venv-submit`.
   * To add a package: `uv add <package>==<exact-version>` (then commit `uv.lock` + `requirements.txt`).
   * To regenerate the lock and the `requirements.txt` export: `invoke lock`.
   * To run a command in the project env: `uv run --frozen --extra cu126 <command>` (`--extra cpu` with no GPU).
