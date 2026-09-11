@@ -51,6 +51,7 @@ from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, buil
 from sqlad_benchmarking.tracking import (
     CellLog,
     capture_cell_log,
+    cell_log_path,
     delete_running_cell_runs,
     ensure_parent_run,
     log_dataset_input,
@@ -133,7 +134,6 @@ def _run_one(
     extractor: str,
     data_root: Path,
     model_dir: Path,
-    log_dir: Path,
     limit: int | None = None,
     target_fpr: float = 0.001,
     capture_insider: bool = False,
@@ -144,8 +144,9 @@ def _run_one(
     save_methods: frozenset[str] = frozenset({"ae"}),
 ) -> DriftResultRow:
     """Train one cell on the origin (S1) normals and evaluate it on S1 and the shifted (S2) test set."""
-    stem = f"{method}_{extractor}_{family.name}_{domain.value}"
-    with capture_cell_log(log_dir, stem) as cell_log:
+    log_path = cell_log_path(family.name, method, extractor, domain.value)
+    stem = log_path.stem
+    with capture_cell_log(log_path.parent, stem) as cell_log:
         return _run_one_tracked(
             family=family,
             domain=domain,
@@ -415,7 +416,6 @@ def evaluate_drift(
             if scenario is not None
             else Path(f"reports/{dataset}_results.csv")
         )
-    log_dir = Path(f"reports/{dataset}/logs")
     model_dir.mkdir(parents=True, exist_ok=True)
     report.parent.mkdir(parents=True, exist_ok=True)
     if scenario is not None:
@@ -443,7 +443,6 @@ def evaluate_drift(
                         extractor,
                         data_root,
                         model_dir,
-                        log_dir,
                         limit=limit,
                         target_fpr=target_fpr,
                         capture_insider=cell_capture_insider,

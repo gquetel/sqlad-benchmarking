@@ -37,6 +37,7 @@ from sqlad_benchmarking.model import METHOD_LABELS, AEDetector, MethodName, buil
 from sqlad_benchmarking.tracking import (
     CellLog,
     capture_cell_log,
+    cell_log_path,
     delete_running_cell_runs,
     ensure_parent_run,
     log_and_register_detector,
@@ -201,7 +202,6 @@ def _run_one(
     extractor: str,
     data_root: Path,
     model_dir: Path,
-    log_dir: Path,
     limit: int | None = None,
     target_fpr: float = 0.001,
     capture_insider: bool = False,
@@ -213,8 +213,9 @@ def _run_one(
     save_methods: frozenset[str] = frozenset({"ae"}),
 ) -> ResultRow:
     """Train + evaluate one (scenario, method, extractor) cell, optionally logging to MLflow."""
-    stem = f"{method}_{extractor}_{family.name}_{scenario.value}"
-    with capture_cell_log(log_dir, stem) as cell_log:
+    log_path = cell_log_path(family.name, method, extractor, scenario.value)
+    stem = log_path.stem
+    with capture_cell_log(log_path.parent, stem) as cell_log:
         return _run_one_tracked(
             family=family,
             scenario=scenario,
@@ -554,9 +555,6 @@ def evaluate_suite(
             if scenario is not None
             else Path(f"reports/{dataset}_results.csv")
         )
-    # Per-cell logs live under reports/{dataset}/logs/ (next to the per-cell CSVs) and
-    # are also uploaded to each child run as an MLflow artifact.
-    log_dir = Path(f"reports/{dataset}/logs")
     model_dir.mkdir(parents=True, exist_ok=True)
     report.parent.mkdir(parents=True, exist_ok=True)
     if scenario is not None:
@@ -585,7 +583,6 @@ def evaluate_suite(
                         extractor,
                         data_root,
                         model_dir,
-                        log_dir,
                         limit=limit,
                         target_fpr=target_fpr,
                         capture_insider=capture_insider,

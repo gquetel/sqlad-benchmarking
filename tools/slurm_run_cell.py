@@ -29,11 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class SlurmPreempted(RuntimeError):
-    """Raised when SLURM sends SIGTERM (preemption under a QoS like ``runfill``, or a
-    time-limit kill) so the in-flight cell's ``with mlflow.start_run()`` block sees an
-    exception and runs its cleanup, instead of the process dying mid-run and leaving
-    the MLflow run stuck at RUNNING with no artifacts.
-    """
+    """Raised when SLURM sends SIGTERM to an active cell."""
 
 
 def _handle_sigterm(signum, frame) -> None:  # noqa: ARG001

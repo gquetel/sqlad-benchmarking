@@ -6,6 +6,7 @@ Some specificity of this setup:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -164,6 +165,11 @@ class CellLog:
             logger.warning(f"Could not upload log artifact {self.path.name}: {exc}")
 
 
+def cell_log_path(dataset: str, method: str, extractor: str, scenario: str) -> Path:
+    """Return an evaluation cell's log path."""
+    return Path("reports") / dataset / "logs" / f"{method}_{extractor}_{dataset}_{scenario}.log"
+
+
 @contextmanager
 def capture_cell_log(log_dir: Path, stem: str) -> Iterator[CellLog]:
     """Capture log records in ``log_dir/<stem>.log``."""
@@ -252,3 +258,39 @@ def log_dataset_input(*, url: str, name: str, digest: str, context: str) -> None
     # mlflow does not accept digest > 36 chars
     dataset = MetaDataset(source=HTTPDatasetSource(url=url), name=name, digest=digest[:36])
     mlflow.log_input(dataset, context=context)
+
+
+def _killed_cell_log(dataset: str, manifest: str, index: int) -> Path | None:
+    """Return a manifest cell's log path if it exists."""
+    if not manifest or index < 0:
+        return None
+    try:
+        lines = [line for line in Path(manifest).read_text().splitlines() if line.strip()]
+        cell = json.loads(lines[index])
+        path = cell_log_path(dataset, cell["method"], cell["extractor"], cell["scenario"])
+        return path if path.exists() else None
+    except (OSError, ValueError, IndexError, KeyError, TypeError) as exc:
+        logger.warning(f"Could not find the log of cell {index} of {manifest}: {exc}")
+        return None
+
+
+def fail_killed_run(dataset: str, status: int, manifest: str = "", index: int = -1) -> None:
+    """Attach a killed cell's log and mark its MLflow run FAILED."""
+    job_id = os.environ.get("SLURM_JOB_ID", "")
+    try:
+        if not setup_mlflow(dataset):
+            return
+        log_path = _killed_cell_log(dataset, manifest, index)
+        filter_string = f"attributes.status = 'RUNNING' and tags.`slurm_job_id` = '{job_id}'"
+        runs = mlflow.search_runs(filter_string=filter_string, output_format="list")
+        client = MlflowClient()
+        for run in runs:
+            if log_path is not None:
+                try:
+                    client.log_artifact(run.info.run_id, str(log_path), artifact_path="logs")
+                except Exception as exc:
+                    logger.warning(f"Could not upload log artifact {log_path.name}: {exc}")
+            client.set_terminated(run.info.run_id, status="FAILED")
+            logger.info(f"Marked MLflow run {run.info.run_id} FAILED: task exited with status {status}")
+    except Exception as exc:
+        logger.warning(f"Could not close the MLflow run of SLURM job {job_id}: {exc}")

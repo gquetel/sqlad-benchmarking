@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from sqlad_benchmarking.tracking import capture_cell_log
+from sqlad_benchmarking import tracking
+from sqlad_benchmarking.tracking import capture_cell_log, cell_log_path
 from sqlad_benchmarking.visualize import curve_artifact_dir, plot_curves
 
 
@@ -57,8 +61,6 @@ def test_cell_log_exception_lands_in_the_file_not_on_the_console(tmp_path, capsy
 
 
 def test_curve_artifact_dir_files_points_apart_from_figures():
-    from pathlib import Path
-
     assert curve_artifact_dir(Path("ae_li_superviz26_a_roc.png")) == "roc_curves"
     assert curve_artifact_dir(Path("ae_li_superviz26_a_auprc.png")) == "pr_curves"
     assert curve_artifact_dir(Path("ae_li_superviz26_a_roc.csv")) == "curve_data"
@@ -87,3 +89,88 @@ def test_plot_curves_returns_points_and_figures_when_rendering_works(tmp_path, m
     written = plot_curves(labels, scores, "a", tmp_path, "stem")
     assert [p.name for p in written] == ["stem_roc.csv", "stem_auprc.csv", "stem_roc.png", "stem_auprc.png"]
     assert [curve_artifact_dir(p) for p in written] == ["curve_data", "curve_data", "roc_curves", "pr_curves"]
+
+
+def test_cell_log_path_names_the_log_of_a_cell():
+    expected = Path("reports/superviz26/logs/ocsvm_li_superviz26_a-a.log")
+    assert cell_log_path("superviz26", "ocsvm", "li", "a-a") == expected
+
+
+@pytest.fixture
+def killed_cell(tmp_path, monkeypatch):
+    """Create a manifest and cell log."""
+    monkeypatch.chdir(tmp_path)
+    manifest = tmp_path / "cells_cpu.jsonl"
+    manifest.write_text(
+        json.dumps({"scenario": "x", "method": "ocsvm", "extractor": "li"})
+        + "\n"
+        + json.dumps({"scenario": "a-a", "method": "ae", "extractor": "cv"})
+        + "\n"
+    )
+    log = cell_log_path("superviz26", "ae", "cv", "a-a")
+    log.parent.mkdir(parents=True)
+    log.write_text("CUDA out of memory\n")
+    return SimpleNamespace(manifest=manifest, index=1, log=log)
+
+
+@pytest.fixture
+def fake_mlflow(monkeypatch):
+    """Mock one RUNNING MLflow run."""
+    calls = SimpleNamespace(filter=None, terminated=[], artifacts=[], upload_error=None)
+
+    class FakeClient:
+        def log_artifact(self, run_id, local_path, artifact_path):
+            if calls.upload_error is not None:
+                raise calls.upload_error
+            calls.artifacts.append((run_id, local_path, artifact_path))
+
+        def set_terminated(self, run_id, status):
+            calls.terminated.append((run_id, status))
+
+    def fake_search_runs(filter_string, **kwargs):
+        calls.filter = filter_string
+        return [SimpleNamespace(info=SimpleNamespace(run_id="r1"))]
+
+    monkeypatch.setenv("SLURM_JOB_ID", "985129")
+    monkeypatch.setattr(tracking, "setup_mlflow", lambda dataset: True)
+    monkeypatch.setattr(tracking.mlflow, "search_runs", fake_search_runs)
+    monkeypatch.setattr(tracking, "MlflowClient", FakeClient)
+    return calls
+
+
+def test_fail_killed_run_attaches_the_log_of_the_cell_that_died(killed_cell, fake_mlflow):
+    tracking.fail_killed_run("superviz26", 137, str(killed_cell.manifest), killed_cell.index)
+    assert "attributes.status = 'RUNNING'" in fake_mlflow.filter
+    assert "slurm_job_id` = '985129'" in fake_mlflow.filter
+    assert fake_mlflow.artifacts == [("r1", str(killed_cell.log), "logs")]
+    assert fake_mlflow.terminated == [("r1", "FAILED")]
+
+
+def test_fail_killed_run_closes_the_run_when_the_cell_wrote_no_log(killed_cell, fake_mlflow):
+    killed_cell.log.unlink()
+    tracking.fail_killed_run("superviz26", 137, str(killed_cell.manifest), killed_cell.index)
+    assert fake_mlflow.artifacts == []
+    assert fake_mlflow.terminated == [("r1", "FAILED")]
+
+
+def test_fail_killed_run_closes_the_run_when_the_upload_fails(killed_cell, fake_mlflow):
+    fake_mlflow.upload_error = OSError("no route")
+    tracking.fail_killed_run("superviz26", 137, str(killed_cell.manifest), killed_cell.index)
+    assert fake_mlflow.terminated == [("r1", "FAILED")]
+
+
+def test_fail_killed_run_closes_the_run_when_the_manifest_is_invalid(killed_cell, fake_mlflow):
+    killed_cell.manifest.write_text("[]\n")
+    tracking.fail_killed_run("superviz26", 137, str(killed_cell.manifest), 0)
+    assert fake_mlflow.terminated == [("r1", "FAILED")]
+
+
+def test_fail_killed_run_never_raises_when_the_tracking_server_is_down(monkeypatch):
+    monkeypatch.setattr(tracking, "setup_mlflow", lambda dataset: True)
+    monkeypatch.setattr(tracking.mlflow, "search_runs", lambda **kwargs: (_ for _ in ()).throw(OSError("no route")))
+    tracking.fail_killed_run("superviz26", 137)
+
+
+def test_fail_killed_run_never_raises_when_mlflow_setup_fails(monkeypatch):
+    monkeypatch.setattr(tracking, "setup_mlflow", lambda dataset: (_ for _ in ()).throw(OSError("bad config")))
+    tracking.fail_killed_run("superviz26", 137)

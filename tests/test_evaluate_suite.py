@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -53,7 +55,7 @@ _GPU_CFG = {
 }
 
 
-def _write_cpu_script(tmp_path, *, limit):
+def _write_cpu_script(tmp_path, *, limit, track=False):
     script = tmp_path / "job.sbatch"
     _write_job_script(
         script,
@@ -66,7 +68,7 @@ def _write_cpu_script(tmp_path, *, limit):
         log_pattern=str(tmp_path / "logs" / "cpu-%A_%a.log"),
         target_fpr=0.001,
         seed=7,
-        track=False,
+        track=track,
         limit=limit,
     )
     return script.read_text()
@@ -187,6 +189,20 @@ def test_job_script_includes_limit_when_set(tmp_path):
 
 def test_job_script_omits_limit_when_none(tmp_path):
     assert "--limit" not in _write_cpu_script(tmp_path, limit=None)
+
+
+def test_job_script_marks_the_mlflow_run_failed_when_the_task_dies(tmp_path):
+    script = _write_cpu_script(tmp_path, limit=None, track=True)
+    assert "trap close_dead_run EXIT" in script
+    manifest = tmp_path / "cells.jsonl"
+    assert f"fail_killed_run('superviz25', $status, '{manifest}', ${{SLURM_ARRAY_TASK_ID:--1}})" in script
+    bash = shutil.which("bash")
+    assert bash is not None
+    assert subprocess.run([bash, "-n", str(tmp_path / "job.sbatch")], check=False).returncode == 0  # noqa: S603
+
+
+def test_job_script_has_no_exit_trap_without_tracking(tmp_path):
+    assert "fail_killed_run" not in _write_cpu_script(tmp_path, limit=None, track=False)
 
 
 def test_venv_faults_reports_a_missing_venv(tmp_path):

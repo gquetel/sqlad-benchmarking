@@ -65,6 +65,7 @@ from sqlad_benchmarking.model import AEDetector
 from sqlad_benchmarking.tracking import (
     CellLog,
     capture_cell_log,
+    cell_log_path,
     delete_running_cell_runs,
     ensure_parent_run,
     log_dataset_input,
@@ -312,7 +313,6 @@ def _run_target(
     extractor: str,
     data_root: Path,
     model_dir: Path,
-    log_dir: Path,
     ks: tuple[int, ...],
     seeds: tuple[int, ...],
     *,
@@ -323,8 +323,9 @@ def _run_target(
     track: bool,
 ) -> list[FSLResultRow]:
     """Sweep the adaptation budget for one (target, extractor) cell and return its rows."""
-    stem = f"ae_{extractor}_{family.name}_{target.value}"
-    with capture_cell_log(log_dir, stem) as cell_log:
+    log_path = cell_log_path(family.name, "ae", extractor, target.value)
+    stem = log_path.stem
+    with capture_cell_log(log_path.parent, stem) as cell_log:
         try:
             return _run_target_tracked(
                 family=family,
@@ -524,7 +525,6 @@ def evaluate_fsl(
             if scenario is not None
             else Path(f"reports/{dataset}_results.csv")
         )
-    log_dir = Path(f"reports/{dataset}/logs")
     report.parent.mkdir(parents=True, exist_ok=True)
     if scenario is not None:
         report.unlink(missing_ok=True)
@@ -549,7 +549,6 @@ def evaluate_fsl(
                     extractor,
                     data_root,
                     model_dir,
-                    log_dir,
                     ks_parsed,
                     seeds_parsed,
                     test_limit=test_limit,

@@ -267,6 +267,24 @@ def _write_manifest(path: Path, cells: list[Cell]) -> None:
     path.write_text("".join(json.dumps(cell._asdict()) + "\n" for cell in cells))
 
 
+def _reap_trap(dataset: str, manifest: Path, track: bool) -> str:
+    """Return the MLflow cleanup exit trap."""
+    if not track:
+        return ""
+    call = (
+        "from sqlad_benchmarking.tracking import fail_killed_run; "
+        f"fail_killed_run('{dataset}', $status, '{manifest}', ${{SLURM_ARRAY_TASK_ID:--1}})"
+    )
+    return f"""close_dead_run() {{
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    python -c "{call}"
+  fi
+}}
+trap close_dead_run EXIT
+"""
+
+
 def _write_job_script(
     path: Path,
     *,
@@ -311,6 +329,7 @@ def _write_job_script(
 set -euo pipefail
 cd {REPO_ROOT}
 {env_setup(cfg)}
+{_reap_trap(dataset, manifest, track)}
 python -m tools.slurm_run_cell \\
   --manifest {manifest} \\
   --index "$SLURM_ARRAY_TASK_ID" \\
