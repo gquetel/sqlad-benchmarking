@@ -28,12 +28,12 @@ from sqlad_benchmarking.visualize import image_export
 logger = logging.getLogger(__name__)
 
 
-class SlurmPreempted(RuntimeError):
+class SlurmPreemptedError(RuntimeError):
     """Raised when SLURM sends SIGTERM to an active cell."""
 
 
 def _handle_sigterm(signum, frame) -> None:  # noqa: ARG001
-    raise SlurmPreempted("received SIGTERM (SLURM preemption or time limit)")
+    raise SlurmPreemptedError("received SIGTERM (SLURM preemption or time limit)")
 
 
 def run_cell(

@@ -109,7 +109,7 @@ def _num(x: object) -> float | None:
     """Coerce an MLflow metric cell to a float, mapping missing/NaN to None."""
     try:
         v = float(x)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return None if math.isnan(v) else v
 
@@ -219,7 +219,8 @@ DUMBBELL_MACRO = (
     "    % #1=ycoord #2=s1-auroc #3=s2-auroc -- gray connector plus the reference dot / post-drift square markers.\n"
     "    \\addplot[gray, line width=0.55pt, forget plot] coordinates {(#2,#1) (#3,#1)};\n"
     "    \\addplot[only marks, mark=*, mark size=2.2pt, draw=black, fill=black, forget plot] coordinates {(#2,#1)};\n"
-    "    \\addplot[only marks, mark=square*, mark size=2pt, draw=black, fill=black, forget plot] coordinates {(#3,#1)};\n"
+    "    \\addplot[only marks, mark=square*, mark size=2pt, draw=black, fill=black, forget plot] "
+    "coordinates {(#3,#1)};\n"
     "  }"
 )
 
@@ -299,7 +300,8 @@ def _panel(
         value = rf"\textcolor[HTML]{{{color}}}{{{delta:+.2f}}}"
         lines.append(f"        \\dumbdelta{{{min(s1v, s2v):.4f}}}{{{max(s1v, s2v):.4f}}}{{{y}}}{{{value}}}")
     lines.append(
-        f"        \\draw[black!55, dashed, line width=0.45pt] (axis cs:{xmin:.2f},{sep_y}) -- (axis cs:{xmax:.2f},{sep_y});"
+        f"        \\draw[black!55, dashed, line width=0.45pt] (axis cs:{xmin:.2f},{sep_y}) -- "
+        f"(axis cs:{xmax:.2f},{sep_y});"
     )
     return lines
 
@@ -313,12 +315,7 @@ def render_figure(data: Results) -> str:
     """
     _warn_unregistered()
     avgs = _averages(data)
-    present = [
-        v
-        for cell in avgs.values()
-        for v in (cell["s1_auroc"], cell["s2_auroc"])
-        if v is not None
-    ]
+    present = [v for cell in avgs.values() for v in (cell["s1_auroc"], cell["s2_auroc"]) if v is not None]
     if not present:
         raise RuntimeError("No (extractor, engine) cell has both reference and post-drift averages; nothing to plot.")
     xmin, xmax = _nice_bounds(present)

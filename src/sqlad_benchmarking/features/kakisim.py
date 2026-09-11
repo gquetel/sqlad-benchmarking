@@ -21,7 +21,7 @@ import sqlparse
 from scipy.sparse import csr_matrix, hstack
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import CountVectorizer
-from sqlparse import tokens as T
+from sqlparse import tokens
 
 # ---- Tokenization & semantic tagging ----
 
@@ -87,45 +87,45 @@ _NOISY_FOR_E: set[str] = {"Int", "Punct", "Par"}
 DEFAULT_MAX_FEATURES = 200
 
 
-def _get_tag(ttype, token_val: str, next_tok=None) -> str:
-    if token_val == "(" or token_val == ")":
+def _get_tag(ttype, value: str, next_tok=None) -> str:
+    if value == "(" or value == ")":
         return "Par"
-    if ttype is T.Keyword.DDL:
+    if ttype is tokens.Keyword.DDL:
         return "DLL"
-    if ttype is T.Keyword.DML:
+    if ttype is tokens.Keyword.DML:
         return "DML"
-    if ttype in T.Keyword:
-        upper = token_val.upper()
+    if ttype in tokens.Keyword:
+        upper = value.upper()
         if upper in _KEYWORD_OVERRIDES:
             return _KEYWORD_OVERRIDES[upper]
         return "Keyw"
-    if ttype is T.Number.Integer or ttype is T.Number.Float:
+    if ttype is tokens.Number.Integer or ttype is tokens.Number.Float:
         return "Int"
-    if ttype is T.Number.Hexadecimal:
+    if ttype is tokens.Number.Hexadecimal:
         return "Hexadecimal"
-    if ttype is T.Literal.String.Single:
+    if ttype is tokens.Literal.String.Single:
         return "Quot"
-    if ttype is T.Punctuation:
+    if ttype is tokens.Punctuation:
         return "Punct"
-    if ttype is T.Wildcard:
+    if ttype is tokens.Wildcard:
         return "Wildcard"
-    if ttype is T.Comparison:
+    if ttype is tokens.Comparison:
         return "Comparison"
-    if ttype in T.Operator:
+    if ttype in tokens.Operator:
         return "Oper"
-    if ttype in T.Name:
-        if ttype is T.Name.Builtin:
+    if ttype in tokens.Name:
+        if ttype is tokens.Name.Builtin:
             return "Builtin"
         if next_tok is not None and next_tok.value == "(":
             return "Func"
-        upper = token_val.upper()
+        upper = value.upper()
         if upper in _KEYWORD_OVERRIDES:
             return _KEYWORD_OVERRIDES[upper]
         return "Identifi"
-    if ttype in T.Comment:
+    if ttype in tokens.Comment:
         return "Escap"
-    if ttype is T.Error:
-        if token_val == "'":
+    if ttype is tokens.Error:
+        if value == "'":
             return "Escap"
         return "Error"
     return "Unknown"

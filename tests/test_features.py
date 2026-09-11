@@ -140,7 +140,7 @@ def test_tfidf_is_stateful_and_sparse():
 def test_tfidf_caps_vocabulary_at_200_by_default():
     ext = TfidfExtractor()
     assert ext.max_features == 200
-    queries = [f"select col{i} from t{i}" for i in range(300)]
+    queries = [" ".join(("select", f"col{i}", "from", f"t{i}")) for i in range(300)]
     ext.fit(queries)
     assert ext.transform(queries).shape[1] == 200
 
