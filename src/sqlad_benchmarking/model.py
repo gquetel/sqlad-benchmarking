@@ -35,17 +35,20 @@ from sqlad_benchmarking.grid import METHOD_LABELS, MethodName
 
 logger = logging.getLogger(__name__)
 
-# Dense embeddings that are already bounded, so they need no scaler. This is a
-# different reason to skip the scaler than SPARSE_EXTRACTORS below.
-_BOUNDED_EXTRACTORS = frozenset({"sbert", "codet5"})
+# These embeddings are already in [-1, 1], so they need no scaler.
+# sbert, codebert, and roberta use tanh output; codet5 and qwen3-emb are normalized.
+_BOUNDED_EXTRACTORS = frozenset({"sbert", "codet5", "codebert", "roberta", "qwen3-emb"})
+
+# These embeddings can be negative, so scaling must keep their sign.
+_SIGNED_EMBEDDING_EXTRACTORS = frozenset({"flan-t5", "llm2vec", "modernbert", "sbert2", "sentbert"})
 
 
 def _scaler_for(extractor: str) -> TransformerMixin:
     """Pick a scaler compatible with the extractor's output.
 
-    Sparse extractors stay unscaled: StandardScaler centres its input, which makes the
-    matrix dense and raises. The bounded embeddings stay unscaled because they need no
-    scaling. Li and every GAUR mode use StandardScaler, matching gaur-sql-detect.
+    Sparse extractors stay unscaled because centering makes them dense. Bounded
+    embeddings are already in [-1, 1]. Li and GAUR use StandardScaler to match
+    gaur-sql-detect.
     """
     if extractor in SPARSE_EXTRACTORS or extractor in _BOUNDED_EXTRACTORS:
         return FunctionTransformer()
@@ -557,11 +560,8 @@ def build_method(
                 scaler=FunctionTransformer(),
                 output_activation="relu",
             )
-        if extractor in ("sbert", "codet5"):
-            # SecureBERT pooler_output is tanh-bounded and CodeT5+ embeddings are
-            # L2-normalized, both within [-1, 1]: train directly on the raw
-            # embeddings (no scaler) with a tanh output so reconstruction can span
-            # the negative range, mirroring the reference MyAutoEncoderTanh.
+        if extractor in _BOUNDED_EXTRACTORS:
+            # These inputs are already in [-1, 1], so tanh can reconstruct them directly.
             return AEDetector(
                 config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=512),
                 extractor=maybe_wrap(extractor_instance, cdir),
@@ -575,6 +575,14 @@ def build_method(
                 config=AEConfig(learning_rate=1e-3, epochs=100, batch_size=4096),
                 extractor=maybe_wrap(extractor_instance, cdir),
                 scaler=MaxAbsScaler(),
+            )
+        if extractor in _SIGNED_EMBEDDING_EXTRACTORS:
+            # These features can be negative. Keep their sign when scaling and use tanh
+            # so the model can reconstruct both positive and negative values.
+            return AEDetector(
+                extractor=maybe_wrap(extractor_instance, cdir),
+                scaler=MaxAbsScaler(),
+                output_activation="tanh",
             )
         # Li dense features are non-negative, so a sigmoid output needs inputs in
         # [0, 1]: MaxAbsScaler maps the feature matrix into that range.

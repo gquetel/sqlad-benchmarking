@@ -9,7 +9,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import FunctionTransformer, MaxAbsScaler, StandardScaler
 
 import sqlad_benchmarking.model as model_mod
-from sqlad_benchmarking.features import build_extractor
+from sqlad_benchmarking.features import EXTRACTORS, build_extractor
 from sqlad_benchmarking.model import (
     AEConfig,
     AEDetector,
@@ -53,10 +53,13 @@ def test_scaler_for_routes_per_extractor():
     assert isinstance(_scaler_for("cv"), FunctionTransformer)
     assert isinstance(_scaler_for("tfidf"), FunctionTransformer)
     assert isinstance(_scaler_for("kakisim"), FunctionTransformer)
-    # The sbert/codet5 embeddings are dense but already bounded, so they stay
-    # unscaled too; the Li and Loginov dense features are standardised.
+    # Bounded embeddings are already in [-1, 1], so they stay unscaled. Li and
+    # Loginov use standardization.
     assert isinstance(_scaler_for("sbert"), FunctionTransformer)
     assert isinstance(_scaler_for("codet5"), FunctionTransformer)
+    assert isinstance(_scaler_for("codebert"), FunctionTransformer)
+    assert isinstance(_scaler_for("roberta"), FunctionTransformer)
+    assert isinstance(_scaler_for("qwen3-emb"), FunctionTransformer)
     assert isinstance(_scaler_for("li"), StandardScaler)
     assert isinstance(_scaler_for("loginov"), StandardScaler)
 
@@ -143,6 +146,40 @@ def test_build_method_unknown_raises():
     """An unknown head name must fail fast with a clear error."""
     with pytest.raises(ValueError, match="Unknown method"):
         build_method("nope", "li")  # type: ignore[arg-type]
+
+
+# Check each extractor's scaler and output activation together. Sigmoid only covers
+# [0, 1], so signed features need tanh.
+_AE_PAIRS: dict[str, tuple[type, str]] = {
+    "cv": (FunctionTransformer, "relu"),
+    "sbert": (FunctionTransformer, "tanh"),
+    "codet5": (FunctionTransformer, "tanh"),
+    "codebert": (FunctionTransformer, "tanh"),
+    "roberta": (FunctionTransformer, "tanh"),
+    "qwen3-emb": (FunctionTransformer, "tanh"),
+    "flan-t5": (MaxAbsScaler, "tanh"),
+    "llm2vec": (MaxAbsScaler, "tanh"),
+    "modernbert": (MaxAbsScaler, "tanh"),
+    "sbert2": (MaxAbsScaler, "tanh"),
+    "sentbert": (MaxAbsScaler, "tanh"),
+    "kakisim": (MaxAbsScaler, "sigmoid"),
+    "li": (MaxAbsScaler, "sigmoid"),
+    "loginov": (MaxAbsScaler, "sigmoid"),
+    "tfidf": (MaxAbsScaler, "sigmoid"),
+    "gaur-chatgpt": (MaxAbsScaler, "sigmoid"),
+    "gaur-claude": (MaxAbsScaler, "sigmoid"),
+    "gaur-expert": (MaxAbsScaler, "sigmoid"),
+    "gaur-gpt-oss": (MaxAbsScaler, "sigmoid"),
+    "gaur-llama": (MaxAbsScaler, "sigmoid"),
+    "gaur-mistral": (MaxAbsScaler, "sigmoid"),
+    "gaur-ruleid": (MaxAbsScaler, "sigmoid"),
+}
+
+
+def test_ae_scaler_and_activation_pairs():
+    """Each extractor must use the scaler and output activation its features need."""
+    actual = {e: (type(build_method("ae", e).scaler), build_method("ae", e).output_activation) for e in EXTRACTORS}
+    assert actual == _AE_PAIRS
 
 
 def test_parallel_decision_function_matches_serial(monkeypatch):

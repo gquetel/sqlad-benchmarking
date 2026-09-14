@@ -115,8 +115,10 @@ FIGURE_CAPTION = (
     r"In-domain (\textbullet) vs.\ LODO ($\blacksquare$) AUROC per feature extractor and decision "
     r"engine, averaged over the four scenarios of each setting; the connector length is the "
     r"cross-domain gap $\Delta = \text{LODO} - \text{ID}$, shown in green when small ($> -0.05$) "
-    r"and red otherwise. Missing rows correspond to feature extractors without a finished run yet."
+    r"and red otherwise."
 )
+# Add this note only when a cell is missing.
+INCOMPLETE_CAPTION = r" Missing rows correspond to feature extractors without a finished run yet."
 
 
 def _num(x: object) -> float | None:
@@ -255,9 +257,10 @@ def _nice_bounds(vals: list[float]) -> tuple[float, float]:
 
 
 def _xticks(xmin: float, xmax: float) -> str:
-    """Comma-separated ticks every 0.1 across ``[xmin, xmax]``."""
-    n_steps = round((xmax - xmin) / 0.1)
-    ticks = [round(xmin + i * 0.1, 2) for i in range(n_steps + 1)]
+    """Return 0.1-spaced ticks inside the bounds."""
+    first = math.ceil(xmin * 10 - 1e-9)
+    last = math.floor(xmax * 10 + 1e-9)
+    ticks = [i / 10 for i in range(first, last + 1)]
     return ",".join(_fmt_tick(t) for t in ticks)
 
 
@@ -266,9 +269,8 @@ def _pgfplotsset(xmin: float, xmax: float) -> str:
     n = len(EXTRACTORS)
     yticks = ",".join(str(n - i) for i in range(n))
     yticklabels = ",".join(label for _, label in EXTRACTORS)
-    # Row spacing scales with the number of extractors, so the figure stays legible
-    # as HANDCRAFTED_EXTRACTORS/PRETRAINED_EXTRACTORS grow or shrink.
-    height = round(5.9 * n / 15, 1)
+    # Scale panel height with extractor count and keep the figure compact.
+    height = round(5.05 * n / 15, 1)
     return (
         "\\pgfplotsset{\n"
         "  dumbaxis/.style={\n"
@@ -302,7 +304,7 @@ def _panel(
 ) -> list[str]:
     """Render one ``\\nextgroupplot`` panel: one dumbbell row per extractor (skipped if incomplete)."""
     n = len(EXTRACTORS)
-    opts = f"ylabel={{{elabel}}}" + ("" if is_last else ", xlabel={}")
+    opts = f"ylabel={{{elabel}}}" + ("" if is_last else ", xlabel={}, xticklabels={}")
     lines = [f"      \\nextgroupplot[{opts}]"]
     for i, (extractor, _) in enumerate(EXTRACTORS):
         y = n - i
@@ -347,17 +349,22 @@ def render_figure(data: Results) -> str:
         f"  \\def\\dumbthreshR{{{xmax - 0.13 * span:.2f}}}",
         "  \\begin{tikzpicture}",
         "    \\begin{groupplot}[",
-        "      group style={group size=1 by 3, vertical sep=1.0cm},",
+        "      group style={group size=1 by 3, vertical sep=0.4cm},",
         "      dumbaxis,",
         "      xlabel={AUROC},",
         "    ]",
     ]
     for i, (engine, elabel) in enumerate(ENGINES):
         lines.extend(_panel(engine, elabel, avgs, sep_y, xmin, xmax, is_last=i == len(ENGINES) - 1))
+    incomplete = any(
+        avgs[(extractor, engine)]["id_auroc"] is None or avgs[(extractor, engine)]["lodo_auroc"] is None
+        for extractor, _ in EXTRACTORS
+        for engine, _ in ENGINES
+    )
     lines += [
         "    \\end{groupplot}",
         "  \\end{tikzpicture}",
-        f"  \\caption{{{FIGURE_CAPTION}}}",
+        f"  \\caption{{{FIGURE_CAPTION}{INCOMPLETE_CAPTION if incomplete else ''}}}",
         "  \\label{fig:transfer-dumbbell}",
         "\\end{figure}",
     ]

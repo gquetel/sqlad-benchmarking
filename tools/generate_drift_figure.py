@@ -239,9 +239,10 @@ def _nice_bounds(vals: list[float]) -> tuple[float, float]:
 
 
 def _xticks(xmin: float, xmax: float) -> str:
-    """Comma-separated ticks every 0.1 across ``[xmin, xmax]``."""
-    n_steps = round((xmax - xmin) / 0.1)
-    ticks = [round(xmin + i * 0.1, 2) for i in range(n_steps + 1)]
+    """Return 0.1-spaced ticks inside the bounds."""
+    first = math.ceil(xmin * 10 - 1e-9)
+    last = math.floor(xmax * 10 + 1e-9)
+    ticks = [i / 10 for i in range(first, last + 1)]
     return ",".join(_fmt_tick(t) for t in ticks)
 
 
