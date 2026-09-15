@@ -69,7 +69,7 @@ versions or regenerate the lock without explicit instruction.
   never retried, because a retry burns compute and fills MLflow with dead runs; fix the cause and
   run the command again. `--check-mlflow` drops cells that already have a FINISHED run (looked up
   once, at startup), which is how a rerun fills in the holes left by a broken batch. `--no-queue`
-  submits everything at once. Run it detached on the submit node — see `docs/source/slurm.md`.
+  submits everything at once. Run it on the submit node — see `docs/source/slurm.md`.
 
 # Code style
 * DO NOT ADD EXCEPTIONS TO RUFF BY YOURSELF. ASK ME FIRST. 

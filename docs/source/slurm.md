@@ -67,13 +67,14 @@ Manifests, generated job scripts, and `.out` logs are written under `reports/slu
 
 ### Gradual submission
 
-Run it on the submit node, detached, so a dropped VPN does not kill it:
+Run it on the submit node. The command stays active until every cell is submitted, so
+use a terminal that survives a dropped VPN (`tmux` or `screen`):
 
 ```bash
-nohup .venv-submit/bin/python -m tools.slurm_submit \
+.venv-submit/bin/python -m tools.slurm_submit \
   --dataset superviz26 --suite all --methods ae \
   --extractors roberta,modernbert,codebert,flan-t5,sentbert,qwen3-emb,llm2vec \
-  --max-jobs 24 --interval 300 > reports/slurm/queue.log 2>&1 &
+  --max-jobs 24 --interval 300
 ```
 
 Preview it anywhere first (off the submit node it assumes an empty queue):
