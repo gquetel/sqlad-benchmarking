@@ -1,26 +1,27 @@
 # Build or refresh the project environment from uv.lock. Source this file, do not run it.
 #
-# The packages always come from uv.lock. Only the interpreter changes: nix gives one on
-# the dev machines, uv installs its own on the cluster, which has no /nix. Each source
-# gets its own directory, because one checkout is visible to both over NFS.
+# Nix provides Python locally; uv installs it on the cluster. Separate environments
+# let both use the same checkout on shared storage.
 #
-#   . tools/setup-env.sh            # full environment
-#   . tools/setup-env.sh submit     # torch-free submit environment
+#   . tools/setup-env.sh                   # CUDA 12.6
+#   SQLAD_EXTRA=cu130 . tools/setup-env.sh  # Blackwell GPUs
+#   . tools/setup-env.sh submit            # job submission, without PyTorch
 #
-# The full cluster environment exceeds the submit node's memory limit.
+# Build both GPU environments on a compute node; setup exceeds the submit node's memory limit.
+# Jobs select the environment for their GPU. See docs/source/slurm.md.
 #
 #   srun --partition=CPU --mem=16G --pty bash -lc '. tools/setup-env.sh'
+#   srun --partition=CPU --mem=16G --pty bash -lc 'SQLAD_EXTRA=cu130 . tools/setup-env.sh'
 
 _sqlad_repo="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
-# A shell without BASH_SOURCE (dash, e.g. a hook whose shebang is /bin/sh) resolves the line
-# above to "/", which builds the venv in the filesystem root. Stop instead.
+# Stop if the shell cannot locate the repository, as can happen outside Bash.
 if [ ! -f "${_sqlad_repo}/pyproject.toml" ]; then
     echo "setup-env.sh: cannot locate the repository (got '${_sqlad_repo}'); source it from bash." >&2
     return 1 2>/dev/null || exit 1
 fi
 
-# Set SQLAD_EXTRA=cpu on a machine with no GPU (the lames, CI).
+# Use SQLAD_EXTRA=cpu without a GPU, or cu130 for Blackwell.
 : "${SQLAD_EXTRA:=cu126}"
 
 if [ -n "${IN_NIX_SHELL:-}" ]; then
@@ -29,11 +30,16 @@ if [ -n "${IN_NIX_SHELL:-}" ]; then
     export UV_PYTHON_DOWNLOADS=never
     export UV_PYTHON_PREFERENCE=only-system
 else
-    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/.venv-cluster"
-    # A nix interpreter needs /nix, which the cluster nodes do not have.
+    # Keep these environment paths in sync with cuda_builds in configs/slurm.yaml.
+    case "${SQLAD_EXTRA}" in
+    cu126 | cpu) _sqlad_venv=".venv-cluster" ;;
+    *) _sqlad_venv=".venv-cluster-${SQLAD_EXTRA}" ;;
+    esac
+    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/${_sqlad_venv}"
+    # Cluster nodes cannot run the Nix-provided Python.
     export UV_PYTHON_PREFERENCE=only-managed
 
-    # On demand only: the Lmod init script fails under `set -u`.
+    # Module setup requires unset-variable checks to be disabled.
     if [ -n "${SQLAD_MODULES:-}" ]; then
         case $- in *u*) _sqlad_u=1; set +u ;; *) _sqlad_u=0 ;; esac
         if [ -f /etc/profile.d/z00_lmod.sh ]; then . /etc/profile.d/z00_lmod.sh; fi
@@ -42,7 +48,7 @@ else
         if [ "${_sqlad_u}" = 1 ]; then set -u; fi
     fi
 
-    # uv installs itself in the home directory, which a batch shell can miss.
+    # Add the user's uv installation to PATH if needed.
     if ! command -v uv >/dev/null 2>&1 && [ -f "${HOME}/.local/bin/env" ]; then
         . "${HOME}/.local/bin/env"
     fi

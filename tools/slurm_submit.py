@@ -28,6 +28,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SUBMIT_DIR = "reports/slurm"
 DEFAULT_ENV = {"venv": ".venv-cluster", "modules": []}
+# Convert a GPU version such as 12.0 to sm_120. Ignore nvidia-smi errors on nodes without a GPU.
+ARCH_PROBE = [
+    "gpu_cc=\"$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ' || true)\"",
+    'case "$gpu_cc" in',
+    '  [0-9]*.[0-9]*) gpu_arch="sm_${gpu_cc%.*}${gpu_cc#*.}" ;;',
+    '  *) gpu_arch="" ;;',
+    "esac",
+]
+# Find uv and stop if the environment does not match uv.lock.
+VENV_CHECK = [
+    'if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; fi',
+    'UV_PROJECT_ENVIRONMENT="$venv" uv sync --frozen --extra "$extra" --check ||',
+    '  { echo "$venv does not match uv.lock; rebuild it with tools/setup-env.sh" >&2; exit 1; }',
+]
 
 
 def _env(cfg: dict) -> dict:
@@ -35,12 +49,51 @@ def _env(cfg: dict) -> dict:
     return {**DEFAULT_ENV, **cfg.get("env", {})}
 
 
+def _cuda_builds(cfg: dict) -> dict:
+    """Return the configured CUDA builds."""
+    return cfg.get("cuda_builds") or {}
+
+
+def _build_by_arch(cfg: dict) -> dict[str, dict]:
+    """Map each GPU architecture to the first build that supports it."""
+    mapping: dict[str, dict] = {}
+    for build in _cuda_builds(cfg).values():
+        for arch in build.get("arch", []):
+            mapping.setdefault(arch, build)
+    return mapping
+
+
+def _default_build(cfg: dict) -> dict:
+    """Return the build for a task with no GPU."""
+    return next(iter(_cuda_builds(cfg).values()))
+
+
+def _venv_select(cfg: dict) -> list[str]:
+    """Generate shell commands to select and check the Python environment for this GPU."""
+    by_arch = _build_by_arch(cfg)
+    if not by_arch:
+        return [f"source {_env(cfg)['venv']}/bin/activate"]
+    by_build: dict[tuple[str, str], list[str]] = {}
+    for arch, build in by_arch.items():
+        by_build.setdefault((build["venv"], build["extra"]), []).append(arch)
+    default = _default_build(cfg)
+    return [
+        *ARCH_PROBE,
+        'case "$gpu_arch" in',
+        *(f'  {"|".join(arches)}) venv="{venv}"; extra="{extra}" ;;' for (venv, extra), arches in by_build.items()),
+        f'  "") venv="{default["venv"]}"; extra="{default["extra"]}" ;;',
+        '  *) echo "no CUDA build for $gpu_arch; check configs/slurm.yaml" >&2; exit 1 ;;',
+        "esac",
+        'source "$venv/bin/activate"',
+        *VENV_CHECK,
+    ]
+
+
 def env_setup(cfg: dict) -> str:
     """Build the task environment setup commands."""
     env = _env(cfg)
     lines = ["module purge", *(f"module load {m}" for m in env["modules"])] if env["modules"] else []
-    lines.append(f"source {env['venv']}/bin/activate")
-    return "\n".join(lines)
+    return "\n".join(lines + _venv_select(cfg))
 
 
 def _needs_gpu(cell: Cell) -> bool:
@@ -49,14 +102,14 @@ def _needs_gpu(cell: Cell) -> bool:
 
 
 def _min_vram(cell: Cell, cfg: dict) -> int:
-    """Return a cell's minimum VRAM in GB."""
+    """Return the required GPU memory in GB."""
     reqs = cfg.get("min_vram_gb", {})
     key = f"{cell.method}:{cell.extractor}"
     return int(reqs.get(key, reqs.get(cell.extractor, reqs.get("default", 0))))
 
 
 def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
-    """Return GPU partitions with enough VRAM."""
+    """Return GPU partitions with enough memory."""
     eligible = [name for name, gb in gpu_cfg["partitions"].items() if gb >= req]
     if not eligible:
         raise typer.BadParameter(f"no GPU partition has >= {req} GB VRAM; check configs/slurm.yaml.")
@@ -64,7 +117,7 @@ def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
 
 
 def _is_long_running(cell: Cell, cfg: dict) -> bool:
-    """Return whether a cell needs extended wall time."""
+    """Return whether a cell needs the longer time limit."""
     keys = set(cfg.get("long_running", []))
     return f"{cell.method}:{cell.extractor}" in keys or cell.extractor in keys
 
@@ -75,12 +128,34 @@ def _gpu_section(cell: Cell, cfg: dict, default: str) -> str:
 
 
 def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
-    """Return a cell's resource bucket."""
+    """Return a cell's group based on GPU and memory needs."""
     if not _needs_gpu(cell):
         return "cpu"
     section = _gpu_section(cell, cfg, gpu_section)
     req = _min_vram(cell, cfg)
     return section if req <= 0 else f"{section}-{req}gb"
+
+
+def _check_cuda_builds(cfg: dict, cells: list[Cell], gpu_section: str) -> None:
+    """Reject submissions with a configured GPU architecture that no CUDA build supports."""
+    by_arch = _build_by_arch(cfg)
+    if not by_arch:
+        return
+    declared = cfg.get("gpu_arch", {})
+    unserved: dict[str, str] = {}
+    for cell in cells:
+        if not _needs_gpu(cell):
+            continue
+        section = cfg[_gpu_section(cell, cfg, gpu_section)]
+        for partition in _eligible_partitions(section, _min_vram(cell, cfg)):
+            arch = declared.get(partition)
+            if arch is None:
+                logger.warning(f"partition {partition} has no gpu_arch entry; its tasks take the default build.")
+            elif arch not in by_arch:
+                unserved[partition] = arch
+    if unserved:
+        listed = ", ".join(f"{p} ({a})" for p, a in sorted(unserved.items()))
+        raise typer.BadParameter(f"no CUDA build has kernels for {listed}; check configs/slurm.yaml.")
 
 
 def _experiment_tag(dataset: str, suite: str) -> str:
@@ -103,7 +178,7 @@ def _job_name(dataset: str, suite: str, cells: list[Cell]) -> str:
 
 
 def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu", gpu_qos: str | None = None) -> dict:
-    """Resolve a cell's SBATCH resources."""
+    """Return a cell's SLURM resource settings."""
     if not _needs_gpu(cell):
         return dict(cfg["cpu"])
     if gpu_section not in cfg:
@@ -117,12 +192,12 @@ def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu", gpu_qos:
 
 
 def _write_manifest(path: Path, cells: list[Cell]) -> None:
-    """Write cells as a JSON Lines manifest."""
+    """Write one cell per line as JSON."""
     path.write_text("".join(json.dumps(cell._asdict()) + "\n" for cell in cells))
 
 
 def _reap_trap(dataset: str, manifest: Path, track: bool) -> str:
-    """Build the MLflow cleanup trap."""
+    """Generate a shell exit handler to mark failed MLflow runs."""
     if not track:
         return ""
     call = (
@@ -227,7 +302,7 @@ def _submit_cells(
     run_id: str | None,
     dry_run: bool,
 ) -> None:
-    """Submit cells as resource-grouped arrays."""
+    """Submit cells in arrays grouped by resource needs."""
     explicit_run_id = run_id is not None
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S")
     submit_dir = REPO_ROOT / SUBMIT_DIR / run_id
@@ -279,7 +354,7 @@ def _submit_cells(
 
 
 class Unit(NamedTuple):
-    """A method-extractor submission unit."""
+    """Cells submitted together for one method and extractor."""
 
     method: str
     extractor: str
@@ -288,7 +363,7 @@ class Unit(NamedTuple):
 
 
 def _build_units(dataset: str, suite: str, methods: str, extractors: str) -> list[Unit]:
-    """Split a grid into submission units."""
+    """Group cells by method and extractor for submission."""
     units = []
     for method in methods.split(","):
         for extractor in extractors.split(","):
@@ -436,6 +511,7 @@ def submit(
 
     units = _build_units(dataset, suite, methods, extractors)
     total_cells = sum(len(u.cells) for u in units)
+    _check_cuda_builds(cfg, [cell for unit in units for cell in unit.cells], gpu_section)
 
     if check_mlflow and not setup_mlflow(dataset):
         raise typer.BadParameter("MLFLOW_TRACKING_URI is not set; --check-mlflow cannot look up what finished.")

@@ -19,7 +19,7 @@ readme = "README.md"
 requires-python = "==3.14.3"
 dependencies = [
   "joblib",
-  "mlflow-skinny==3.14",  # Server is 3.14 so far.
+  "mlflow-skinny==3.14",  # Match the tracking server.
   "python-dotenv",
   "numpy",
   "pandas",
@@ -35,9 +35,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Select one: "cu126" for GPU machines, "cpu" for CI where no GPU is available
-# and the CUDA toolkit would otherwise fill up the runner's disk.
+# Select cu126 for V100/A100/A40/A30, cu130 for RTX6000PRO (Blackwell), or cpu without a GPU.
 cu126 = ["torch==2.12.0"]
+cu130 = ["torch==2.12.0"]
 cpu = ["torch==2.12.0"]
 
 [dependency-groups]
@@ -92,19 +92,25 @@ source = ["src/sqlad_benchmarking"]
 omit = ["tests/*"]
 
 [tool.uv]
-conflicts = [[{ extra = "cu126" }, { extra = "cpu" }]]
+conflicts = [[{ extra = "cu126" }, { extra = "cu130" }, { extra = "cpu" }]]
 
 [tool.uv.sources]
 gaur-sql-detect = { git = "https://github.com/gquetel/gaur-sql-detect", rev = "60c3c228d08ad1bec61739e1976da1178f0ae2fa" }
-# More recent CUDA version dropped V100 support, we use an old one.
+# Separate PyTorch builds support V100 and Blackwell GPUs; see docs/source/slurm.md.
 torch = [
   { index = "pytorch-cu126", extra = "cu126" },
+  { index = "pytorch-cu130", extra = "cu130" },
   { index = "pytorch-cpu", extra = "cpu" },
 ]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [[tool.uv.index]]

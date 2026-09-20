@@ -18,10 +18,13 @@ versions or regenerate the lock without explicit instruction.
 # Relevant commands
 
 * The project uses `uv` for Python package management on top of the Nix-provided interpreter.
-  * To sync the environment from the lock: `. tools/setup-env.sh` (`.venv-nix` under Nix, `.venv-cluster` on the cluster). Use `. tools/setup-env.sh submit` for the torch-free `.venv-submit`.
+  * Sync from the lock: `. tools/setup-env.sh` creates `.venv-nix` under Nix or `.venv-cluster` elsewhere.
+    Outside Nix, `SQLAD_EXTRA=cu130` uses `.venv-cluster-cu130`.
+    `. tools/setup-env.sh submit` creates `.venv-submit` without PyTorch.
   * To add a package: `uv add <package>==<exact-version>` (then commit `uv.lock` + `requirements.txt`).
   * To regenerate the lock and the `requirements.txt` export: `invoke lock`.
-  * To run a command in the project env: `uv run --frozen --extra cu126 <command>` (`--extra cpu` with no GPU).
+  * To run a command in the project env: `uv run --frozen --extra cu126 <command>` (`--extra cpu`
+    with no GPU, `--extra cu130` on a Blackwell GPU).
     Always pass the extra: without it, uv replaces torch with the default build.
 * The project uses `pytest` for testing: `pytest tests/`.
 * The project uses `treefmt` + `ruff` for formatting and linting:
@@ -51,25 +54,22 @@ versions or regenerate the lock without explicit instruction.
     shifted (S2) test sets, writing `auroc_s1`/`auroc_s2`/`delta_auroc` rows. The two
     protocols are selected by a `DatasetFamily.protocol` field; `slurm_run_cell` dispatches
     on it, so `slurm_submit --dataset superviz26-drift` fans the drift grid out the same way.
-* To parallelize the evaluation grid on a SLURM cluster, `tools.slurm_submit` fans each
-  `(scenario, method, extractor)` cell out as a job array (one array per resource class:
-  `cpu`, and a `gpu` array per VRAM tier — each GPU cell runs on the partitions with enough
-  VRAM for it, from `min_vram_gb` in the config). Site
-  settings live in `configs/slurm.yaml`; jobs activate the shared `.venv-cluster`. Before submission,
-  `slurm_submit` syncs it from `uv.lock` with `--extra cu126` and verifies its torch kernels against
-  the eligible partitions declared in `gpu_arch`.
+* `tools.slurm_submit` runs each `(scenario, method, extractor)` combination (a cell) as a SLURM task.
+  It groups tasks into arrays by CPU/GPU and memory needs (`min_vram_gb` in `configs/slurm.yaml`).
+  The `cuda_builds` block lists two Python environments: `.venv-cluster` for cu126 and
+  `.venv-cluster-cu130` for Blackwell GPUs. Build both with `tools/setup-env.sh`.
+  Each task detects its GPU with `nvidia-smi` and activates the first compatible build.
+  Submission fails if a configured GPU architecture has no compatible build. Tasks stop if their
+  environment does not match `uv.lock` (`uv sync --check`). See `docs/source/slurm.md` for setup.
   Each cell writes its row to `reports/{dataset}/cells/*.csv` and its log to
-  `reports/{dataset}/logs/*.log`; MLflow is the canonical store.
+  `reports/{dataset}/logs/*.log`; MLflow is the main results store.
     * Preview: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --dry-run`.
     * Submit: `python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae --extractors li`.
-* The cluster caps in-flight jobs (~24), so `slurm_submit` drip-feeds by default: one unit per
-  `(method, extractor)` whenever `squeue` shows headroom, re-checking every `--interval` seconds.
-  No state file: *in flight* comes from the job names in `squeue`, so it never collides with an
-  earlier invocation. Every cell is submitted **exactly once** — a crashed or preempted cell is
-  never retried, because a retry burns compute and fills MLflow with dead runs; fix the cause and
-  run the command again. `--check-mlflow` drops cells that already have a FINISHED run (looked up
-  once, at startup), which is how a rerun fills in the holes left by a broken batch. `--no-queue`
-  submits everything at once. Run it on the submit node — see `docs/source/slurm.md`.
+* The cluster allows about 24 queued or running jobs. `slurm_submit` checks `squeue` every `--interval`
+  seconds and submits a `(method, extractor)` group when space is available. It skips groups already
+  in the queue. Each cell is submitted **at most once per invocation**, including failed or interrupted jobs.
+  Fix failures and rerun with `--check-mlflow` to skip FINISHED runs, checked once at startup.
+  `--no-queue` submits everything at once. Run submissions on the submit node; see `docs/source/slurm.md`.
 
 # Code style
 * DO NOT ADD EXCEPTIONS TO RUFF BY YOURSELF. ASK ME FIRST. 

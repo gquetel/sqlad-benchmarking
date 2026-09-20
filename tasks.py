@@ -3,8 +3,7 @@ import sys
 
 from invoke import Context, task
 
-# Disable pty when it is unavailable or unsupported: on Windows, and on Python
-# 3.14+ where invoke's pty handling is broken (this project requires 3.14+).
+# Invoke's pseudo-terminal support fails on Windows and Python 3.14+.
 NO_PTY = os.name == "nt" or sys.version_info >= (3, 14)
 PROJECT_NAME = "sqlad_benchmarking"
 
@@ -12,7 +11,7 @@ PROJECT_NAME = "sqlad_benchmarking"
 # Setup commands
 @task
 def sync(ctx: Context) -> None:
-    """Create/refresh the venv from uv.lock (deps + dev group + project)."""
+    """Install the project and its dependencies from uv.lock."""
     ctx.run("bash -c '. ./tools/setup-env.sh'", echo=True, pty=not NO_PTY)
 
 
@@ -20,7 +19,7 @@ def sync(ctx: Context) -> None:
 def lock(ctx: Context) -> None:
     """Regenerate uv.lock and the pip-compatible requirements.txt export."""
     ctx.run("uv lock", echo=True, pty=not NO_PTY)
-    ctx.run("uv export --no-dev --no-emit-project --extra cu126 -o requirements.txt", echo=True, pty=not NO_PTY)
+    ctx.run("uv export --no-dev --no-emit-project -o requirements.txt", echo=True, pty=not NO_PTY)
 
 
 # Project commands
@@ -63,7 +62,7 @@ def fetch_data(ctx: Context, force: bool = False, check: bool = False) -> None:
 def fetch_supplementary(
     ctx: Context, groups: str = "drift,fsl", force: bool = False, check: bool = False, keep_archive: bool = False
 ) -> None:
-    """Download the heavy concept-drift/few-shot CSVs from Zenodo (NOT part of fetch_data; several GB)."""
+    """Download drift and few-shot datasets from Zenodo (several GB, excluded from fetch_data)."""
     fetch_superviz26(ctx, groups=groups, force=force, check=check, keep_archive=keep_archive)
 
 
@@ -75,7 +74,7 @@ def fetch_supplementary(
     }
 )
 def smoke(ctx: Context, limit: int = 1000, no_track: bool = False, register: bool = False) -> None:
-    """Fast end-to-end smoke run on a small subset (in-domain, OCSVM only)."""
+    """Train and evaluate OCSVM on a small sample from each domain."""
     cmd = (
         f"python -m {PROJECT_NAME}.evaluate_suite --suite in_domain --methods ocsvm "
         f"--limit {limit} --report reports/smoke.csv"

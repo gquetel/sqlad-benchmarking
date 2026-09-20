@@ -11,8 +11,9 @@ gpu:
   cpus_per_task: 32
   mem: 64G
   time: "12:00:00"
-  # GPU partitions and their per-GPU VRAM, listed in preference order (fastest GPU first). A cell runs on every partition whose VRAM meets its requirement, in this order.
+  # GPU memory in GB, in preference order. Jobs can use any partition with enough memory.
   partitions:
+    RTX6000PRO: 96
     A100: 40
     A40: 46
     A30: 24
@@ -25,6 +26,7 @@ gpu-long:
   mem: 64G
   time: "24:00:00"
   partitions:
+    RTX6000PRO: 96
     A100: 40
     A40: 46
     A30: 24
@@ -32,29 +34,43 @@ gpu-long:
     V100-16GB: 16
 
 gpu_arch:
+  RTX6000PRO: sm_120
   A100: sm_80
   A40: sm_86
   A30: sm_80
   V100-32GB: sm_70
   V100-16GB: sm_70
 
-# Minimum per-GPU VRAM per cell, keyed by extractor or engine:extractor (the latter wins)
+# Each build lists its Python environment, uv extra, and supported GPU architectures.
+# Jobs use the first matching build, or the first build if no GPU is detected.
+# Build both environments with tools/setup-env.sh; see docs/source/slurm.md.
+cuda_builds:
+  cu126:
+    venv: .venv-cluster
+    extra: cu126
+    arch: [sm_70, sm_75, sm_80, sm_86, sm_90]
+  cu130:
+    venv: .venv-cluster-cu130
+    extra: cu130
+    arch: [sm_75, sm_80, sm_86, sm_90, sm_100, sm_120]
+
+# Required GPU memory in GB. A method:extractor entry overrides an extractor entry.
 min_vram_gb:
   default: 0
   codet5: 32
   qwen3-emb: 24
   llm2vec: 32
 
-# Cells that need the longer wall-time reservation (the `gpu-long` block instead of `gpu`),
-# keyed by extractor or engine:extractor. The heavier full-split data pushes these past 12h.
+# Extractors or method:extractor pairs that use the gpu-long time limit.
 long_running:
   - ocsvm:sbert
   - sbert2
   - qwen3-emb
   - llm2vec
 
-# Environment the array tasks use on the compute nodes. `tools/setup-env.sh` builds it.
+# Compute-node environment settings.
 env:
+  # Python environment used when no CUDA architectures are configured.
   venv: .venv-cluster
-  # Modules to load before the venv. Empty: the wheels need nothing from Lmod.
+  # System modules to load before activating Python; none are required here.
   modules: []

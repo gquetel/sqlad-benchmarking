@@ -22,9 +22,15 @@ Without Nix, for example on the SLURM cluster, the same lock file builds a secon
 . tools/setup-env.sh
 ```
 
-The script builds `.venv-nix` inside `nix-shell` and `.venv-cluster` elsewhere, both from `uv.lock`. It installs the CUDA build of torch; pass `SQLAD_EXTRA=cpu` on a machine with no GPU. Run project commands with `uv run --frozen --extra cu126`, which re-syncs the environment first. Always pass the extra: without it, uv replaces torch with the default build. After a `git pull`, source the script again, or enable the hook once with `git config core.hooksPath .githooks`.
+The script installs packages from `uv.lock` into `.venv-nix` under Nix or `.venv-cluster` elsewhere.
+It defaults to CUDA 12.6. Set `SQLAD_EXTRA=cpu` without a GPU, or `SQLAD_EXTRA=cu130` for Blackwell GPUs
+(`.venv-cluster-cu130` outside Nix).
 
-`requirements.txt` provides a pip-compatible export of the locked packages for environments that do not use uv.
+Run commands with `uv run --frozen --extra cu126 <command>`, using `cpu` or `cu130` to match your setup.
+Always pass `--extra` to keep the chosen PyTorch build. After `git pull`, source the setup script again,
+or enable automatic setup with `git config core.hooksPath .githooks`.
+
+For pip, use `requirements.txt`, exported from the lock file, and choose a PyTorch build for your hardware.
 
 ## Project structure
 

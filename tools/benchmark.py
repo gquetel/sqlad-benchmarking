@@ -1,17 +1,14 @@
-"""Inference-latency benchmark for the IFIPSEC RQ2.3 figure.
+"""Measure prediction time for the IFIPSEC RQ2.3 figure.
 
-GAUR cells need a live instrumented MySQL server, so they run in-process on
-lame25; everything else fans out to SLURM as array jobs.
+Run GAUR locally with the instrumented MySQL server; submit other extractors to SLURM:
 
-    python -m tools.benchmark cluster   # cv/li/loginov/sbert/codet5 -> SLURM
-    python -m tools.benchmark lames     # gaur-* -> in-process on lame25
+    python -m tools.benchmark cluster
+    python -m tools.benchmark lames
 
-Both load-or-train the model, time scoring with the feature cache off (a warm
-cache would time a cache hit, not real inference), and log
-``infer_ms_per_query`` to the ``Inference-Latency-Superviz25`` experiment.
-Device policy matches the paper: neural embedding extractors time on GPU and the
-remaining extractors run on CPU. The figure itself is rendered by
-:mod:`tools.generate_observation_tex`.
+Both commands load or train models and time predictions with feature caching disabled.
+They log ``infer_ms_per_query`` to the ``Inference-Latency-Superviz25`` MLflow experiment.
+Embedding extractors use GPUs; other extractors use CPUs.
+Render the figure with :mod:`tools.generate_observation_tex`.
 """
 
 from __future__ import annotations
@@ -41,7 +38,7 @@ from sqlad_benchmarking.tracking import setup_mlflow
 from tools.slurm_submit import (
     REPO_ROOT,
     SUBMIT_DIR,
-    _check_env,
+    _check_cuda_builds,
     _eligible_partitions,
     _gpu_section,
     _min_vram,
@@ -51,27 +48,21 @@ from tools.slurm_submit import (
 
 logger = logging.getLogger(__name__)
 
-# Only SuperViz25 (single scenario "dataset") backs the figure.
 DATASET = "superviz25"
-# Latency runs go to their own experiment so they never touch the eval runs.
 BENCHMARK_EXPERIMENT = "Inference-Latency-Superviz25"
-# GAUR cells need a live instrumented MySQL server + gaur_sqld -> run in-process on lame25.
 GAUR_EXTRACTORS = "gaur-expert,gaur-chatgpt,gaur-claude,gaur-llama,gaur-mistral,gaur-gpt-oss,gaur-ruleid"
-# The rest have no such dependency and fan out to the SLURM cluster.
 CLUSTER_EXTRACTORS = "cv,li,loginov,sbert,codet5"
-# Every decision engine timed by default (cv/lof added for the observation-chapter figure).
 DEFAULT_METHODS = "ocsvm,ae,lof"
-# Per-cell latency CSVs (one file per array task, no shared writer).
+# One CSV per task avoids concurrent writes to the same file.
 CELLS_DIR = REPO_ROOT / "reports" / "superviz25" / "cells-inference"
-# Timing a random sample gives the same per-query number as the full 3.35M rows,
-# much cheaper since GAUR re-collects traces uncached each pass. 0 = full split.
+# Sample rows to limit tracing time; 0 uses the full test set.
 TIMING_SAMPLE = 5000
 
 try:
     import torch
 
     _CUDA = torch.cuda.is_available()
-except ImportError:  # torch is always installed, but keep the module importable without it.
+except ImportError:
     torch = None  # type: ignore[assignment]
     _CUDA = False
 
@@ -80,14 +71,14 @@ except ImportError:  # torch is always installed, but keep the module importable
 
 
 def _extractor_step(model: Detector) -> object:
-    """Return the model's feature-extractor step (pipeline head, or AE's attribute)."""
+    """Return the model's feature extractor."""
     if isinstance(model, AEDetector):
         return model.extractor
     return model.pipeline.named_steps["features"]
 
 
 def _disable_feature_cache(model: Detector) -> bool:
-    """Turn the feature cache off so ``transform`` recomputes every call; returns True if it had one."""
+    """Disable feature caching and return whether the extractor supports it."""
     ext = _extractor_step(model)
     if isinstance(ext, CachingExtractor):
         ext.cache_dir = None
@@ -96,29 +87,29 @@ def _disable_feature_cache(model: Detector) -> bool:
 
 
 def _is_cuda_model(model: Detector) -> bool:
+    """Return whether the model is an autoencoder running on a GPU."""
     return _CUDA and isinstance(model, AEDetector) and model.device.type == "cuda"
 
 
 def _force_cpu(model: Detector) -> None:
-    """Move an autoencoder to CPU so it is timed on CPU (the paper times all GAUR pipelines on CPU)."""
+    """Move an autoencoder to the CPU for timing."""
     if isinstance(model, AEDetector) and model.net is not None:
         model.device = torch.device("cpu")
         model.net.to(model.device)
 
 
 def _enable_benchmark_tracking() -> bool:
-    """Configure MLflow and make the dedicated benchmark experiment active; returns availability."""
+    """Select the benchmark MLflow experiment; return False if tracking is unavailable."""
     if not setup_mlflow(DATASET):
         return False
-    # setup_mlflow picks the eval experiment; redirect logging to the benchmark one.
     mlflow.set_experiment(BENCHMARK_EXPERIMENT)
     return True
 
 
 def _time_score(model: Detector, df: pd.DataFrame, repeats: int, warmup: int) -> list[float]:
-    """Time ``score_samples(df)`` ``repeats`` times after ``warmup`` untimed runs; returns per-run seconds.
+    """Return prediction times in seconds after untimed warm-up runs.
 
-    Syncs CUDA around each run so async kernel launches don't undercount GPU latency.
+    Wait for GPU autoencoders to finish before recording each time.
     """
     sync = _is_cuda_model(model)
     for _ in range(warmup):
@@ -136,7 +127,7 @@ def _time_score(model: Detector, df: pd.DataFrame, repeats: int, warmup: int) ->
 
 
 def _train_model(method: MethodName, extractor: str, df_fit: pd.DataFrame, model_path: Path, cache: bool) -> Detector:
-    """Fit a model on ``df_fit`` (the eval suite's seed-split 90% of train normals) and save it."""
+    """Train a model on df_fit and save it."""
     logger.info(f"Training missing model {method}+{extractor} on {len(df_fit)} normals -> {model_path}")
     model = build_method(method, extractor, cache=cache)
     model.fit(df_fit)
@@ -145,7 +136,7 @@ def _train_model(method: MethodName, extractor: str, df_fit: pd.DataFrame, model
 
 
 def _load_test_df(data_root: Path | None, sample: int = TIMING_SAMPLE, seed: int = 7) -> pd.DataFrame:
-    """Load the SuperViz25 test split for timing, seed-sampled to ``sample`` rows (<=0 = full split)."""
+    """Load a reproducible SuperViz25 test sample; sample <= 0 loads all rows."""
     family = FAMILIES[DATASET]
     scenario = family.suites["all"][0]
     df = family.load_split(scenario, "test", root=data_root, columns=("full_query", "label", "attack_technique"))
@@ -155,7 +146,7 @@ def _load_test_df(data_root: Path | None, sample: int = TIMING_SAMPLE, seed: int
 
 
 def _load_fit_df(data_root: Path | None, seed: int) -> pd.DataFrame:
-    """Load the eval suite's fit split (seed-split 90% of train normals) for training missing models."""
+    """Load the same 90% of benign training rows used by the evaluation suite."""
     family = FAMILIES[DATASET]
     scenario = family.suites["all"][0]
     df_train_normal = split_normals(family.load_split(scenario, "train", root=data_root))
@@ -176,7 +167,7 @@ def _benchmark_cell(
     track: bool,
     force_cpu: bool = False,
 ) -> dict | None:
-    """Benchmark one cell; returns a result dict, or None when its model is missing and not trained."""
+    """Measure one model's prediction time; return None if no model can be loaded or trained."""
     scenario = FAMILIES[DATASET].suites["all"][0]
     model_path = model_dir / _model_filename(DATASET, method, extractor, scenario)
     if model_path.exists():
@@ -204,7 +195,6 @@ def _benchmark_cell(
     )
 
     if track:
-        # Fresh run in the benchmark experiment; eval runs untouched.
         with mlflow.start_run(run_name=f"{method}+{extractor}#{time.strftime('%Y%m%d-%H%M%S')}"):
             mlflow.set_tags(
                 {
@@ -236,12 +226,12 @@ def _benchmark_cell(
 
 
 def _needs_gpu(cell: Cell) -> bool:
-    """Paper device policy: only embedding extractors time on GPU; AEs stay on CPU."""
+    """Return whether the extractor needs a GPU for timing."""
     return cell.extractor in GPU_EXTRACTORS
 
 
 def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
-    """Array bucket for a cell: cpu, the GPU section, or ``{section}-{req}gb`` for VRAM-pinned."""
+    """Group a cell by its CPU, GPU, and memory needs."""
     if not _needs_gpu(cell):
         return "cpu"
     section = _gpu_section(cell, cfg, gpu_section)
@@ -250,7 +240,7 @@ def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
 
 
 def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str) -> dict:
-    """SBATCH resource block for a cell: the cpu block, or a VRAM-filtered GPU block."""
+    """Return a cell's SLURM settings, selecting GPUs with enough memory."""
     if not _needs_gpu(cell):
         return dict(cfg["cpu"])
     if gpu_section not in cfg:
@@ -265,7 +255,7 @@ def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str) -> dict:
 
 
 def _header(job_name: str, cfg: dict, log_pattern: str, extra: list[str]) -> str:
-    """Common #SBATCH directives (name, logs, account) plus the caller's resource lines."""
+    """Build SLURM directives for the job name, logs, account, and resources."""
     directives = [
         f"#SBATCH --job-name={job_name}",
         f"#SBATCH --output={log_pattern}",
@@ -290,7 +280,7 @@ def _write_array_script(
     sample: int,
     track: bool,
 ) -> None:
-    """One array script: full #SBATCH header, then benchmark one cell per array index."""
+    """Write a SLURM script that benchmarks one cell per array task."""
     extra = [f"#SBATCH --partition={res['partition']}"]
     if res.get("gres"):
         extra.append(f"#SBATCH --gres={res['gres']}")
@@ -318,7 +308,7 @@ python -m tools.benchmark run-cell \\
 
 
 def _sbatch(script: Path, dry_run: bool) -> str | None:
-    """Submit (or, in dry-run, print) one job array and return its job id."""
+    """Submit an array and return its job ID, or print the command for a dry run."""
     cmd = ["sbatch", str(script)]
     if dry_run:
         logger.info("DRY-RUN: " + " ".join(cmd))
@@ -327,7 +317,6 @@ def _sbatch(script: Path, dry_run: bool) -> str | None:
     if not sbatch:
         raise typer.BadParameter("sbatch not found on PATH; run on a SLURM submit node or use --dry-run.")
     cmd[0] = sbatch
-    # Safe: shell=False, absolute sbatch path, script generated from the versioned config.
     result = subprocess.run(cmd, shell=False, capture_output=True, text=True)  # noqa: S603
     if result.returncode != 0:
         raise typer.BadParameter(f"sbatch rejected {script}:\n{result.stderr.strip() or result.stdout.strip()}")
@@ -354,18 +343,15 @@ def cluster(
     run_id: Annotated[str | None, typer.Option(help="Submission id (names the dir under submit_dir).")] = None,
     dry_run: Annotated[bool, typer.Option(help="Print manifests and sbatch commands without submitting.")] = False,
 ) -> None:
-    """Fan the non-GAUR cells out to SLURM, one array per resource class (run on the submit node)."""
+    """Submit non-GAUR benchmarks from the submit node, grouped by resource needs."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if any(e.strip().startswith("gaur") for e in extractors.split(",")):
         raise typer.BadParameter("GAUR extractors need the MySQL server; run them with the 'lames' command.")
     cfg = yaml.safe_load(config.read_text())
     track = not no_track
 
-    # A dry run only prints scripts; a real submit needs the shared venv the compute nodes source.
-    if not dry_run:
-        _check_env(cfg)
-
     cells = enumerate_cells(DATASET, "all", methods, extractors)
+    _check_cuda_builds(cfg, cells, gpu_section)
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S")
     submit_dir = REPO_ROOT / SUBMIT_DIR / f"latency-{run_id}"
     (submit_dir / "logs").mkdir(parents=True, exist_ok=True)
@@ -420,7 +406,7 @@ def lames(
     cache: Annotated[bool, typer.Option(help="Cache features during the train-missing fit.")] = True,
     track: Annotated[bool, typer.Option(help="Log a latency run per cell to MLflow.")] = True,
 ) -> None:
-    """Benchmark the GAUR cells in-process on lame25 (needs the instrumented MySQL server), CPU-timed."""
+    """Benchmark GAUR on the local CPU; requires the instrumented MySQL server."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if not all(e.strip().startswith("gaur") for e in extractors.split(",") if e.strip()):
         raise typer.BadParameter("The 'lames' command is for GAUR extractors only; use 'cluster' for the rest.")
@@ -436,7 +422,7 @@ def lames(
 
     rows = []
     for cell in cells:
-        # force_cpu: the paper times every GAUR pipeline on CPU, even the autoencoders.
+        # Time GAUR on the CPU, including autoencoders.
         row = _benchmark_cell(
             cell.method, cell.extractor, df_test, df_fit, model_dir, repeats, warmup, cache, train_missing, track, True
         )
@@ -465,7 +451,7 @@ def run_cell(
     cache: Annotated[bool, typer.Option(help="Cache features during the train-missing fit.")] = True,
     track: Annotated[bool, typer.Option(help="Log the latency run to MLflow when configured.")] = True,
 ) -> None:
-    """Benchmark the manifest cell at ``index`` (one SLURM array task) and log/write its latency."""
+    """Benchmark the cell at index in the task list and save its prediction time."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     lines = [line for line in manifest.read_text().splitlines() if line.strip()]
     if not 0 <= index < len(lines):
