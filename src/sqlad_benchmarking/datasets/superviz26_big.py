@@ -36,14 +36,14 @@ def resolve_path(name: Superviz26, root: Path | None = None) -> Path:
 
 def load_split(
     name: Superviz26,
-    split: Split,
+    split: Split | None,
     *,
     root: Path | None = None,
     columns: tuple[str, ...] = ("full_query", "label", "split"),
     limit: int | None = None,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Load rows of the Big Superviz26 CSV that belong to ``split``.
+    """Load one split, or the whole CSV with optional sampling when ``split`` is ``None``.
 
     The Big CSVs hold a training set larger than the standard full-split Superviz26 and
     are generated locally (not on Zenodo), so a missing file raises ``FileNotFoundError``

@@ -8,13 +8,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 import typer
 import yaml
 
 from sqlad_benchmarking.datasets import FAMILIES
+from sqlad_benchmarking.datasets.integrity import file_digest
+from sqlad_benchmarking.datasets.superviz25 import Superviz25
 from sqlad_benchmarking.evaluate_drift import evaluate_drift
-from sqlad_benchmarking.evaluate_suite import Cell, _validate_grid, enumerate_cells, evaluate_suite
+from sqlad_benchmarking.evaluate_suite import Cell, _load_cell_data, _validate_grid, enumerate_cells, evaluate_suite
 from sqlad_benchmarking.features import GPU_EXTRACTORS
 from tools.slurm_submit import (
     _bucket,
@@ -67,7 +70,7 @@ _CUDA_CFG = {
         "V100-16GB": "sm_70",
     },
     "cuda_builds": {
-        "cu126": {"venv": ".venv-cluster", "extra": "cu126", "arch": ["sm_70", "sm_80", "sm_86"]},
+        "cu126": {"venv": ".venv-cluster-cu126", "extra": "cu126", "arch": ["sm_70", "sm_80", "sm_86"]},
         "cu130": {"venv": ".venv-cluster-cu130", "extra": "cu130", "arch": ["sm_80", "sm_120"]},
     },
 }
@@ -252,6 +255,49 @@ def test_evaluate_drift_rejects_non_drift_family():
         evaluate_drift(dataset="superviz26", suite="all", methods="ocsvm", extractors="li")
 
 
+def test_limited_cell_data_samples_whole_csv_before_splitting(tmp_path):
+    rows = pd.DataFrame(
+        {
+            "full_query": [f"query {i}" for i in range(12)],
+            "label": [0] * 8 + [1] * 4,
+            "split": ["train"] * 8 + ["test"] * 4,
+            "attack_technique": [""] * 8 + ["tautology"] * 4,
+        }
+    )
+    rows.to_csv(tmp_path / "dataset.csv", index=False)
+    family = FAMILIES["superviz25"]
+
+    train, test = _load_cell_data(family, Superviz25.MAIN, tmp_path, limit=5, seed=3)
+    expected = rows.sample(n=5, random_state=3)
+    assert len(train) + len(test) == 5
+    assert set(train["full_query"]) == set(expected.loc[expected["split"] == "train", "full_query"])
+    assert set(test["full_query"]) == set(expected.loc[expected["split"] == "test", "full_query"])
+    assert _load_cell_data(family, Superviz25.MAIN, tmp_path, limit=5, seed=3)[0].equals(train)
+
+
+def test_limited_cell_data_verifies_default_csv(tmp_path, monkeypatch):
+    from sqlad_benchmarking.datasets import superviz25
+
+    path = tmp_path / "dataset.csv"
+    pd.DataFrame(
+        {
+            "full_query": ["query 0", "query 1", "query 2"],
+            "label": [0, 0, 1],
+            "split": ["train", "train", "test"],
+            "attack_technique": ["", "", "tautology"],
+        }
+    ).to_csv(path, index=False)
+    entry = {"bytes": path.stat().st_size, "sha256": file_digest(path, "sha256")}
+    monkeypatch.setattr(superviz25, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(superviz25, "manifest_entry", lambda _: entry)
+
+    train, test = _load_cell_data(FAMILIES["superviz25"], Superviz25.MAIN, tmp_path, limit=2, seed=1)
+    assert len(train) + len(test) == 2
+    path.write_text(path.read_text() + "query 3,0,train,\n")
+    with pytest.raises(ValueError, match="differs from the Zenodo"):
+        _load_cell_data(FAMILIES["superviz25"], Superviz25.MAIN, tmp_path, limit=2, seed=1)
+
+
 def test_job_script_includes_limit_when_set(tmp_path):
     assert "--limit 50000" in _write_cpu_script(tmp_path, limit=50000)
 
@@ -275,25 +321,22 @@ def test_job_script_has_no_exit_trap_without_tracking(tmp_path):
 
 
 def test_env_setup_activates_the_configured_venv():
-    assert env_setup({}) == "source .venv-cluster/bin/activate"
-    assert env_setup({"env": {"venv": ".venv-other"}}) == "source .venv-other/bin/activate"
+    assert 'venv=".venv-cluster-cpu"; extra="cpu"' in env_setup({})
+    assert 'venv=".venv-other"; extra="cpu"' in env_setup({"env": {"venv": ".venv-other"}})
+    assert 'source "$venv/bin/activate"' in env_setup({})
 
 
 def test_env_setup_purges_then_loads_the_site_modules_in_order():
     lines = env_setup({"env": {"modules": ["gcc/14.3.0", "cuda/12.9"]}}).splitlines()
-    assert lines == [
-        "module purge",
-        "module load gcc/14.3.0",
-        "module load cuda/12.9",
-        "source .venv-cluster/bin/activate",
-    ]
+    assert lines == ["module purge", "module load gcc/14.3.0", "module load cuda/12.9", *env_setup({}).splitlines()]
 
 
 def test_env_setup_selects_the_venv_from_the_gpu_of_the_node():
     lines = env_setup(_CUDA_CFG).splitlines()
     assert lines[0].startswith('gpu_cc="$(nvidia-smi')
-    assert '  sm_70|sm_80|sm_86) venv=".venv-cluster"; extra="cu126" ;;' in lines
+    assert '  sm_70|sm_80|sm_86) venv=".venv-cluster-cu126"; extra="cu126" ;;' in lines
     assert '  sm_120) venv=".venv-cluster-cu130"; extra="cu130" ;;' in lines
+    assert '  "") venv=".venv-cluster-cpu"; extra="cpu" ;;' in lines
     assert 'source "$venv/bin/activate"' in lines
 
 
@@ -311,16 +354,16 @@ def test_env_setup_still_loads_the_site_modules_before_the_selection():
 
 @pytest.mark.parametrize(
     ("compute_cap", "expected"),
-    [("7.0", ".venv-cluster"), ("8.0", ".venv-cluster"), ("12.0", ".venv-cluster-cu130")],
+    [("7.0", ".venv-cluster-cu126"), ("8.0", ".venv-cluster-cu126"), ("12.0", ".venv-cluster-cu130")],
 )
 def test_venv_selection_matches_the_architecture_of_the_gpu(tmp_path, compute_cap, expected):
     assert _run_venv_selection(tmp_path, compute_cap) == expected
 
 
 @pytest.mark.parametrize("probe", [None, _NO_DEVICES])
-def test_venv_selection_takes_the_default_build_without_a_gpu(tmp_path, probe):
-    """Select the default build when nvidia-smi is absent or reports no GPU."""
-    assert _run_venv_selection(tmp_path, probe) == ".venv-cluster"
+def test_venv_selection_uses_cpu_without_a_gpu(tmp_path, probe):
+    """Select the CPU profile when nvidia-smi is absent or reports no GPU."""
+    assert _run_venv_selection(tmp_path, probe) == ".venv-cluster-cpu"
 
 
 def test_check_cuda_builds_accepts_every_partition_a_cell_can_get():

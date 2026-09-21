@@ -42,11 +42,11 @@ gpu_arch:
   V100-16GB: sm_70
 
 # Each build lists its Python environment, uv extra, and supported GPU architectures.
-# Jobs use the first matching build, or the first build if no GPU is detected.
-# Build both environments with tools/setup-env.sh; see docs/source/slurm.md.
+# GPU jobs use the first matching build; CPU jobs use env below.
+# Build each environment with tools/setup-env.sh; see docs/source/slurm.md.
 cuda_builds:
   cu126:
-    venv: .venv-cluster
+    venv: .venv-cluster-cu126
     extra: cu126
     arch: [sm_70, sm_75, sm_80, sm_86, sm_90]
   cu130:
@@ -74,7 +74,8 @@ long_running:
 
 # Compute-node environment settings.
 env:
-  # Python environment used when no CUDA architectures are configured.
-  venv: .venv-cluster
+  # Python environment used by CPU tasks.
+  venv: .venv-cluster-cpu
+  extra: cpu
   # System modules to load before activating Python; none are required here.
   modules: []

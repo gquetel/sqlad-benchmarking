@@ -3,14 +3,15 @@
 # Nix provides Python locally; uv installs it on the cluster. Separate environments
 # let both use the same checkout on shared storage.
 #
-#   . tools/setup-env.sh                   # CUDA 12.6
-#   SQLAD_EXTRA=cu130 . tools/setup-env.sh  # Blackwell GPUs
-#   . tools/setup-env.sh submit            # job submission, without PyTorch
+#   . tools/setup-env.sh                    # CPU
+#   SQLAD_EXTRA=cu126 . tools/setup-env.sh  # CUDA 12.6
+#   SQLAD_EXTRA=cu130 . tools/setup-env.sh  # CUDA 13.0
+#   . tools/setup-env.sh submit             # job submission, without PyTorch
 #
 # Build both GPU environments on a compute node; setup exceeds the submit node's memory limit.
 # Jobs select the environment for their GPU. See docs/source/slurm.md.
 #
-#   srun --partition=CPU --mem=16G --pty bash -lc '. tools/setup-env.sh'
+#   srun --partition=CPU --mem=16G --pty bash -lc 'SQLAD_EXTRA=cu126 . tools/setup-env.sh'
 #   srun --partition=CPU --mem=16G --pty bash -lc 'SQLAD_EXTRA=cu130 . tools/setup-env.sh'
 
 _sqlad_repo="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
@@ -21,21 +22,16 @@ if [ ! -f "${_sqlad_repo}/pyproject.toml" ]; then
     return 1 2>/dev/null || exit 1
 fi
 
-# Use SQLAD_EXTRA=cpu without a GPU, or cu130 for Blackwell.
-: "${SQLAD_EXTRA:=cu126}"
+# Each package profile has its own environment.
+: "${SQLAD_EXTRA:=cpu}"
 
 if [ -n "${IN_NIX_SHELL:-}" ]; then
-    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/.venv-nix"
+    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/.venv-nix-${SQLAD_EXTRA}"
     # A downloaded interpreter does not run on NixOS.
     export UV_PYTHON_DOWNLOADS=never
     export UV_PYTHON_PREFERENCE=only-system
 else
-    # Keep these environment paths in sync with cuda_builds in configs/slurm.yaml.
-    case "${SQLAD_EXTRA}" in
-    cu126 | cpu) _sqlad_venv=".venv-cluster" ;;
-    *) _sqlad_venv=".venv-cluster-${SQLAD_EXTRA}" ;;
-    esac
-    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/${_sqlad_venv}"
+    export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/.venv-cluster-${SQLAD_EXTRA}"
     # Cluster nodes cannot run the Nix-provided Python.
     export UV_PYTHON_PREFERENCE=only-managed
 

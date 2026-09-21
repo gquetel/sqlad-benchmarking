@@ -13,7 +13,7 @@ Writes to ``--out-dir`` (default the chapter's ``data/`` dir), all sourced from 
 MLflow is the single source of truth: the latest finished full-run per cell wins;
 cells with no finished run render as ``--``.
 
-Run via ``nix-shell --run '.venv-nix/bin/python -m tools.generate_observation_tex ...'``.
+Run via ``nix-shell --run 'uv run --frozen --extra cpu python -m tools.generate_observation_tex ...'``.
 
 Usage:
     python -m tools.generate_observation_tex

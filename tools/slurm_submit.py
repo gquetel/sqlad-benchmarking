@@ -27,7 +27,7 @@ SCENARIO_TAG = {"suite": "scenario", "drift": "domain", "fsl": "target"}
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SUBMIT_DIR = "reports/slurm"
-DEFAULT_ENV = {"venv": ".venv-cluster", "modules": []}
+DEFAULT_ENV = {"venv": ".venv-cluster-cpu", "extra": "cpu", "modules": []}
 # Convert a GPU version such as 12.0 to sm_120. Ignore nvidia-smi errors on nodes without a GPU.
 ARCH_PROBE = [
     "gpu_cc=\"$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ' || true)\"",
@@ -63,20 +63,19 @@ def _build_by_arch(cfg: dict) -> dict[str, dict]:
     return mapping
 
 
-def _default_build(cfg: dict) -> dict:
-    """Return the build for a task with no GPU."""
-    return next(iter(_cuda_builds(cfg).values()))
-
-
 def _venv_select(cfg: dict) -> list[str]:
     """Generate shell commands to select and check the Python environment for this GPU."""
     by_arch = _build_by_arch(cfg)
+    default = _env(cfg)
     if not by_arch:
-        return [f"source {_env(cfg)['venv']}/bin/activate"]
+        return [
+            f'venv="{default["venv"]}"; extra="{default["extra"]}"',
+            'source "$venv/bin/activate"',
+            *VENV_CHECK,
+        ]
     by_build: dict[tuple[str, str], list[str]] = {}
     for arch, build in by_arch.items():
         by_build.setdefault((build["venv"], build["extra"]), []).append(arch)
-    default = _default_build(cfg)
     return [
         *ARCH_PROBE,
         'case "$gpu_arch" in',
@@ -161,7 +160,7 @@ def _check_cuda_builds(cfg: dict, cells: list[Cell], gpu_section: str) -> None:
         for partition in _eligible_partitions(section, _min_vram(cell, cfg), _allowed_partitions(cell, cfg)):
             arch = declared.get(partition)
             if arch is None:
-                logger.warning(f"partition {partition} has no gpu_arch entry; its tasks take the default build.")
+                logger.warning(f"partition {partition} has no gpu_arch entry; verify its architecture at runtime.")
             elif arch not in by_arch:
                 unserved[partition] = arch
     if unserved:
@@ -508,7 +507,9 @@ def submit(
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,
     register: Annotated[bool, typer.Option(help="Register each fitted model in the MLflow Model Registry.")] = False,
     no_track: Annotated[bool, typer.Option(help="Disable MLflow tracking for the submitted jobs.")] = False,
-    limit: Annotated[int | None, typer.Option(help="Label-stratified subset size per cell for smoke runs.")] = None,
+    limit: Annotated[
+        int | None, typer.Option(help="Suite: random rows per CSV; drift: stratified rows per partition.")
+    ] = None,
     run_id: Annotated[
         str | None,
         typer.Option(help="Submission id naming the dir under reports/slurm (--no-queue only; else one per unit)."),

@@ -29,7 +29,7 @@ import typer
 from sklearn.metrics import average_precision_score
 from sklearn.model_selection import train_test_split
 
-from sqlad_benchmarking.data import load_whole_sampled, split_normals
+from sqlad_benchmarking.data import split_normals
 from sqlad_benchmarking.datasets import FAMILIES, DatasetFamily
 from sqlad_benchmarking.features import EXTRACTOR_LABELS, extractor_observes_insider
 from sqlad_benchmarking.grid import (
@@ -126,6 +126,29 @@ def _mlflow_key(name: str) -> str:
     return f"recall_{_MLFLOW_KEY_RE.sub('_', name).strip()}"
 
 
+def _load_cell_data(
+    family: DatasetFamily, scenario: StrEnum, data_root: Path, limit: int | None, seed: int
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load train and test rows, sampling the whole verified CSV for a limited run."""
+    if limit is not None:
+        df_all = family.load_split(
+            scenario,
+            None,
+            root=data_root,
+            columns=("full_query", "label", "split", "attack_technique"),
+            limit=limit,
+            seed=seed,
+        )
+        df_train = df_all[df_all["split"] == "train"].reset_index(drop=True)
+        df_test = df_all[df_all["split"] == "test"].reset_index(drop=True)
+    else:
+        df_train = family.load_split(scenario, "train", root=data_root)
+        df_test = family.load_split(
+            scenario, "test", root=data_root, columns=("full_query", "label", "attack_technique")
+        )
+    return df_train, df_test
+
+
 def _run_one(
     family: DatasetFamily,
     scenario: StrEnum,
@@ -197,23 +220,7 @@ def _run_one_tracked(
     # features.extractor_observes_insider); --capture-insider is an explicit override.
     capture_insider = capture_insider or extractor_observes_insider(extractor)
     # attack_technique is needed for per-technique recall; it is NaN on normal rows.
-    if limit is not None:
-        # Smoke run: sample `limit` rows from the whole file (all splits, both
-        # labels) *before* splitting on `split`, rather than subsampling each
-        # split independently. Split proportions follow the file's distribution.
-        df_all = load_whole_sampled(
-            family.resolve_path(scenario, data_root),
-            columns=("full_query", "label", "split", "attack_technique"),
-            limit=limit,
-            seed=seed,
-        )
-        df_train = df_all[df_all["split"] == "train"].reset_index(drop=True)
-        df_test = df_all[df_all["split"] == "test"].reset_index(drop=True)
-    else:
-        df_train = family.load_split(scenario, "train", root=data_root, limit=limit)
-        df_test = family.load_split(
-            scenario, "test", root=data_root, columns=("full_query", "label", "attack_technique"), limit=limit
-        )
+    df_train, df_test = _load_cell_data(family, scenario, data_root, limit, seed)
 
     if extractor in SUBSAMPLE_EXTRACTORS:
         n_train_before, n_test_before = len(df_train), len(df_test)
@@ -242,8 +249,7 @@ def _run_one_tracked(
     # Zenodo records publish either a sha256 (superviz26) or an md5 (superviz25).
     digest = file_entry.get("sha256") or file_entry.get("md5", "")
 
-    # A limited run trains on a stratified subset (smoke test); an unlimited run
-    # uses the full dataset. The label distinguishes the two in the MLflow UI.
+    # The label distinguishes limited smoke runs from full runs in the MLflow UI.
     run_type = "smoke-run" if limit is not None else "full-run"
 
     model = build_method(method, extractor, cache=cache, cache_dir=cache_dir)
@@ -437,7 +443,9 @@ def evaluate_suite(
     report: Annotated[
         Path | None, typer.Option(help="Output CSV for results (default: reports/{dataset}_results.csv).")
     ] = None,
-    limit: Annotated[int | None, typer.Option(help="Label-stratified subset size for smoke runs.")] = None,
+    limit: Annotated[
+        int | None, typer.Option(help="Random row cap for the whole CSV before splitting into train/test.")
+    ] = None,
     target_fpr: Annotated[
         float, typer.Option(help="Target false-positive rate for the validation-calibrated threshold.")
     ] = 0.001,

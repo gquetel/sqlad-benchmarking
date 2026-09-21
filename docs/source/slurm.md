@@ -33,15 +33,17 @@ environments from `uv.lock`:
 
 | Python environment | Used for | Setup command |
 |---|---|---|
-| `.venv-cluster` | array tasks on a V100, A100, A40 or A30, and the CPU tasks | `. tools/setup-env.sh` |
+| `.venv-cluster-cpu` | CPU array tasks | `. tools/setup-env.sh` |
+| `.venv-cluster-cu126` | array tasks on a V100, A100, A40 or A30 | `SQLAD_EXTRA=cu126 . tools/setup-env.sh` |
 | `.venv-cluster-cu130` | array tasks on an `RTX6000PRO` (Blackwell) GPU | `SQLAD_EXTRA=cu130 . tools/setup-env.sh` |
 | `.venv-submit` | `slurm_submit`, on the submit node | `. tools/setup-env.sh submit` |
 
-Installing the GPU packages exceeds the submit node's 3.5 GiB memory limit. Build both GPU environments
-on a compute node:
+Installing GPU packages exceeds the submit node's 3.5 GiB memory limit. Build each GPU environment
+on a compute node, and build the CPU environment if you will submit CPU tasks:
 
 ```sh
 srun --partition=CPU --mem=16G --pty bash -lc '. tools/setup-env.sh'
+srun --partition=CPU --mem=16G --pty bash -lc 'SQLAD_EXTRA=cu126 . tools/setup-env.sh'
 srun --partition=CPU --mem=16G --pty bash -lc 'SQLAD_EXTRA=cu130 . tools/setup-env.sh'
 ```
 
@@ -58,7 +60,8 @@ python -m tools.slurm_submit ...
 Without `UV_PROJECT_ENVIRONMENT`, `uv run` manages a separate `.venv`. Activate the required environment or call its Python directly.
 
 A task stops if its Python environment is missing or does not match `uv.lock` (checked with `uv sync --check`).
-Rebuild both GPU environments after the lock file changes.
+Rebuild each profile you use after the lock file changes. The setup script stores each profile in
+`.venv-cluster-<profile>`, so adding or removing a CUDA build does not replace the CPU environment.
 
 ### Two CUDA builds
 
@@ -68,7 +71,7 @@ The configured PyTorch builds support different GPUs: `cu126` supports V100 but 
 Each `cuda_builds` entry lists an environment path (`venv`), a package selection (`extra`), and supported
 GPU architectures (`arch`). At startup, a task checks its GPU with `nvidia-smi` and uses the first matching
 build. With the current order, V100, A100, A40, and A30 use `cu126`; RTX6000PRO uses `cu130`.
-Tasks with no detected GPU use the first build.
+Tasks with no detected GPU use the CPU environment from `env`.
 
 Before submission, `slurm_submit` checks the architectures listed in `gpu_arch` for the selected partitions.
 It rejects architectures with no compatible build and warns about partitions missing a `gpu_arch` entry.
@@ -87,7 +90,7 @@ python -m tools.slurm_submit --dataset superviz26 --suite all --methods ocsvm,ae
 # Submit everything at once, ignoring the job limit:
 python -m tools.slurm_submit --dataset superviz26 --methods ae --extractors li --no-queue
 
-# Quick check: sample up to 50,000 rows per split, preserving label proportions:
+# Quick check: sample up to 50,000 random rows from each scenario CSV before train/test splitting:
 python -m tools.slurm_submit --dataset superviz26 --suite all --methods ae --extractors sbert --limit 50000
 ```
 

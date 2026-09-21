@@ -18,13 +18,16 @@ versions or regenerate the lock without explicit instruction.
 # Relevant commands
 
 * The project uses `uv` for Python package management on top of the Nix-provided interpreter.
-  * Sync from the lock: `. tools/setup-env.sh` creates `.venv-nix` under Nix or `.venv-cluster` elsewhere.
-    Outside Nix, `SQLAD_EXTRA=cu130` uses `.venv-cluster-cu130`.
-    `. tools/setup-env.sh submit` creates `.venv-submit` without PyTorch.
+  * `nix-shell` supplies Python and uv without syncing packages. It selects the CPU profile by default;
+    `SQLAD_EXTRA=cu126 nix-shell` or `SQLAD_EXTRA=cu130 nix-shell` selects a GPU profile.
+    `uv run --frozen --extra <profile> <command>` syncs the matching `.venv-nix-<profile>` on first use.
+  * Outside Nix, `. tools/setup-env.sh` builds `.venv-cluster-cpu` by default.
+    `SQLAD_EXTRA=cu126 . tools/setup-env.sh` and `SQLAD_EXTRA=cu130 . tools/setup-env.sh` build
+    separate CUDA profiles. `. tools/setup-env.sh submit` creates `.venv-submit` without PyTorch.
   * To add a package: `uv add <package>==<exact-version>` (then commit `uv.lock` + `requirements.txt`).
   * To regenerate the lock and the `requirements.txt` export: `invoke lock`.
-  * To run a command in the project env: `uv run --frozen --extra cu126 <command>` (`--extra cpu`
-    with no GPU, `--extra cu130` on a Blackwell GPU).
+  * To run a command in the project env: `uv run --frozen --extra cpu <command>` (`--extra cu126`
+    on V100/A100/A40/A30, `--extra cu130` on a Blackwell GPU).
     Always pass the extra: without it, uv replaces torch with the default build.
 * The project uses `pytest` for testing: `pytest tests/`.
 * The project uses `treefmt` + `ruff` for formatting and linting:
@@ -56,9 +59,9 @@ versions or regenerate the lock without explicit instruction.
     on it, so `slurm_submit --dataset superviz26-drift` fans the drift grid out the same way.
 * `tools.slurm_submit` runs each `(scenario, method, extractor)` combination (a cell) as a SLURM task.
   It groups tasks into arrays by CPU/GPU and memory needs (`min_vram_gb` in `configs/slurm.yaml`).
-  The `cuda_builds` block lists two Python environments: `.venv-cluster` for cu126 and
-  `.venv-cluster-cu130` for Blackwell GPUs. Build both with `tools/setup-env.sh`.
-  Each task detects its GPU with `nvidia-smi` and activates the first compatible build.
+  The `cuda_builds` block lists two Python environments: `.venv-cluster-cu126` and
+  `.venv-cluster-cu130`; CPU tasks use `.venv-cluster-cpu`. Build each profile you use with
+  `tools/setup-env.sh`. Each task detects its GPU with `nvidia-smi` and activates the first compatible build.
   Submission fails if a configured GPU architecture has no compatible build. Tasks stop if their
   environment does not match `uv.lock` (`uv sync --check`). See `docs/source/slurm.md` for setup.
   Each cell writes its row to `reports/{dataset}/cells/*.csv` and its log to

@@ -44,7 +44,9 @@ def run_cell(
     seed: Annotated[int, typer.Option(help="Random state for the train/validation calibration split.")] = 7,
     register: Annotated[bool, typer.Option(help="Register the fitted model in the MLflow Model Registry.")] = False,
     track: Annotated[bool, typer.Option(help="Log the run to MLflow when MLFLOW_TRACKING_URI is set.")] = True,
-    limit: Annotated[int | None, typer.Option(help="Label-stratified subset size for smoke runs.")] = None,
+    limit: Annotated[
+        int | None, typer.Option(help="Suite: random rows per CSV; drift: stratified rows per partition.")
+    ] = None,
 ) -> None:
     """Run the manifest cell at ``index`` through the evaluation suite."""
     signal.signal(signal.SIGTERM, _handle_sigterm)

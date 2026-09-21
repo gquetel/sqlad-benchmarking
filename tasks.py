@@ -68,7 +68,7 @@ def fetch_supplementary(
 
 @task(
     help={
-        "limit": "Total stratified samples per split (default 1000).",
+        "limit": "Random rows per scenario CSV before train/test splitting (default 1000).",
         "no_track": "Disable MLflow tracking.",
         "register": "Register fitted models in the MLflow Model Registry.",
     }

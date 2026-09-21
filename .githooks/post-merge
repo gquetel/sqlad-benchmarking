@@ -1,5 +1,8 @@
 #!/bin/bash
-# A pull can move a pinned dependency, thus refresh the venv.
 # Enable once with: git config core.hooksPath .githooks
-# bash, not sh: the script finds the repo through BASH_SOURCE.
-. ./tools/setup-env.sh
+if git diff --quiet ORIG_HEAD HEAD -- uv.lock pyproject.toml; then
+    exit 0
+fi
+
+echo "Dependencies changed. Local Nix environments sync on the next uv run --frozen --extra <profile>." >&2
+echo "Rebuild cluster profiles you use on a compute node with SQLAD_EXTRA=<profile> . tools/setup-env.sh." >&2

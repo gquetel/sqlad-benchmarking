@@ -27,7 +27,7 @@ let
   driverLibs = "/run/opengl-driver/lib:/usr/lib/x86_64-linux-gnu";
 in
 pkgs.mkShell {
-  name = "cuda-ml";
+  name = "sqlad-benchmarking";
 
   packages = with pkgs; [
     pyEnv.python314
@@ -47,13 +47,10 @@ pkgs.mkShell {
     # Use the Nix chromium; else kaleido grabs its own broken downloaded chrome.
     export BROWSER_PATH=${pkgs.chromium}/bin/chromium
 
-    # Build/refresh .venv-nix from uv.lock. The script also points uv at the Nix
-    # interpreter. The cluster sources the same script and gets .venv-cluster.
-    . ./tools/setup-env.sh
-
-    # Activate the venv via PATH so it survives into the interactive shell,
-    # whatever it is (bash, or a fish that the user's .bashrc exec-s).
-    export VIRTUAL_ENV="$PWD/.venv-nix"
-    export PATH="$VIRTUAL_ENV/bin:$PATH"
+    export SQLAD_EXTRA="''${SQLAD_EXTRA:-cpu}"
+    export UV_PROJECT_ENVIRONMENT="$PWD/.venv-nix-$SQLAD_EXTRA"
+    export UV_PYTHON_DOWNLOADS=never
+    export UV_PYTHON_PREFERENCE=only-system
+    echo "Nix shell ready ($SQLAD_EXTRA). Run: uv run --frozen --extra $SQLAD_EXTRA <command>"
   '';
 }

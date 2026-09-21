@@ -10,25 +10,25 @@ The `gaur-*` extractors collect one parser trace per query, in ten equal parts. 
 
 ## Development environment
 
-Nix is the recommended setup and the one used in CI. It provides the expected Python interpreter and system libraries, synchronizes the packages from `uv.lock`, and activates the project virtual environment:
+Nix is the recommended local setup and the one used in CI. It provides the expected Python interpreter, uv, and system libraries. Entering the shell does not install Python packages:
 
 ```sh
 nix-shell
+uv run --frozen --extra cpu python -m sqlad_benchmarking.evaluate_suite --help
 ```
 
-Without Nix, for example on the SLURM cluster, the same lock file builds a second environment. `uv` installs itself and its own interpreter, so nothing else is needed:
+The shell uses the CPU profile by default. For a GPU, select its profile before entering the shell and use the matching extra in each command:
 
 ```sh
-. tools/setup-env.sh
+SQLAD_EXTRA=cu126 nix-shell
+uv run --frozen --extra cu126 python -m sqlad_benchmarking.evaluate_suite --help
 ```
 
-The script installs packages from `uv.lock` into `.venv-nix` under Nix or `.venv-cluster` elsewhere.
-It defaults to CUDA 12.6. Set `SQLAD_EXTRA=cpu` without a GPU, or `SQLAD_EXTRA=cu130` for Blackwell GPUs
-(`.venv-cluster-cu130` outside Nix).
+Use `SQLAD_EXTRA=cu130` for Blackwell GPUs. Each profile has its own `.venv-nix-<profile>` directory. The first `uv run` installs the locked packages for that profile; later runs reuse them. Always pass `--extra` so uv keeps the selected PyTorch build.
 
-Run commands with `uv run --frozen --extra cu126 <command>`, using `cpu` or `cu130` to match your setup.
-Always pass `--extra` to keep the chosen PyTorch build. After `git pull`, source the setup script again,
-or enable automatic setup with `git config core.hooksPath .githooks`.
+Without Nix, for example on the SLURM cluster, build each environment you need explicitly with `. tools/setup-env.sh` (CPU), `SQLAD_EXTRA=cu126 . tools/setup-env.sh`, or `SQLAD_EXTRA=cu130 . tools/setup-env.sh`. These use separate `.venv-cluster-<profile>` directories. Build GPU profiles on a compute node; see the [SLURM guide](docs/source/slurm.md). `. tools/setup-env.sh submit` builds the smaller `.venv-submit` environment on the submit node.
+
+After a merge changes dependencies, local `uv run` syncs its profile on the next use. Cluster environments need an explicit rebuild. To get a reminder after merges, enable `git config core.hooksPath .githooks`; the hook only prints a notice.
 
 For pip, use `requirements.txt`, exported from the lock file, and choose a PyTorch build for your hardware.
 

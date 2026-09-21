@@ -83,13 +83,13 @@ def stratified_subsample(
 
 def load_split_csv(
     path: Path,
-    split: str,
+    split: str | None,
     *,
     columns: tuple[str, ...] = ("full_query", "label", "split"),
     limit: int | None = None,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Load the rows of a CSV whose ``split`` column equals ``split``.
+    """Load one split, or randomly sample the whole CSV when ``split`` is ``None``.
 
     Shared by every dataset family (Superviz25, Superviz26, ...): they resolve the
     file path and report a family-specific fetch hint, then defer the column
@@ -104,35 +104,12 @@ def load_split_csv(
     df = load_dataset(path, usecols=cols)
     if "split" not in df.columns:
         raise ValueError(f"{path} has no 'split' column")
+    if split is None:
+        if limit is not None and limit < len(df):
+            return df.sample(n=limit, random_state=seed).reset_index(drop=True)
+        return df
     out = df[df["split"] == split].reset_index(drop=True)
     return stratified_subsample(out, limit=limit, seed=seed)
-
-
-def load_whole_sampled(
-    path: Path,
-    *,
-    columns: tuple[str, ...] = ("full_query", "label", "split"),
-    limit: int | None = None,
-    seed: int = 7,
-) -> pd.DataFrame:
-    """Read the whole CSV and (for smoke runs) sample ``limit`` rows before splitting.
-
-    Samples ``limit`` rows from the *entire* file (all splits, both labels, no
-    stratification) and leaves the ``split`` column intact for the caller to
-    filter into train/test. This differs from :func:`load_split_csv`, which
-    subsamples each split independently; here the split proportions follow the
-    file's overall distribution. ``random_state=seed`` makes the selection
-    deterministic.
-    """
-    cols = tuple(columns)
-    if "split" not in cols:
-        cols = cols + ("split",)
-    df = load_dataset(path, usecols=cols)
-    if "split" not in df.columns:
-        raise ValueError(f"{path} has no 'split' column")
-    if limit is not None and limit < len(df):
-        df = df.sample(n=limit, random_state=seed).reset_index(drop=True)
-    return df
 
 
 def split_normals(df: pd.DataFrame) -> pd.DataFrame:

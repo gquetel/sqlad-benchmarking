@@ -79,24 +79,24 @@ def manifest_entry(name: Superviz26) -> dict:
 
 def load_split(
     name: Superviz26,
-    split: Split,
+    split: Split | None,
     *,
     root: Path | None = None,
     columns: tuple[str, ...] = ("full_query", "label", "split"),
     limit: int | None = None,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Load rows from the chosen Superviz26 CSV that belong to ``split``.
+    """Load one split, or the whole CSV with optional sampling when ``split`` is ``None``.
 
     Args:
         name: Which of the 8 datasets to load.
-        split: ``train`` or ``test``.
+        split: ``train``, ``test``, or ``None`` for the whole CSV.
         root: Directory holding the CSVs. Defaults to ``~/datasets/superviz26-lodo/``.
         columns: Columns to keep. The default trims the file to the three columns
             actually needed by the Li methods, cutting memory by ~10x.
 
     Returns:
-        DataFrame containing only rows where the ``split`` column equals ``split``.
+        DataFrame containing the selected rows.
 
     Raises:
         FileNotFoundError: If the CSV is not on disk. Hints at the fetcher.

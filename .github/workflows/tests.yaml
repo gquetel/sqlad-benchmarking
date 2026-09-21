@@ -31,7 +31,6 @@ jobs:
             uv lock --check
             uv export --no-dev --no-emit-project -o requirements.txt
             git diff --exit-code requirements.txt
-            SQLAD_EXTRA=cpu . ./tools/setup-env.sh
             uv run --frozen --extra cpu coverage run -m pytest tests/ --skip-slow
             uv run --frozen --extra cpu coverage report -m
           "

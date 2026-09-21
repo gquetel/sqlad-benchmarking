@@ -54,18 +54,18 @@ def manifest_entry(name: Superviz25) -> dict:
 
 def load_split(
     name: Superviz25,
-    split: Split,
+    split: Split | None,
     *,
     root: Path | None = None,
     columns: tuple[str, ...] = ("full_query", "label", "split"),
     limit: int | None = None,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Load rows of the Superviz25 CSV that belong to ``split``.
+    """Load one split, or the whole CSV with optional sampling when ``split`` is ``None``.
 
     Args:
         name: Dataset member (only ``MAIN``).
-        split: ``train`` or ``test``. The train split is benign-only.
+        split: ``train``, ``test``, or ``None`` for the whole CSV.
         root: Directory holding the CSV. Defaults to ``data/raw/superviz25/``.
         columns: Columns to keep (``split`` is always included).
 
