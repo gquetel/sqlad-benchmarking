@@ -25,6 +25,7 @@ from tools.slurm_submit import (
     _is_long_running,
     _min_vram,
     _needs_gpu,
+    _resolve_resources,
     _tick,
     _write_job_script,
     env_setup,
@@ -169,6 +170,31 @@ def test_eligible_partitions_filters_by_vram_preference_order():
 def test_eligible_partitions_raises_when_none_fit():
     with pytest.raises(typer.BadParameter, match="VRAM"):
         _eligible_partitions(_GPU_CFG["gpu"], 128)
+
+
+def test_llm2vec_uses_only_a100_and_rtx_partitions():
+    cfg = yaml.safe_load(Path("configs/slurm.yaml").read_text())
+    for section in ("gpu", "gpu-long"):
+        for method in ("ocsvm", "lof", "ae"):
+            cell = Cell("a-a", method, "llm2vec")
+            assert _resolve_resources(cfg, cell, section)["partition"] == "RTX6000PRO,A100"
+
+    same_duration_cfg = {**cfg, "long_running": []}
+    llm2vec = Cell("a-a", "ae", "llm2vec")
+    codet5 = Cell("a-a", "ae", "codet5")
+    assert _bucket(llm2vec, same_duration_cfg, "gpu") != _bucket(codet5, same_duration_cfg, "gpu")
+
+
+def test_llm2vec_benchmark_uses_only_a100_and_rtx_partitions():
+    from tools.benchmark import _bucket as benchmark_bucket
+    from tools.benchmark import _resolve_resources as benchmark_resources
+
+    cfg = yaml.safe_load(Path("configs/slurm.yaml").read_text())
+    same_duration_cfg = {**cfg, "long_running": []}
+    llm2vec = Cell("a-a", "ae", "llm2vec")
+    codet5 = Cell("a-a", "ae", "codet5")
+    assert benchmark_resources(cfg, llm2vec, "gpu")["partition"] == "RTX6000PRO,A100"
+    assert benchmark_bucket(llm2vec, same_duration_cfg, "gpu") != benchmark_bucket(codet5, same_duration_cfg, "gpu")
 
 
 def test_bucket_assignment():

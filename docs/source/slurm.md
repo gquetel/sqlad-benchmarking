@@ -13,7 +13,8 @@ It groups tasks with similar resource needs into SLURM job arrays:
 - **GPU** for autoencoders and embedding-based extractors. Models with higher memory needs are
   limited to suitable GPUs.
 
-SLURM can assign GPU tasks to any configured partition (group of nodes) with enough GPU memory.
+SLURM can assign GPU tasks to configured partitions (groups of nodes) with enough GPU memory and
+permission for the selected extractor.
 Each task selects the Python environment for its assigned GPU (see
 [Two CUDA builds](#two-cuda-builds)).
 
@@ -22,7 +23,8 @@ It writes `reports/{dataset}/logs/{stem}.log` and uploads the log to MLflow, inc
 
 Edit [`configs/slurm.yaml`](https://github.com/gquetel/sqlad-benchmarking/blob/main/configs/slurm.yaml)
 to set partitions, memory, and time limits. `cuda_builds` lists the Python environments;
-`env.modules` lists system modules to load before Python.
+`env.modules` lists system modules to load before Python. `allowed_partitions` limits an extractor
+to named GPU partitions; LLM2Vec uses only `RTX6000PRO` and `A100`.
 
 ## Cluster environment
 

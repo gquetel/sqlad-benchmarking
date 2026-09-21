@@ -61,6 +61,10 @@ min_vram_gb:
   qwen3-emb: 24
   llm2vec: 32
 
+# GPU partitions permitted for an extractor. Unlisted extractors use any partition with enough memory.
+allowed_partitions:
+  llm2vec: [RTX6000PRO, A100]
+
 # Extractors or method:extractor pairs that use the gpu-long time limit.
 long_running:
   - ocsvm:sbert

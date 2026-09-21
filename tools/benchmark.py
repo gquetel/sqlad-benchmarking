@@ -38,6 +38,7 @@ from sqlad_benchmarking.tracking import setup_mlflow
 from tools.slurm_submit import (
     REPO_ROOT,
     SUBMIT_DIR,
+    _allowed_partitions,
     _check_cuda_builds,
     _eligible_partitions,
     _gpu_section,
@@ -231,12 +232,16 @@ def _needs_gpu(cell: Cell) -> bool:
 
 
 def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
-    """Group a cell by its CPU, GPU, and memory needs."""
+    """Group a cell by its CPU, GPU, memory, and partition needs."""
     if not _needs_gpu(cell):
         return "cpu"
     section = _gpu_section(cell, cfg, gpu_section)
     req = _min_vram(cell, cfg)
-    return section if req <= 0 else f"{section}-{req}gb"
+    bucket = section if req <= 0 else f"{section}-{req}gb"
+    allowed = _allowed_partitions(cell, cfg)
+    if allowed is not None:
+        bucket = f"{bucket}-{'-'.join(allowed)}"
+    return bucket
 
 
 def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str) -> dict:
@@ -247,7 +252,7 @@ def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str) -> dict:
         raise typer.BadParameter(f"GPU section {gpu_section!r} not found in config; check configs/slurm.yaml.")
     gpu_cfg = cfg[gpu_section]
     res = {k: v for k, v in gpu_cfg.items() if k != "partitions"}
-    res["partition"] = ",".join(_eligible_partitions(gpu_cfg, _min_vram(cell, cfg)))
+    res["partition"] = ",".join(_eligible_partitions(gpu_cfg, _min_vram(cell, cfg), _allowed_partitions(cell, cfg)))
     return res
 
 

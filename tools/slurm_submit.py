@@ -108,11 +108,18 @@ def _min_vram(cell: Cell, cfg: dict) -> int:
     return int(reqs.get(key, reqs.get(cell.extractor, reqs.get("default", 0))))
 
 
-def _eligible_partitions(gpu_cfg: dict, req: int) -> list[str]:
-    """Return GPU partitions with enough memory."""
-    eligible = [name for name, gb in gpu_cfg["partitions"].items() if gb >= req]
+def _allowed_partitions(cell: Cell, cfg: dict) -> list[str] | None:
+    """Return the GPU partition allowlist for an extractor, if configured."""
+    return cfg.get("allowed_partitions", {}).get(cell.extractor)
+
+
+def _eligible_partitions(gpu_cfg: dict, req: int, allowed: list[str] | None = None) -> list[str]:
+    """Return GPU partitions with enough memory and permission for the extractor."""
+    eligible = [
+        name for name, gb in gpu_cfg["partitions"].items() if gb >= req and (allowed is None or name in allowed)
+    ]
     if not eligible:
-        raise typer.BadParameter(f"no GPU partition has >= {req} GB VRAM; check configs/slurm.yaml.")
+        raise typer.BadParameter(f"no allowed GPU partition has >= {req} GB VRAM; check configs/slurm.yaml.")
     return eligible
 
 
@@ -128,12 +135,16 @@ def _gpu_section(cell: Cell, cfg: dict, default: str) -> str:
 
 
 def _bucket(cell: Cell, cfg: dict, gpu_section: str) -> str:
-    """Return a cell's group based on GPU and memory needs."""
+    """Return a cell's group based on GPU, memory, and partition needs."""
     if not _needs_gpu(cell):
         return "cpu"
     section = _gpu_section(cell, cfg, gpu_section)
     req = _min_vram(cell, cfg)
-    return section if req <= 0 else f"{section}-{req}gb"
+    bucket = section if req <= 0 else f"{section}-{req}gb"
+    allowed = _allowed_partitions(cell, cfg)
+    if allowed is not None:
+        bucket = f"{bucket}-{'-'.join(allowed)}"
+    return bucket
 
 
 def _check_cuda_builds(cfg: dict, cells: list[Cell], gpu_section: str) -> None:
@@ -147,7 +158,7 @@ def _check_cuda_builds(cfg: dict, cells: list[Cell], gpu_section: str) -> None:
         if not _needs_gpu(cell):
             continue
         section = cfg[_gpu_section(cell, cfg, gpu_section)]
-        for partition in _eligible_partitions(section, _min_vram(cell, cfg)):
+        for partition in _eligible_partitions(section, _min_vram(cell, cfg), _allowed_partitions(cell, cfg)):
             arch = declared.get(partition)
             if arch is None:
                 logger.warning(f"partition {partition} has no gpu_arch entry; its tasks take the default build.")
@@ -185,7 +196,7 @@ def _resolve_resources(cfg: dict, cell: Cell, gpu_section: str = "gpu", gpu_qos:
         raise typer.BadParameter(f"GPU section {gpu_section!r} not found in config; check configs/slurm.yaml.")
     gpu_cfg = cfg[gpu_section]
     res = {k: v for k, v in gpu_cfg.items() if k != "partitions"}
-    res["partition"] = ",".join(_eligible_partitions(gpu_cfg, _min_vram(cell, cfg)))
+    res["partition"] = ",".join(_eligible_partitions(gpu_cfg, _min_vram(cell, cfg), _allowed_partitions(cell, cfg)))
     if gpu_qos:
         res["qos"] = gpu_qos
     return res
