@@ -48,10 +48,18 @@ else
     if ! command -v uv >/dev/null 2>&1 && [ -f "${HOME}/.local/bin/env" ]; then
         . "${HOME}/.local/bin/env"
     fi
-    if ! command -v uv >/dev/null 2>&1; then
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        . "${HOME}/.local/bin/env"
-    fi
+    _sqlad_uv_version=0.11.13
+    case "$(uv --version 2>/dev/null || true)" in
+        "uv ${_sqlad_uv_version}"|"uv ${_sqlad_uv_version} "*) ;;
+        *)
+            curl -LsSf "https://astral.sh/uv/${_sqlad_uv_version}/install.sh" | sh
+            export PATH="${HOME}/.local/bin:${PATH}"
+            ;;
+    esac
+    case "$(uv --version 2>/dev/null || true)" in
+        "uv ${_sqlad_uv_version}"|"uv ${_sqlad_uv_version} "*) ;;
+        *) echo "setup-env.sh: uv ${_sqlad_uv_version} is required." >&2; return 1 ;;
+    esac
     uv python install
 fi
 
@@ -59,7 +67,8 @@ if [ "${1:-}" = "submit" ]; then
     export UV_PROJECT_ENVIRONMENT="${_sqlad_repo}/.venv-submit"
     # Install the project without its training dependencies.
     uv sync --frozen --only-group submit &&
-        uv pip install --quiet --python "${UV_PROJECT_ENVIRONMENT}/bin/python" --no-deps -e "${_sqlad_repo}"
+        uv pip install --quiet --python "${UV_PROJECT_ENVIRONMENT}/bin/python" --no-deps -e "${_sqlad_repo}" &&
+        (cd "${_sqlad_repo}" && "${UV_PROJECT_ENVIRONMENT}/bin/python" -m tools.slurm_submit --help >/dev/null)
 else
     uv sync --frozen --extra "${SQLAD_EXTRA}"
 fi

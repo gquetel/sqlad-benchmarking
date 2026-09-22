@@ -8,13 +8,7 @@ NO_PTY = os.name == "nt" or sys.version_info >= (3, 14)
 PROJECT_NAME = "sqlad_benchmarking"
 
 
-# Setup commands
-@task
-def sync(ctx: Context) -> None:
-    """Install the project and its dependencies from uv.lock."""
-    ctx.run("bash -c '. ./tools/setup-env.sh'", echo=True, pty=not NO_PTY)
-
-
+# Dependency commands
 @task
 def lock(ctx: Context) -> None:
     """Regenerate uv.lock and the pip-compatible requirements.txt export."""

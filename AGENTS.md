@@ -33,7 +33,7 @@ versions or regenerate the lock without explicit instruction.
 * The project uses `treefmt` + `ruff` for formatting and linting:
     * To format code: `treefmt`.
     * To check formatting without writing: `treefmt --fail-on-change`.
-* The project uses `invoke` for setup/orchestration tasks (e.g. `sync`, `lock`, `test`, docs,
+* The project uses `invoke` for orchestration tasks (e.g. `lock`, `test`, docs,
 *  dataset fetch). Refer to `tasks.py` for available tasks. Every Superviz26 build
   ships in one `superviz26.zip` on Zenodo record 21068333; `python -m tools.fetch_superviz26`
   downloads it once and extracts a named group (`main`/`drift`/`fsl`) to that group's loader

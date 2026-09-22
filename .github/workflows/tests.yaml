@@ -24,7 +24,26 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@v27
 
-      - name: Run tests & coverage
+      - name: Check Nix shell and formatting
+        run: |
+          nix-shell --run '
+            set -euo pipefail
+            test "$SQLAD_EXTRA" = cpu
+            test "$UV_PROJECT_ENVIRONMENT" = "$PWD/.venv-nix-cpu"
+            test "$UV_PYTHON_DOWNLOADS" = never
+            test "$UV_PYTHON_PREFERENCE" = only-system
+            command -v python
+            command -v uv
+            command -v treefmt
+            command -v ruff
+            treefmt --fail-on-change
+            ruff check .
+          '
+
+      - name: Check submit environment
+        run: nix-shell nix/ci-env.nix --run "bash -e -c '. tools/setup-env.sh submit'"
+
+      - name: Run tests, coverage, and build docs
         run: |
           nix-shell nix/ci-env.nix --run "
             set -euo pipefail
@@ -33,4 +52,5 @@ jobs:
             git diff --exit-code requirements.txt
             uv run --frozen --extra cpu coverage run -m pytest tests/ --skip-slow
             uv run --frozen --extra cpu coverage report -m
+            uv run --frozen --extra cpu mkdocs build --strict --config-file docs/mkdocs.yaml --site-dir build
           "

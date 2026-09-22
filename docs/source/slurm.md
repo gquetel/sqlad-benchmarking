@@ -28,7 +28,7 @@ to named GPU partitions; LLM2Vec uses only `RTX6000PRO` and `A100`.
 
 ## Cluster environment
 
-On this cluster, the setup script installs uv and Python in the home directory. It creates these
+On this cluster, setup uses uv 0.11.13 and installs Python in the home directory. It creates these
 environments from `uv.lock`:
 
 | Python environment | Used for | Setup command |
@@ -49,11 +49,12 @@ srun --partition=CPU --mem=16G --pty bash -lc 'SQLAD_EXTRA=cu130 . tools/setup-e
 
 The shared home directory makes the result available to every node. If a system library is missing, add its module to `env.modules` or `SQLAD_MODULES`.
 
-`.venv-submit` omits torch and fits within the submit node's limit:
+`.venv-submit` omits torch and fits within the submit node's limit. Setup checks that
+`tools.slurm_submit --help` runs in this environment:
 
 ```sh
 . tools/setup-env.sh submit          # once
-source .venv-submit/bin/activate.fish
+source .venv-submit/bin/activate
 python -m tools.slurm_submit ...
 ```
 
