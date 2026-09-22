@@ -1,52 +1,39 @@
 # SQL attack detection benchmarks
 
-This repository compares anomaly-detection methods for SQL attacks across several feature extractors and Superviz datasets.
+This project evaluates SQL attack detectors across feature extractors and Superviz datasets.
 
-## Running experiments
+## Run locally
 
-All methods can be trained and evaluated on any compatible machine. Most experiments were run in parallel on a SLURM cluster using the provided submission tool, which assigns CPU or GPU resources as needed and submits jobs gradually to respect cluster limits. GAUR experiments were run locally because they require an instrumented MySQL server, but they can run on any machine where that dependency is available. See [Running experiments on SLURM](docs/source/slurm.md) and [Datasets](docs/source/datasets.md) for the commands and data requirements.
-
-The `gaur-*` extractors collect one parser trace per query, in ten equal parts. Each part writes its feature rows to disk and logs the rows that are done, so a failed collection continues at the last complete part. A query that GAUR cannot trace keeps its row, with `n_parser_invoc = 0`. `gaur_sqld` sets the number of processes with its own `n_workers` setting, and it stops the collection with a `GaurServerError` if the server writes a single shared `gaur.log`.
-
-## Development environment
-
-Nix is the recommended local setup and the one used in CI. It provides the expected Python interpreter, uv, and system libraries. Entering the shell does not install Python packages:
+From the repository root, Nix can pin Python, uv, and system libraries. `uv sync` installs the Python packages
+from `uv.lock`; activate that environment before running project commands. Nix is optional: without it, install
+uv yourself, skip `nix-shell`, and activate `.venv/bin/activate` instead.
 
 ```sh
 nix-shell
-uv run --frozen --extra cpu python -m sqlad_benchmarking.evaluate_suite --help
+uv sync --frozen --extra cpu
+source .venv-nix-cpu/bin/activate
+invoke fetch-data
+python -m sqlad_benchmarking.evaluate_suite \
+  --dataset superviz25 --suite all --methods ocsvm --extractors li --limit 50000 --no-track
 ```
 
-The shell uses the CPU profile by default. For a GPU, select its profile before entering the shell and use the matching extra in each command:
+`invoke fetch-data` downloads Superviz25 to `data/raw/superviz25/dataset.csv` and the main Superviz26 CSVs to
+`~/datasets/superviz26-lodo/`. The evaluation writes `reports/superviz25_results.csv` and a log under
+`reports/superviz25/logs/`. Omit `--limit` to use the full CSV.
 
-```sh
-SQLAD_EXTRA=cu126 nix-shell
-uv run --frozen --extra cu126 python -m sqlad_benchmarking.evaluate_suite --help
-```
+See [Datasets](docs/source/datasets.md) for the other dataset families and
+[SLURM](docs/source/slurm.md) for parallel runs. CLI options are available with
+`python -m sqlad_benchmarking.evaluate_suite --help` in the activated environment.
 
-Use `SQLAD_EXTRA=cu130` for Blackwell GPUs. Each profile has its own `.venv-nix-<profile>` directory. The first `uv run` installs the locked packages for that profile; later runs reuse them. Always pass `--extra` so uv keeps the selected PyTorch build.
+## Environments
 
-Without Nix, for example on the SLURM cluster, build each environment you need explicitly with `. tools/setup-env.sh` (CPU), `SQLAD_EXTRA=cu126 . tools/setup-env.sh`, or `SQLAD_EXTRA=cu130 . tools/setup-env.sh`. These use separate `.venv-cluster-<profile>` directories. Build GPU profiles on a compute node; see the [SLURM guide](docs/source/slurm.md). `. tools/setup-env.sh submit` builds the smaller `.venv-submit` environment on the submit node.
+For a GPU, enter `SQLAD_EXTRA=cu126 nix-shell`, run `uv sync --frozen --extra cu126`, and source
+`.venv-nix-cu126/bin/activate`. Use `cu130` for Blackwell GPUs. Nix keeps each profile in its own
+`.venv-nix-<profile>` directory. Without Nix, uv uses `.venv`; syncing another extra replaces the packages
+in that environment, so keep separate environments if you need several builds at once.
+On a SLURM cluster, source `tools/setup-env.sh` to build its separate environments as described in the
+[SLURM guide](docs/source/slurm.md). Always sync with the matching uv extra so it keeps the intended PyTorch build.
 
-After a merge changes dependencies, local `uv run` syncs its profile on the next use. Cluster environments need an explicit rebuild. To get a reminder after merges, enable `git config core.hooksPath .githooks`; the hook only prints a notice.
+## Credits
 
-For pip, use `requirements.txt`, exported from the lock file, and choose a PyTorch build for your hardware.
-
-## Project structure
-
-The main directories are:
-
-```txt
-├── configs/                  # Experiment and cluster configuration
-├── data/                     # Dataset metadata
-├── docs/                     # Documentation
-├── models/                   # Trained models
-├── reports/                  # Evaluation results
-├── src/sqlad_benchmarking/   # Training and evaluation code
-├── tests/                    # Test suite
-└── tools/                    # Dataset, SLURM, and report utilities
-```
-
-### Credits
-
-This repository structure is based on [mlops_template](https://github.com/SkafteNicki/mlops_template), a [cookiecutter template](https://github.com/cookiecutter/cookiecutter) for Machine Learning Operations (MLOps).
+The repository structure is based on [mlops_template](https://github.com/SkafteNicki/mlops_template).

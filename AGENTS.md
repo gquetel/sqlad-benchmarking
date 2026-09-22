@@ -17,18 +17,20 @@ versions or regenerate the lock without explicit instruction.
 
 # Relevant commands
 
-* The project uses `uv` for Python package management on top of the Nix-provided interpreter.
-  * `nix-shell` supplies Python and uv without syncing packages. It selects the CPU profile by default;
-    `SQLAD_EXTRA=cu126 nix-shell` or `SQLAD_EXTRA=cu130 nix-shell` selects a GPU profile.
-    `uv run --frozen --extra <profile> <command>` syncs the matching `.venv-nix-<profile>` on first use.
+* The project uses `uv` for Python packages; Nix can provide the pinned interpreter and uv.
+  * `nix-shell` optionally supplies pinned Python, uv, and system libraries without syncing packages. It selects
+    the CPU profile by default; `SQLAD_EXTRA=cu126 nix-shell` or `SQLAD_EXTRA=cu130 nix-shell` selects a GPU profile.
+    Run `uv sync --frozen --extra <profile>`, then source `.venv-nix-<profile>/bin/activate`.
+    Without Nix, uv uses `.venv`, so source `.venv/bin/activate` instead.
   * Outside Nix, `. tools/setup-env.sh` builds `.venv-cluster-cpu` by default.
     `SQLAD_EXTRA=cu126 . tools/setup-env.sh` and `SQLAD_EXTRA=cu130 . tools/setup-env.sh` build
     separate CUDA profiles. `. tools/setup-env.sh submit` creates `.venv-submit` without PyTorch.
   * To add a package: `uv add <package>==<exact-version>` (then commit `uv.lock` + `requirements.txt`).
   * To regenerate the lock and the `requirements.txt` export: `invoke lock`.
-  * To run a command in the project env: `uv run --frozen --extra cpu <command>` (`--extra cu126`
-    on V100/A100/A40/A30, `--extra cu130` on a Blackwell GPU).
-    Always pass the extra: without it, uv replaces torch with the default build.
+  * After activation, run project commands directly, such as `invoke fetch-data` or
+    `python -m sqlad_benchmarking.evaluate_suite`. Use `--extra cu126` when syncing for V100/A100/A40/A30,
+    or `--extra cu130` for Blackwell GPUs. Always pass the extra to uv sync: without it, uv replaces torch
+    with the default build.
 * The project uses `pytest` for testing: `pytest tests/`.
 * The project uses `treefmt` + `ruff` for formatting and linting:
     * To format code: `treefmt`.
