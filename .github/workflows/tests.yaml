@@ -22,7 +22,7 @@ jobs:
         uses: wimpysworld/nothing-but-nix@v10
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v27
+        uses: cachix/install-nix-action@v30
 
       - name: Check Nix shell and formatting
         run: |
