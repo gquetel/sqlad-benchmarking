@@ -4,9 +4,9 @@ The size experiment (Section "Size evaluation" of the benchmark paper) asks whet
 the full per-domain training sets are large enough, by retraining the most performant
 AE methods on the Big pools (2x the size of full) and re-evaluating on the test splits.
 
-The two training-set sizes live in two MLflow experiments that share the same tags:
+The two training-set sizes live in MLflow experiments that share the same tags:
 
-  * Full       -> ``Superviz26-SQL``       (see tracking._EXPERIMENT_NAMES)
+  * Full       -> ``Superviz26-SQL``; corrected CodeT5+ runs are in ``FE-study-LODO``
   * Big (2x)   -> ``Superviz26-SQL-Big``
 
 For each method (AE on top of the Li, CodeT5+ and SecureBERT extractors) and each
@@ -50,6 +50,10 @@ METHODS: list[tuple[str, str]] = [
     ("codet5", "CodeT5+ + AE"),
 ]
 
+# The feature-extractor study moved corrected runs to FE-study-LODO. Other size-study
+# baselines still come from the legacy full-split experiment.
+FULL_EXPERIMENT_OVERRIDES = {"codet5": "FE-study-LODO"}
+
 # (scenario key as tagged in MLflow) for each regime.
 INDOMAIN = ["a-a", "b-b", "c-c", "d-d"]
 LODO = ["bcd-a", "acd-b", "abd-c", "abc-d"]
@@ -79,8 +83,8 @@ SPECS: dict[str, SizeSpec] = {
         experiment_big="Superviz26-SQL-Big",
         regimes=[("In-domain", INDOMAIN), ("LODO", LODO)],
         caption=(
-            r"Effect of doubling the training set on AUROC for the three methods. AUROC is "
-            r"averaged over the four scenarios on the full and Big (2x) sets. $\Delta$ is the "
+            r"Effect of doubling the training split on AUROC for the three methods. AUROC is "
+            r"averaged over the four scenarios on the full and Big (2x) splits. $\Delta$ is the "
             r"Big-minus-full difference."
         ),
         label="tab:superviz26-size",
@@ -91,8 +95,8 @@ SPECS: dict[str, SizeSpec] = {
         experiment_big="Superviz26-SQL-Big",
         regimes=[(None, ["a-a"])],
         caption=(
-            r"Effect of doubling the training set on the AUROC of the three detection methods "
-            r"on \dataset{}, on the full training set and a Big (2x) variant. $\Delta$ is the "
+            r"Effect of doubling the training split on the AUROC of the three detection methods "
+            r"on \dataset{}, on the full training split and a Big (2x) variant. $\Delta$ is the "
             r"Big-minus-full difference."
         ),
         label="tab:perfs-big-super",
@@ -101,14 +105,17 @@ SPECS: dict[str, SizeSpec] = {
 }
 
 
-def load_aurocs(experiment: str) -> dict[tuple[str, str], float]:
+def load_aurocs(experiment: str, extractor: str | None = None) -> dict[tuple[str, str], float]:
     """Latest finished full-run AUROC per (extractor, scenario) for the AE method."""
     # MLflow filter strings are AND-only (no OR), so the AE head can't be matched
     # server-side across the current `decision_engine` and legacy `pipeline` tags;
     # query the AND-only conditions and reconcile the engine tag client-side below.
+    filter_string = "attributes.status = 'FINISHED' and tags.run_type = 'full-run'"
+    if extractor is not None:
+        filter_string += f" and tags.feature_extractor = '{extractor}'"
     runs = mlflow.search_runs(
         experiment_names=[experiment],
-        filter_string="attributes.status = 'FINISHED' and tags.run_type = 'full-run'",
+        filter_string=filter_string,
         output_format="pandas",
     )
     if runs.empty:
@@ -211,6 +218,8 @@ def main(
     if not setup_mlflow("superviz26"):
         raise typer.Exit(code=1)
     full = load_aurocs(spec.experiment_full)
+    for extractor, experiment in FULL_EXPERIMENT_OVERRIDES.items():
+        full.update(load_aurocs(experiment, extractor))
     big = load_aurocs(spec.experiment_big)
     table_out = table_out or REPO_ROOT / "reports" / dataset / spec.out_name
     table_out.parent.mkdir(parents=True, exist_ok=True)
